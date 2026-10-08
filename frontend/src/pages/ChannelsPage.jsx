@@ -529,11 +529,15 @@ export default function ChannelsPage() {
         {/* Recently watched */}
         {recentChannels.length > 0 && !query && (
           <section>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1">
               <Clock size={14} className="text-[var(--color-muted)]" />
               <span className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wide">Recently Watched</span>
             </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {/* overflow-x-auto also clips vertically, which cut off the card hover
+                lift, the remove button (sits above the corner) and the hover glow.
+                Padding gives them room inside the clip box; the matching negative
+                margin keeps the strip aligned with the grid below. */}
+            <div className="flex gap-2 overflow-x-auto scrollbar-none pt-2 pb-3 px-2 -mx-2">
               {recentChannels.map(r => (
                 <div key={r.uniqueId} className="relative group/recent shrink-0">
                   <ChannelCard
