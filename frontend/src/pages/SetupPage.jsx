@@ -1021,6 +1021,13 @@ export default function SetupPage() {
                 hint="Channel list — add as an M3U / playlist URL in your IPTV client or tuner."
               />
               <LinkRow
+                label="VLC Playlist"
+                icon={ListVideo}
+                url={`${origin}/api/xspf`}
+                filename="stalkerweb.xspf"
+                hint="The same channels for VLC, with a folder per category — VLC shows M3U files as one flat list. Open it in VLC, or use Media → Open Network Stream with this URL."
+              />
+              <LinkRow
                 label="XMLTV EPG Guide"
                 icon={CalendarDays}
                 url={`${origin}/api/xmltv`}
