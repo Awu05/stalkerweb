@@ -176,6 +176,29 @@ still show in the guide. Add `?filler=none` to leave them out for a smaller,
 faster import. The feed is gzip-compressed for clients that accept it and cached
 between refreshes.
 
+Jellyfin's Live TV shows every channel in one list. Add `?prefix=1` to the M3U
+URL to put the category in each channel's name ("Sports | ESPN"), so a channel's
+category is visible and sorting by name keeps each category together.
+
+### Categories, movies and series: Xtream Codes
+
+StalkerWeb also answers as an Xtream Codes server, the account type most IPTV
+players understand. Players that speak it show live TV, movies and series each
+by category, the way the portal lays them out.
+
+- **Server:** `http://your-host:8983`
+- **Username / password:** anything; they aren't checked
+
+In Jellyfin, install the community **Jellyfin Xtream** plugin (it comes from its
+own plugin repository; see the plugin's README) and enter the server above.
+Movies and series are browsed by category under Channels, and the plugin's
+settings let you pick which categories to include. TiviMate, IPTV Smarters and
+other Xtream players work the same way.
+
+The same filters apply as for the M3U. Movie and series lists are read from the
+portal one page at a time and cached for an hour, so the first visit to a large
+category can take a while.
+
 > **Upgrading from a build before channel ids moved to portal ids:** `tvg-id`
 > values in the M3U changed, so Jellyfin (or Kodi) needs one guide refresh /
 > tuner re-scan to re-map its channels. Stream URLs minted by older builds still

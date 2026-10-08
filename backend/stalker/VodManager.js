@@ -14,11 +14,36 @@ const TAG = 'VodManager';
 const VOD_LINK_TTL_MS = 5 * 60 * 1000;
 const CATEGORY_TTL_MS = 30 * 60 * 1000;
 
+// Whole-category listings (getAllItems) for clients that ask for a category's
+// full contents at once, like the Xtream API. A category is one portal page
+// per ~14 titles, read one at a time with a pause between pages so a big
+// catalog never bursts into the portal's rate limit, then kept for an hour.
+const LISTING_TTL_MS      = 60 * 60 * 1000;
+const LISTING_MAX_PAGES   = 150;   // ~2,100 titles per category
+const LISTING_PAGE_GAP_MS = 150;
+
 class VodManager {
-  constructor(client) {
+  constructor(client, { pageGapMs = LISTING_PAGE_GAP_MS } = {}) {
     this.client = client;
+    this._pageGapMs = pageGapMs;
     this._linkCache = new Map(); // `${videoId}:${series}` → { url, ts }
     this._categoryCache = new Map(); // type → { value, ts } | { pending }
+    this._listingCache = new Map();  // `${type}:${categoryId}` → { value, ts } | { pending }
+  }
+
+  // Returns the cached value for `key`, or runs `fetch` once for every caller
+  // waiting on it. A failed fetch is not cached.
+  _cached(cache, key, ttlMs, fetch) {
+    const hit = cache.get(key);
+    if (hit && (hit.pending || Date.now() - hit.ts < ttlMs)) {
+      return hit.pending || Promise.resolve(hit.value);
+    }
+    const pending = fetch().then(
+      (value) => { cache.set(key, { value, ts: Date.now() }); return value; },
+      (e)     => { cache.delete(key); throw e; },
+    );
+    cache.set(key, { pending });
+    return pending;
   }
 
   // ── Categories ─────────────────────────────────────────────────────────────
@@ -27,16 +52,7 @@ class VodManager {
   // /api/channels/languages both ask for it on every request. Concurrent
   // callers share one in-flight portal request.
   getCategories(type = 'vod') {
-    const hit = this._categoryCache.get(type);
-    if (hit && (hit.pending || Date.now() - hit.ts < CATEGORY_TTL_MS)) {
-      return hit.pending || Promise.resolve(hit.value);
-    }
-    const pending = this._fetchCategories(type).then(
-      (value) => { this._categoryCache.set(type, { value, ts: Date.now() }); return value; },
-      (e)     => { this._categoryCache.delete(type); throw e; },
-    );
-    this._categoryCache.set(type, { pending });
-    return pending;
+    return this._cached(this._categoryCache, type, CATEGORY_TTL_MS, () => this._fetchCategories(type));
   }
 
   async _fetchCategories(type) {
@@ -94,6 +110,50 @@ class VodManager {
       totalPages,
       page,
     };
+  }
+
+  // Every title in a category, cached (see LISTING_TTL_MS). Pages are read in
+  // order with a pause between them; a page that fails after the first ends
+  // the walk with what was read so far.
+  getAllItems(type, categoryId) {
+    const key = `${type}:${categoryId}`;
+    return this._cached(this._listingCache, key, LISTING_TTL_MS, () => this._fetchAllItems(type, String(categoryId)));
+  }
+
+  async _fetchAllItems(type, categoryId) {
+    const items = [];
+    let pages = 1;
+    for (let p = 1; p <= Math.min(pages, LISTING_MAX_PAGES); p++) {
+      if (p > 1 && this._pageGapMs) await new Promise((r) => setTimeout(r, this._pageGapMs));
+      let js;
+      try {
+        const r = await this.client._stalkerCall({
+          type, action: 'get_ordered_list', category: categoryId, sortby: 'added', fav: '0', p: String(p),
+        });
+        js = r?.js || {};
+      } catch (e) {
+        if (p === 1) throw e;
+        log.warn(TAG, `listing ${type}/${categoryId}: page ${p} failed (${e.message}) — keeping ${items.length} titles`);
+        break;
+      }
+      const data = Array.isArray(js.data) ? js.data : [];
+      if (p === 1) {
+        const total   = parseInt(js.total_items || '0', 10) || data.length;
+        const perPage = parseInt(js.max_page_items || '14', 10) || 14;
+        pages = Math.max(1, Math.ceil(total / perPage));
+        if (pages > LISTING_MAX_PAGES) {
+          log.warn(TAG, `listing ${type}/${categoryId}: ${total} titles — reading the newest ${LISTING_MAX_PAGES * perPage}`);
+        }
+      }
+      if (!data.length) break;
+      for (const raw of data) {
+        const item = this._normalizeItem(raw);
+        if (!item.categoryId) item.categoryId = categoryId;
+        items.push(item);
+      }
+    }
+    log.info(TAG, `listing ${type}/${categoryId}: ${items.length} titles`);
+    return items;
   }
 
   // ── Seasons / Episodes (TV-show drill-down) ─────────────────────────────────

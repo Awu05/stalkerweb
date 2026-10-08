@@ -69,6 +69,11 @@ module.exports = function m3uModule(appState, logoManager) {
     // Hidden genres/languages and adult channels are left out (?all=1 keeps them).
     const shown = channels.filter(exportFilterFor(req, appState).keep);
 
+    // ?prefix=1 writes the category into each name ("Sports | ESPN"), for
+    // players with no grouping (Jellyfin Live TV): sorted by name, each
+    // category's channels then sit together and the category stays visible.
+    const prefix = req.query.prefix === '1';
+
     const base  = `${req.protocol}://${req.get('host')}`;
     const lines = ['#EXTM3U x-tvg-url=""'];
 
@@ -78,7 +83,7 @@ module.exports = function m3uModule(appState, logoManager) {
                   || ch.iconPath
                   || (logoManager ? logoManager.resolveDbLogo(ch.name) : '')
                   || '';
-      const name   = ch.name.replace(/,/g, ' '); // commas break the EXTINF line
+      const name   = (prefix ? `${group} | ${ch.name}` : ch.name).replace(/,/g, ' '); // commas break the EXTINF line
       const chno   = ch.number > 0 ? ` tvg-chno="${ch.number}"` : '';
 
       lines.push(

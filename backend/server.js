@@ -81,6 +81,7 @@ appState.getExportFilter = () => buildExportFilter({
   profile:   profilesManager.getActive(),
   showAdult: exportSettingsCache.load()?.show_adult === true,
 });
+appState.getShowAdult = () => exportSettingsCache.load()?.show_adult === true;
 
 const { authRoutes, connectPortal } = require('./routes/auth')(appState, config);
 
@@ -249,6 +250,14 @@ const favoritesRoutes = require('./routes/favorites')(favoritesManager, appState
 const profilesRoutes  = require('./routes/profiles')(profilesManager);
 const exportRoutes    = require('./routes/export')(config);
 const logsRoutes      = require('./routes/logs');
+const XtreamIdStore   = require('./lib/XtreamIdStore');
+const xtreamRoutes    = require('./routes/xtream')(appState, {
+  proxyRouter: proxyRoutes,
+  m3uRouter:   m3uRoutes,
+  xmltvRouter: xmltvRoutes,
+  logoManager,
+  idStore:     new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json')),
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/vod', vodRoutes);
@@ -267,6 +276,9 @@ app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
+// Xtream Codes API (/player_api.php, /live/…, /movie/…, /series/…) — after
+// /api and /proxy so its catch-all /<user>/<pass>/<id> path never shadows them.
+app.use(xtreamRoutes);
 
 // ── Serve frontend (built React app) ──────────────────────────────────────
 const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
