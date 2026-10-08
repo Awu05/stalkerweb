@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import VodManager from '../stalker/VodManager.js'
 
 const fakeClient = () => {
@@ -46,5 +46,25 @@ describe('VodManager category cache', () => {
     client.fail = false
     await expect(vm.getCategories('vod')).resolves.toHaveLength(1)
     expect(client.calls).toBe(2)
+  })
+
+  it('keeps an empty answer for a minute, not half an hour', async () => {
+    vi.useFakeTimers()
+    try {
+      let reply = { js: { error: 'session expired' } }
+      const client = { calls: 0, _stalkerCall: async () => { client.calls++; return reply } }
+      const vm = new VodManager(client)
+
+      expect(await vm.getCategories('vod')).toEqual([])
+      await vm.getCategories('vod')
+      expect(client.calls).toBe(1)
+
+      reply = { js: [{ id: 1, title: 'Movies' }] }
+      vi.advanceTimersByTime(61 * 1000)
+      expect(await vm.getCategories('vod')).toHaveLength(1)
+      expect(client.calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

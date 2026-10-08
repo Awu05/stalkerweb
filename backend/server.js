@@ -128,8 +128,10 @@ app.use((req, res, next) => {
 
 // Timeout comes from IDLE_TIMEOUT_MINUTES, overridden by a value saved on the
 // Settings page (see routes/settings.js). 0 = never auto-disconnect.
-const { parseIdleMinutes, DEFAULT_IDLE_MINUTES } = require('./lib/idleTimeout');
-const envIdleMinutes   = parseIdleMinutes(process.env.IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_MINUTES);
+const { parseIdleMinutes, parseIdleEnv } = require('./lib/idleTimeout');
+const envIdle          = parseIdleEnv(process.env.IDLE_TIMEOUT_MINUTES);
+if (envIdle.warning) log.warn('server', envIdle.warning);
+const envIdleMinutes   = envIdle.minutes;
 const savedIdleMinutes = parseIdleMinutes(
   new (require('./cache/CacheManager'))(config.dataDir).load()?.idle_timeout_minutes, null);
 
@@ -251,12 +253,13 @@ const profilesRoutes  = require('./routes/profiles')(profilesManager);
 const exportRoutes    = require('./routes/export')(config);
 const logsRoutes      = require('./routes/logs');
 const XtreamIdStore   = require('./lib/XtreamIdStore');
+const xtreamIdStore   = new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json'));
 const xtreamRoutes    = require('./routes/xtream')(appState, {
   proxyRouter: proxyRoutes,
   m3uRouter:   m3uRoutes,
   xmltvRouter: xmltvRoutes,
   logoManager,
-  idStore:     new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json')),
+  idStore:     xtreamIdStore,
 });
 
 app.use('/api/auth', authRoutes);
@@ -365,6 +368,7 @@ const httpServer = app.listen(config.port, () => {
 // ── Graceful shutdown ──────────────────────────────────────────────────────
 function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
+  xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();

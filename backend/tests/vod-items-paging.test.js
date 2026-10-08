@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import VodManager from '../stalker/VodManager.js'
 
 // A portal category of 100 titles served 14 per page (8 portal pages).
@@ -64,6 +64,30 @@ describe('VodManager.getItems paging', () => {
     }
     const items = await new VodManager(client, { pageGapMs: 0 }).getAllItems('vod', '1')
     expect(items).toHaveLength(2 * PER_PAGE)
+  })
+
+  it('getAllItems keeps a partial listing for minutes, not the full hour', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = fakeClient()
+      const ok = client._stalkerCall
+      let failPage3 = true
+      client._stalkerCall = async (params) => {
+        if (failPage3 && params.p === '3') throw new Error('HTTP 429')
+        return ok(params)
+      }
+      const vm = new VodManager(client, { pageGapMs: 0 })
+
+      expect(await vm.getAllItems('vod', '1')).toHaveLength(2 * PER_PAGE)
+      expect(vm.peekAllItems('vod', '1')).toHaveLength(2 * PER_PAGE)
+
+      failPage3 = false
+      vi.advanceTimersByTime(3 * 60 * 1000)
+      expect(vm.peekAllItems('vod', '1')).toBeUndefined()
+      expect(await vm.getAllItems('vod', '1')).toHaveLength(TOTAL)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reports a single page for a category that fits in one batch', async () => {

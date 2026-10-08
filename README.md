@@ -197,7 +197,9 @@ other Xtream players work the same way.
 
 The same filters apply as for the M3U. Movie and series lists are read from the
 portal one page at a time and cached for an hour, so the first visit to a large
-category can take a while.
+category can take a while. Players that ask for every movie at once get what has
+been read within 20 seconds; the rest is read in the background and appears on
+their next refresh.
 
 > **Upgrading from a build before channel ids moved to portal ids:** `tvg-id`
 > values in the M3U changed, so Jellyfin (or Kodi) needs one guide refresh /
