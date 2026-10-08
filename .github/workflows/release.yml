@@ -72,9 +72,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # No version pin — same setup as ci.yml, whose APK build passes. The
+      # old '8.9' pin went stale when AGP moved to 9.x (needs Gradle ≥ 9.4.1).
       - uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.9'
 
       - name: Restore signing keystore
         run: |
