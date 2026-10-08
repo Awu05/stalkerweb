@@ -153,26 +153,31 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, collaps
       >
         <div className={cn('flex items-center h-14 shrink-0 border-b border-[var(--color-border)]', collapsed ? 'justify-center px-2' : 'justify-between px-4')}>
           <LogoMark collapsed={collapsed} />
-          <button
-            onClick={onToggle}
-            className="hidden lg:flex items-center justify-center w-7 h-7 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors shrink-0"
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Reminders live up here beside the logo; a collapsed header is too
+                narrow for both buttons, so there it heads the icon column. */}
+            {connected && !collapsed && <ReminderBell reminders={reminders} onRemove={removeReminder} />}
+            <button
+              onClick={onToggle}
+              className="hidden lg:flex items-center justify-center w-7 h-7 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors shrink-0"
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto py-3">
+          {connected && collapsed && (
+            <div className="flex justify-center pb-2 mb-2 border-b border-[var(--color-border)] mx-3">
+              <ReminderBell reminders={reminders} onRemove={removeReminder} />
+            </div>
+          )}
           {navItems}
         </div>
 
         <div className={cn('shrink-0 border-t border-[var(--color-border)] py-3 px-3 flex flex-col gap-2', collapsed && 'items-center')}>
-          {connected && (
-            <div className={cn('flex items-center gap-1', collapsed ? 'flex-col' : 'justify-between')}>
-              <ReminderBell reminders={reminders} onRemove={removeReminder} />
-              {!collapsed && <IdleBadge idleInfo={idleInfo} collapsed={collapsed} />}
-            </div>
-          )}
+          {connected && <IdleBadge idleInfo={idleInfo} collapsed={collapsed} />}
           {!collapsed && <KeepaliveBadge lastPingAt={lastPingAt} collapsed={collapsed} />}
 
           <span
