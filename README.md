@@ -166,6 +166,11 @@ Set the M3U URL to: `http://your-host:8983/api/m3u`
 ### 2. Add XMLTV Guide
 Set the XMLTV URL to: `http://your-host:8983/api/xmltv`
 
+Channels the portal has no guide data for get 6-hour placeholder blocks so they
+still show in the guide. Add `?filler=none` to leave them out for a smaller,
+faster import. The feed is gzip-compressed for clients that accept it and cached
+between refreshes.
+
 > **Upgrading from a build before channel ids moved to portal ids:** `tvg-id`
 > values in the M3U changed, so Jellyfin (or Kodi) needs one guide refresh /
 > tuner re-scan to re-map its channels. Stream URLs minted by older builds still

@@ -5,7 +5,8 @@
 // synthetic 1-hour programme blocks for channels with no EPG data.
 //
 // Query params:
-//   ?period=24   — hours of EPG to fetch (default 24, max 168 / 7 days)
+//   ?period=24     — hours of EPG to fetch (default 24, max 168 / 7 days)
+//   ?filler=none   — omit filler programmes for channels without EPG data
 //
 // Jellyfin usage:
 //   Dashboard → Live TV → Guide Providers → Add → XMLTV
@@ -17,11 +18,23 @@
 'use strict';
 
 const express = require('express');
+const zlib = require('zlib');
+const { promisify } = require('util');
 const log = require('../logger');
 const TAG = 'xmltv';
+const gzip = promisify(zlib.gzip);
 
-const BLOCK_HOURS = 1;        // programme block length in hours
-const DAYS_AHEAD  = 7;        // how many days of guide data to generate
+// Filler for channels the portal has no EPG for, so they still appear in the
+// client's guide. Coarse on purpose: hourly blocks over 7 days were 168
+// programmes per channel — on a large portal ~90% of the feed and the bulk of
+// the time Jellyfin spends downloading and parsing it.
+const FILLER_HOURS = 6;
+const FILLER_DAYS  = 7;
+
+// The built feed is cached until the channel list or EPG data changes (both
+// are replaced wholesale on reload, so identity is a reliable change signal),
+// and a 1-hour TTL keeps the filler window moving forward.
+const CACHE_TTL_MS = 60 * 60 * 1000;
 
 function xmlEscape(str) {
   return String(str || '')
@@ -46,8 +59,85 @@ function xmltvDate(d) {
   );
 }
 
+// Builds the XMLTV document. Pure: same inputs, same output.
+function buildGuideXml({ channels, groups, epgData, filler = true, now = new Date() }) {
+  const groupName = new Map(groups.map(g => [String(g.id), g.name]));
+
+  // Align filler to a FILLER_HOURS boundary in the past, so blocks line up
+  // across refreshes instead of shifting every hour.
+  const blockMs     = FILLER_HOURS * 60 * 60 * 1000;
+  const start       = new Date(Math.floor(now.getTime() / blockMs) * blockMs);
+  const totalBlocks = filler ? (FILLER_DAYS * 24) / FILLER_HOURS : 0;
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE tv SYSTEM "xmltv.dtd">',
+    '<tv generator-info-name="stalkerweb" generator-info-url="">',
+  ];
+
+  // ── Channel definitions ───────────────────────────────────────────────
+  for (const ch of channels) {
+    const id   = String(ch.uniqueId);
+    const name = xmlEscape(ch.name);
+    const logo = xmlEscape(ch.iconPath || '');
+    lines.push(`  <channel id="${id}">`);
+    lines.push(`    <display-name>${name}</display-name>`);
+    if (logo) lines.push(`    <icon src="${logo}" />`);
+    lines.push('  </channel>');
+  }
+
+  // ── Programme blocks ──────────────────────────────────────────────────
+  let realEpgCount = 0;
+  let syntheticCount = 0;
+
+  for (const ch of channels) {
+    const id       = String(ch.uniqueId);
+    const name     = xmlEscape(ch.name);
+    const category = xmlEscape(groupName.get(String(ch.genreId)) || '');
+
+    // Try real EPG first: keyed by channelId (portal numeric ID)
+    const epgEvents = epgData
+      ? (epgData[String(ch.channelId)] ?? epgData[String(ch.uniqueId)] ?? null)
+      : null;
+
+    if (epgEvents && Array.isArray(epgEvents) && epgEvents.length > 0) {
+      realEpgCount++;
+      for (const ev of epgEvents) {
+        const evStart = new Date((ev.start_timestamp ?? ev.startTime) * 1000);
+        const evStop  = new Date((ev.stop_timestamp  ?? ev.endTime)   * 1000);
+        const title   = xmlEscape(ev.name || ev.title || name);
+        const descr   = xmlEscape(ev.descr || ev.description || '');
+        lines.push(
+          `  <programme start="${xmltvDate(evStart)}" stop="${xmltvDate(evStop)}" channel="${id}">`
+        );
+        lines.push(`    <title lang="en">${title}</title>`);
+        if (descr) lines.push(`    <desc lang="en">${descr}</desc>`);
+        if (category) lines.push(`    <category lang="en">${category}</category>`);
+        lines.push('  </programme>');
+      }
+    } else {
+      // Synthetic fallback: coarse blocks for the full window (none with ?filler=none)
+      if (filler) syntheticCount++;
+      for (let i = 0; i < totalBlocks; i++) {
+        const blockStart = new Date(start.getTime() + i * blockMs);
+        const blockStop  = new Date(blockStart.getTime() + blockMs);
+        lines.push(
+          `  <programme start="${xmltvDate(blockStart)}" stop="${xmltvDate(blockStop)}" channel="${id}">`
+        );
+        lines.push(`    <title lang="en">${name}</title>`);
+        if (category) lines.push(`    <category lang="en">${category}</category>`);
+        lines.push('  </programme>');
+      }
+    }
+  }
+
+  lines.push('</tv>');
+  return { xml: lines.join('\n') + '\n', realEpgCount, syntheticCount };
+}
+
 module.exports = function xmltvModule(appState) {
   const router = express.Router();
+  let cache = null; // { channels, channelCount, groups, epgData, period, filler, builtAt, raw, gzipped }
 
   router.get('/', async (req, res) => {
     const { channelManager, guideManager } = appState;
@@ -77,86 +167,34 @@ module.exports = function xmltvModule(appState) {
       }
     }
 
-    const groupName = new Map(groups.map(g => [String(g.id), g.name]));
-
-    // Align start to the nearest hour boundary in the past
-    const now   = new Date();
-    const start = new Date(now);
-    start.setUTCMinutes(0, 0, 0);
-
-    const totalBlocks = (DAYS_AHEAD * 24) / BLOCK_HOURS;
-    const blockMs     = BLOCK_HOURS * 60 * 60 * 1000;
-
-    const lines = [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<!DOCTYPE tv SYSTEM "xmltv.dtd">',
-      '<tv generator-info-name="stalkerweb" generator-info-url="">',
-    ];
-
-    // ── Channel definitions ───────────────────────────────────────────────
-    for (const ch of channels) {
-      const id   = String(ch.uniqueId);
-      const name = xmlEscape(ch.name);
-      const logo = xmlEscape(ch.iconPath || '');
-      lines.push(`  <channel id="${id}">`);
-      lines.push(`    <display-name>${name}</display-name>`);
-      if (logo) lines.push(`    <icon src="${logo}" />`);
-      lines.push('  </channel>');
+    const filler = req.query.filler !== 'none';
+    // channels.length too: the array is filled in place while a load runs.
+    const fresh  = cache && cache.channels === channels && cache.channelCount === channels.length &&
+                   cache.groups === groups &&
+                   cache.epgData === epgData && cache.period === period && cache.filler === filler &&
+                   Date.now() - cache.builtAt < CACHE_TTL_MS;
+    if (!fresh) {
+      const t0 = Date.now();
+      const { xml, realEpgCount, syntheticCount } = buildGuideXml({ channels, groups, epgData, filler });
+      const raw = Buffer.from(xml, 'utf8');
+      cache = { channels, channelCount: channels.length, groups, epgData, period, filler, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
+      log.info(TAG, `built guide: ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} filler) — ` +
+        `${(raw.length / 1e6).toFixed(1)}MB, ${(cache.gzipped.length / 1e6).toFixed(1)}MB gzipped, ${Date.now() - t0}ms`);
+    } else {
+      log.debug(TAG, 'serving cached guide');
     }
-
-    // ── Programme blocks ──────────────────────────────────────────────────
-    let realEpgCount = 0;
-    let syntheticCount = 0;
-
-    for (const ch of channels) {
-      const id       = String(ch.uniqueId);
-      const name     = xmlEscape(ch.name);
-      const category = xmlEscape(groupName.get(String(ch.genreId)) || '');
-
-      // Try real EPG first: keyed by channelId (portal numeric ID)
-      const epgEvents = epgData
-        ? (epgData[String(ch.channelId)] ?? epgData[String(ch.uniqueId)] ?? null)
-        : null;
-
-      if (epgEvents && Array.isArray(epgEvents) && epgEvents.length > 0) {
-        realEpgCount++;
-        for (const ev of epgEvents) {
-          const evStart = new Date((ev.start_timestamp ?? ev.startTime) * 1000);
-          const evStop  = new Date((ev.stop_timestamp  ?? ev.endTime)   * 1000);
-          const title   = xmlEscape(ev.name || ev.title || name);
-          const descr   = xmlEscape(ev.descr || ev.description || '');
-          lines.push(
-            `  <programme start="${xmltvDate(evStart)}" stop="${xmltvDate(evStop)}" channel="${id}">`
-          );
-          lines.push(`    <title lang="en">${title}</title>`);
-          if (descr) lines.push(`    <desc lang="en">${descr}</desc>`);
-          if (category) lines.push(`    <category lang="en">${category}</category>`);
-          lines.push('  </programme>');
-        }
-      } else {
-        // Synthetic fallback: 1-hour blocks for the full window
-        syntheticCount++;
-        for (let i = 0; i < totalBlocks; i++) {
-          const blockStart = new Date(start.getTime() + i * blockMs);
-          const blockStop  = new Date(blockStart.getTime() + blockMs);
-          lines.push(
-            `  <programme start="${xmltvDate(blockStart)}" stop="${xmltvDate(blockStop)}" channel="${id}">`
-          );
-          lines.push(`    <title lang="en">${name}</title>`);
-          if (category) lines.push(`    <category lang="en">${category}</category>`);
-          lines.push('  </programme>');
-        }
-      }
-    }
-
-    lines.push('</tv>');
-
-    log.info(TAG, `serving guide: ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} synthetic)`);
 
     res.set('Content-Type', 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=3600');
-    res.send(lines.join('\n') + '\n');
+    res.set('Vary', 'Accept-Encoding');
+    if (/\bgzip\b/i.test(req.get('Accept-Encoding') || '')) {
+      res.set('Content-Encoding', 'gzip');
+      return res.send(cache.gzipped);
+    }
+    res.send(cache.raw);
   });
 
   return router;
 };
+
+module.exports.buildGuideXml = buildGuideXml;
