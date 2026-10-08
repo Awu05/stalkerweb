@@ -3,6 +3,7 @@ import { invalidateFavoritesCache } from './lib/useFavorites'
 
 const BASE = '/api'
 const TIMEOUT_MS = 30_000
+export const ACCESS_REQUIRED = 'sw:access-required'
 
 async function _fetch(path, opts = {}) {
   const controller = new AbortController()
@@ -11,6 +12,8 @@ async function _fetch(path, opts = {}) {
     const r = await fetch(BASE + path, { ...opts, signal: controller.signal })
     if (!r.ok) {
       const e = await r.json().catch(() => ({ error: r.statusText }))
+      // Signed out (ACCESS_KEY set, cookie missing or revoked): App shows the login.
+      if (r.status === 401 && e.accessRequired) window.dispatchEvent(new Event(ACCESS_REQUIRED))
       throw new Error(e.error || r.statusText)
     }
     return r.json()
@@ -47,6 +50,11 @@ export const getProxiedLogoUrl = (url) => {
   if (!url || !url.startsWith('http') || url.startsWith('/api/logos/render')) return url
   return `/api/logos/render?url=${encodeURIComponent(url)}`
 }
+
+// ── Access key (ACCESS_KEY) ───────────────────────────────────────────────
+export const getAccessStatus = () => _get('/access/status')
+export const accessLogin     = (key) => _post('/access/login', { key })
+export const accessLogout    = () => _post('/access/logout', {})
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const connect = (body) => _post('/auth/connect', body)

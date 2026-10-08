@@ -17,6 +17,11 @@ services:
       # Container-side path — must match the mount target above. No need to
       # change this; change DOWNLOADS_HOST_PATH instead.
       - DOWNLOAD_DIR=/app/downloads
+      # Optional: require a key before anyone can use StalkerWeb. Set this
+      # before exposing the server to the internet (Cloudflare tunnel, port
+      # forward). The web UI then asks for it once per browser; Setup's links
+      # carry a playback-only token. Unset = open, as on a home network.
+      # - ACCESS_KEY=a-long-passphrase-only-you-know
       # Optional: live log monitor. Without a token /api/logs is localhost-only;
       # set a token to let a remote agent (Claude, Antigravity, …) connect.
       # - LOG_MONITOR_TOKEN=change-me

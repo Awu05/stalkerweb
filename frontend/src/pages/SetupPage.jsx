@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
   Trash2, RefreshCw, Image, Download, Upload, Plus, Pencil, Plug, PlugZap,
-  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays, Server,
+  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays, Server, KeyRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -499,6 +499,7 @@ export default function SetupPage() {
   const [idleSaved, setIdleSaved]       = useState(null)
   const [idleDefault, setIdleDefault]   = useState(30)
   const [httpsPort, setHttpsPort]       = useState(null)  // HTTPS_PORT, for the Stremio link
+  const [shareToken, setShareToken]     = useState(null)  // with ACCESS_KEY: the playback token for the links
   const [idleSaving, setIdleSaving]     = useState(false)
   const [idleNotice, setIdleNotice]     = useState(null)
   const [logoStats, setLogoStats]   = useState(null)
@@ -577,6 +578,7 @@ export default function SetupPage() {
         setDownloadDir(s.download_dir || '')
         if (s.idle_timeout_default != null) setIdleDefault(s.idle_timeout_default)
         setHttpsPort(s.https_port || null)
+        setShareToken(s.access_share_token || null)
         if (s.idle_timeout_minutes != null) {
           setIdleSaved(s.idle_timeout_minutes)
           setIdleNever(s.idle_timeout_minutes === 0)
@@ -1021,18 +1023,31 @@ export default function SetupPage() {
           const stremioOrigin = loc?.protocol === 'http:' && httpsPort
             ? `https://${loc.hostname}:${httpsPort}`  // hostname keeps an IPv6 address's brackets
             : origin
+          // With ACCESS_KEY set, players can't sign in — the links carry a
+          // playback-only token in their path instead (backend lib/access.js).
+          const k = shareToken ? `/k/${shareToken}` : ''
           return (
             <Card title="IPTV Links" description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs.">
               <LinkRow
                 label="Xtream Codes Server"
                 icon={Server}
                 url={origin}
-                hint="Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with any username and password."
+                hint={shareToken
+                  ? "Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, any username, and the Xtream password below."
+                  : "Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with any username and password."}
               />
+              {shareToken && (
+                <LinkRow
+                  label="Xtream Password"
+                  icon={KeyRound}
+                  url={shareToken}
+                  hint="The password for Xtream players. It allows playback only — not this settings page."
+                />
+              )}
               <LinkRow
                 label="Stremio Addon"
                 icon={Server}
-                url={`${stremioOrigin}/stremio/manifest.json`}
+                url={`${stremioOrigin}${k}/stremio/manifest.json`}
                 hint={stremioOrigin.startsWith('https:')
                   ? <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install.</>
                   : <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install. Stremio needs an <strong>https://</strong> address unless it runs on this same computer and the link starts with http://127.0.0.1 — see the README for HTTPS.</>}
@@ -1040,21 +1055,21 @@ export default function SetupPage() {
               <LinkRow
                 label="M3U Playlist"
                 icon={ListVideo}
-                url={`${origin}/api/m3u`}
+                url={`${origin}${k}/api/m3u`}
                 filename="stalkerweb.m3u"
                 hint={<>Channel list — add as an M3U / playlist URL in your IPTV client or tuner. For players that don&apos;t group channels (Jellyfin Live TV), add <code className="font-mono">?prefix=1</code> to put the category in each name, like “Sports | ESPN”.</>}
               />
               <LinkRow
                 label="VLC Playlist"
                 icon={ListVideo}
-                url={`${origin}/api/xspf`}
+                url={`${origin}${k}/api/xspf`}
                 filename="stalkerweb.xspf"
                 hint="The same channels for VLC, with a folder per category — VLC shows M3U files as one flat list. Open it in VLC, or use Media → Open Network Stream with this URL."
               />
               <LinkRow
                 label="XMLTV EPG Guide"
                 icon={CalendarDays}
-                url={`${origin}/api/xmltv`}
+                url={`${origin}${k}/api/xmltv`}
                 filename="stalkerweb-epg.xml"
                 hint={epg
                   ? 'Program guide in XMLTV format — add as the EPG / guide URL alongside the M3U.'
@@ -1063,6 +1078,11 @@ export default function SetupPage() {
               <p className="text-xs text-[var(--color-muted)]">
                 All of these leave out the genres and languages hidden under Genre Filters, and adult content unless Show Adult Content is on. Add <code className="font-mono">?all=1</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
               </p>
+              {shareToken && (
+                <p className="text-xs text-[var(--color-muted)]">
+                  An access key is set, so these links include a token that allows playback only. Share them with people you trust to watch; changing <code className="font-mono">ACCESS_KEY</code> replaces the token and stops every old link. In the Android app, enter the access key itself.
+                </p>
+              )}
               {!connected && (
                 <p className="text-xs text-[var(--color-muted)]">
                   Connect to a portal above so clients can pull live channel and guide data from these links.

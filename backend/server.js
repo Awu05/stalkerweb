@@ -31,6 +31,11 @@ const app = express();
 // blocks as mixed content when the public URL is served over HTTPS.
 app.set('trust proxy', 1);
 
+// Optional access key (ACCESS_KEY). First, so a /k/<token> link prefix is
+// checked and taken off before anything logs or routes the URL.
+const access = require('./lib/access').createAccess({ key: config.accessKey });
+app.use(access.stripPrefix);
+
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -43,6 +48,8 @@ app.use(helmet({
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use('/api/access', access.routes());
+app.use(access.gate);
 
 // ── Shared application state (single active session) ──────────────────────
 const appState = {
@@ -122,7 +129,10 @@ app.use((req, res, next) => {
   // from req.url before calling the route handler, so reading it inside the
   // 'finish' callback would give "/hls?…" instead of "/proxy/hls?…", breaking
   // the httpLogLevel quiet-path check and causing HLS playlist poll spam at INFO.
-  const url = req.url;
+  // Xtream players send the access token as their password; keep it out of logs.
+  const url = req.url
+    .replace(/([?&]password=)[^&]*/i, '$1***')
+    .replace(/^\/(live|movie|series)\/([^/]+)\/[^/]+\//, '/$1/$2/***/');
   res.on('finish', () => {
     const path  = url.split('?')[0];
     const level = httpLogLevel(path, res.statusCode);
@@ -277,7 +287,7 @@ const downloadsRoutes = require('./routes/downloads')(downloadManager, appState)
 const channelRoutes = require('./routes/channels')(appState);
 const epgRoutes = require('./routes/epg')(appState);
 const streamRoutes = require('./routes/stream')(appState, config);
-const settingsRoutes = require('./routes/settings')(config, appState);
+const settingsRoutes = require('./routes/settings')(config, appState, access);
 const proxyRoutes = require('./routes/proxy')(appState);
 const m3uRoutes = require('./routes/m3u')(appState, logoManager);
 const xspfRoutes = require('./routes/xspf')(appState, logoManager);
@@ -404,6 +414,9 @@ async function tryAutoConnect() {
 const httpServer = app.listen(config.port, () => {
   log.info('server', `stalkerweb running on http://0.0.0.0:${config.port}`);
   log.info('server', `dataDir: ${config.dataDir}`);
+  log.info('server', access.enabled
+    ? 'access key set — sign-in required for the web UI, links carry a token'
+    : 'no ACCESS_KEY — anyone who can reach this server can use it (fine on a home network; set one before exposing it to the internet)');
   tryAutoConnect();
 });
 
