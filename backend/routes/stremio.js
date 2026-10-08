@@ -17,23 +17,32 @@
 // the catalog itself (filters, listing, caches) is shared with the Xtream API
 // — see lib/catalog.js.
 //
-// Ids: sw:live:<channel id>, sw:movie:<video id>, sw:series:<show id>, and
-// sw:ep:<episode id> for a show's episodes (the stable ids from XtreamIdStore).
+// Ids carry a short tag of the portal they came from, so an item saved in
+// Stremio's library never plays another portal's title with the same id:
+//   sw:live:<tag>:<channel id>, sw:movie:<tag>:<video id>,
+//   sw:series:<tag>:<show id>, and sw:ep:<episode id> for episodes (their
+//   stable ids from XtreamIdStore already record the portal).
 
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const log = require('../logger');
 const { createCatalog } = require('../lib/catalog');
+const { readyForClient } = require('../lib/clientSession');
+const { baseUrl } = require('../lib/publicUrl');
 const TAG = 'stremio';
 
 const PAGE_SIZE = 100;            // Stremio pages catalogs by 100 (skip = 0, 100, 200…)
-const ID_PREFIX = 'sw:';
+const GENRES_TTL_MS = 60 * 1000;  // category lists per kind, reused across requests
+const CHANNEL_WAIT_MS = 10_000;   // live ids right after a restart, while channels load
 const CATALOGS = {
   tv:     { id: 'sw-live',   name: 'StalkerWeb Live TV' },
   movie:  { id: 'sw-movies', name: 'StalkerWeb Movies' },
   series: { id: 'sw-series', name: 'StalkerWeb Series' },
 };
+
+const hash = (s) => crypto.createHash('sha1').update(String(s)).digest('hex');
 
 // The extra segment of a catalog URL, "genre=Kids%20%26%20Family&skip=100" →
 // { genre: 'Kids & Family', skip: '100' }. Read from the raw URL: Express
@@ -52,70 +61,125 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   const router = express.Router();
   const cat = catalog ?? createCatalog(appState, { logoManager, idStore });
 
-  const baseOf = (req) => `${req.protocol}://${req.get('host')}`;
   const connected = () => !!(appState.channelManager && appState.vodManager);
+  const portalTag = () => hash(cat.currentPortal()).slice(0, 8);
 
-  // Category name → id for each kind, for the genre dropdowns. Names are what
+  // Outside clients arrive long after the idle auto-disconnect; reconnect
+  // first so the addon keeps working without anyone opening the web UI.
+  router.use(async (_req, _res, next) => {
+    await readyForClient(appState, { waitForChannels: true, timeoutMs: 20_000 });
+    next();
+  });
+
+  // ── Genres (the portal's categories) ───────────────────────────────────────
+
+  // Category name → id for one kind, for its genre dropdown. Names are what
   // Stremio sends back, so they must be unique; a repeat gets its id appended.
-  async function genres() {
-    const out = { tv: [], movie: [], series: [] };
-    if (!connected()) return out;
-    const named = (cats) => {
-      const seen = new Set();
-      return cats.map((c) => {
-        let name = c.title ?? c.name;
-        if (seen.has(name)) name = `${name} (${c.id})`;
-        seen.add(name);
-        return { id: String(c.id), name };
-      });
-    };
-    out.tv = named(cat.liveData().categories);
-    try { out.movie = named(await cat.visibleCategories('vod')); } catch (e) { log.warn(TAG, `movie categories: ${e.message}`); }
-    try { out.series = named((await cat.seriesSource()).categories); } catch (e) { log.warn(TAG, `series categories: ${e.message}`); }
-    return out;
+  // Cached briefly per portal: every catalog page needs its own kind's list,
+  // and rebuilding it re-read settings and re-sorted every channel.
+  const genreCache = new Map(); // `${portal}|${kind}` → { value, ts }
+  async function genresFor(kind) {
+    if (!connected()) return { list: [], required: false };
+    const key = `${cat.currentPortal()}|${kind}`;
+    const hit = genreCache.get(key);
+    if (hit && Date.now() - hit.ts < GENRES_TTL_MS) return hit.value;
+
+    let cats = [];
+    let required = false;
+    try {
+      if (kind === 'tv') cats = cat.liveData().categories;
+      else if (kind === 'movie') cats = await cat.visibleCategories('vod');
+      else {
+        const src = await cat.seriesSource();
+        cats = src.categories;
+        // Without a series section the "series" categories are the movie
+        // ones, most holding no shows — so there is no sensible default for
+        // the home board, and a category must be picked in Discover.
+        required = !src.all;
+      }
+    } catch (e) {
+      log.warn(TAG, `${kind} categories: ${e.message}`);
+    }
+    const seen = new Set();
+    const list = cats.map((c) => {
+      let name = c.title ?? c.name;
+      if (seen.has(name)) name = `${name} (${c.id})`;
+      seen.add(name);
+      return { id: String(c.id), name };
+    });
+    const value = { list, required };
+    genreCache.set(key, { value, ts: Date.now() });
+    return value;
+  }
+
+  // The genre Stremio sent, matched forgivingly: Stremio keeps the options of
+  // the manifest it installed, which may predate a rename or a re-suffixed
+  // duplicate.
+  function findGenre(list, name) {
+    const lower = name.toLowerCase();
+    const bare = (n) => n.replace(/ \([^)]*\)$/, '').toLowerCase();
+    return list.find((g) => g.name === name)
+      ?? list.find((g) => g.name.toLowerCase() === lower)
+      ?? list.find((g) => bare(g.name) === bare(name));
   }
 
   // ── Manifest ───────────────────────────────────────────────────────────────
 
   router.get('/manifest.json', async (req, res) => {
-    const g = await genres();
+    const g = { tv: await genresFor('tv'), movie: await genresFor('movie'), series: await genresFor('series') };
     const catalogFor = (type) => ({
       type,
       id: CATALOGS[type].id,
       name: CATALOGS[type].name,
       extra: [
-        { name: 'genre', options: g[type].map((x) => x.name), isRequired: false },
+        { name: 'genre', options: g[type].list.map((x) => x.name), isRequired: g[type].required },
         { name: 'search', isRequired: false },
         { name: 'skip', isRequired: false },
       ],
     });
+    // The patch number follows the portal and its categories, so Stremio sees
+    // a new version — and refreshes its stored genre lists — when they change.
+    const [major = '1', minor = '0'] = String(version).split('.');
+    const patch = parseInt(hash(JSON.stringify([portalTag(), g])).slice(0, 7), 16);
     res.set('Cache-Control', 'no-cache');
     res.json({
       id: 'com.stalkerweb.addon',
-      version,
+      version: `${major}.${minor}.${patch}`,
       name: 'StalkerWeb',
       description: 'Live TV, movies and series from your Stalker portal, by category.',
-      logo: `${baseOf(req)}/favicon.svg`,
+      logo: `${baseUrl(req)}/favicon.svg`,
       resources: ['catalog', 'meta', 'stream'],
       types: ['tv', 'movie', 'series'],
-      idPrefixes: [ID_PREFIX],
+      idPrefixes: ['sw:'],
       catalogs: [catalogFor('tv'), catalogFor('movie'), catalogFor('series')],
     });
   });
 
   // ── Catalogs ───────────────────────────────────────────────────────────────
 
-  const liveMeta = (ch) => ({
-    id: `${ID_PREFIX}live:${ch.uniqueId}`,
-    type: 'tv',
-    name: ch.name,
-    poster: cat.logoFor(ch) || undefined,
-    posterShape: 'square',
-    logo: cat.logoFor(ch) || undefined,
-  });
+  // Images go through this server, like the web UI's: portal images are often
+  // http-only (blocked in Stremio Web) or need the portal session.
+  const imageUrl = (base, src) => {
+    if (!src) return undefined;
+    if (src.startsWith('/')) return base + src;
+    if (/^https?:\/\//i.test(src)) return `${base}/api/logos/render?url=${encodeURIComponent(src)}`;
+    return undefined;
+  };
+
+  const liveMeta = (base, ch) => {
+    const logo = imageUrl(base, cat.logoFor(ch));
+    return {
+      id: `sw:live:${portalTag()}:${ch.uniqueId}`,
+      type: 'tv',
+      name: ch.name,
+      poster: logo,
+      posterShape: 'square',
+      logo,
+    };
+  };
 
   const titleMeta = (base, type, item) => ({
-    id: `${ID_PREFIX}${type}:${item.id}`,
+    id: `sw:${type}:${portalTag()}:${item.id}`,
     type,
     name: item.name,
     poster: cat.posterFor(base, item.screenshotUri) || undefined,
@@ -125,11 +189,11 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   });
 
   async function catalogMetas(req, type, extra) {
-    const base = baseOf(req);
+    const base = baseUrl(req);
     const skip = Math.max(0, parseInt(extra.skip, 10) || 0);
     const search = (extra.search || '').trim();
-    const g = (await genres())[type];
-    const genre = extra.genre ? g.find((x) => x.name === extra.genre) : null;
+    const { list } = await genresFor(type);
+    const genre = extra.genre ? findGenre(list, extra.genre) : null;
     if (extra.genre && !genre) return [];
 
     if (type === 'tv') {
@@ -138,21 +202,20 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
         const q = search.toLowerCase();
         streams = streams.filter(({ ch }) => ch.name.toLowerCase().includes(q));
       }
-      return streams.slice(skip, skip + PAGE_SIZE).map(({ ch }) => liveMeta(ch));
+      return streams.slice(skip, skip + PAGE_SIZE).map(({ ch }) => liveMeta(base, ch));
     }
 
-    // Movies and series: the portal's search, or one category. With no genre
-    // chosen (Stremio's home board) the first category stands in — listing
-    // every category at once can take minutes on a big portal.
+    // Movies and series: the portal's search, or one screen of a category.
+    // With no genre chosen (Stremio's home board) the first category stands in.
     let rows;
     if (search) {
       rows = skip ? [] : await cat.searchTitles(type, search);
     } else {
-      const categoryId = genre?.id ?? g[0]?.id;
+      const categoryId = genre?.id ?? list[0]?.id;
       if (!categoryId) return [];
-      rows = type === 'movie' ? await cat.listMovies(categoryId) : await cat.listShows(categoryId);
+      rows = await cat.pageOfTitles(type, categoryId, skip, PAGE_SIZE);
     }
-    return rows.slice(skip, skip + PAGE_SIZE).map(({ item }) => titleMeta(base, type, item));
+    return rows.map(({ item }) => titleMeta(base, type, item));
   }
 
   async function catalogRoute(req, res) {
@@ -172,22 +235,37 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   router.get('/catalog/:type/:id.json', catalogRoute);
   router.get('/catalog/:type/:id/:extra.json', catalogRoute);
 
-  // ── Meta ───────────────────────────────────────────────────────────────────
+  // ── Ids ────────────────────────────────────────────────────────────────────
 
-  const parseId = (id) => {
-    const m = /^sw:(live|movie|series|ep):(.+)$/.exec(String(id));
-    return m ? { kind: m[1], value: m[2] } : null;
-  };
+  // { kind, value } for an id of the connected portal; { foreign: true } for
+  // one from another portal; null for anything else.
+  function parseId(id) {
+    const ep = /^sw:ep:(.+)$/.exec(String(id));
+    if (ep) return { kind: 'ep', value: ep[1] };
+    const m = /^sw:(live|movie|series):([0-9a-f]{8}):(.+)$/.exec(String(id));
+    if (!m) return null;
+    return m[2] === portalTag() ? { kind: m[1], value: m[3] } : { foreign: true };
+  }
+
+  // Live ids can arrive right after a restart, before the channel list is in.
+  const waitChannel = (id) => appState.channelManager.waitForChannel?.(id, CHANNEL_WAIT_MS)
+    ?? Promise.resolve(appState.channelManager.getChannel(id));
+
+  // ── Meta ───────────────────────────────────────────────────────────────────
 
   router.get('/meta/:type/:id.json', async (req, res) => {
     const ref = parseId(req.params.id);
     if (!ref || !connected()) return res.status(404).json({ meta: null });
-    const base = baseOf(req);
+    const base = baseUrl(req);
+    if (ref.foreign) {
+      return res.json({ meta: { id: req.params.id, type: req.params.type, name: 'From another portal', description: 'Saved while a different portal was connected. Connect that portal again to play it.' } });
+    }
     try {
       if (ref.kind === 'live') {
-        const ch = appState.channelManager.getChannel(ref.value);
+        const ch = await waitChannel(ref.value);
         if (!ch) return res.status(404).json({ meta: null });
-        return res.json({ meta: { ...liveMeta(ch), background: cat.logoFor(ch) || undefined } });
+        const meta = liveMeta(base, ch);
+        return res.json({ meta: { ...meta, background: meta.logo } });
       }
       if (ref.kind === 'movie') {
         const item = cat.findMovie(ref.value);
@@ -201,7 +279,7 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
         const seasons = await cat.seasonsOf(ref.value);
         const released = new Date(Date.parse(show?.added) || 0).toISOString();
         const videos = seasons.flatMap((s) => s.episodes.map((e) => ({
-          id: `${ID_PREFIX}ep:${e.id}`,
+          id: `sw:ep:${e.id}`,
           title: e.title,
           season: s.number,
           episode: e.number,
@@ -221,14 +299,14 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
 
   // ── Streams ────────────────────────────────────────────────────────────────
 
-  router.get('/stream/:type/:id.json', (req, res) => {
+  router.get('/stream/:type/:id.json', async (req, res) => {
     const ref = parseId(req.params.id);
-    if (!ref || !connected()) return res.json({ streams: [] });
+    if (!ref || ref.foreign || !connected()) return res.json({ streams: [] });
 
     let path;
     let title;
     if (ref.kind === 'live') {
-      const ch = appState.channelManager.getChannel(ref.value);
+      const ch = await waitChannel(ref.value);
       if (!ch) return res.json({ streams: [] });
       path = cat.liveProxyPath(ch.uniqueId);
       title = ch.name;
@@ -246,7 +324,7 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
 
     res.json({
       streams: [{
-        url: `${baseOf(req)}/proxy${path}`,
+        url: `${baseUrl(req)}/proxy${path}`,
         name: 'StalkerWeb',
         title,
         // Portal streams are HLS or MPEG-TS, not browser-ready MP4: Stremio's

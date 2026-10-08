@@ -8,37 +8,16 @@
 
 const express = require('express');
 const router = express.Router();
-const CacheManager = require('../cache/CacheManager');
 const log = require('../logger');
 const TAG = 'stream';
 
-module.exports = function streamRoutes(appState, config) {
+module.exports = function streamRoutes(appState) {
 
   // ── Ensure an authenticated session exists, reconnecting if needed ─────────
+  // Shared with the other outside-client entry points (see server.js).
   async function ensureSession() {
-    if (appState.sessionManager?.isAuthenticated()) return;
-
-    // Serialise concurrent reconnect attempts
-    if (!appState._reconnecting) {
-      const cache = new CacheManager(config.dataDir);
-      const saved = cache.load();
-      if (!saved?.portal || !saved?.mac) {
-        throw new Error('Not connected to a portal. Configure portal first.');
-      }
-      log.info(TAG, 'session inactive — auto-reconnecting');
-      appState._reconnecting = appState.connectPortal(saved)
-        .then(() => {
-          log.info(TAG, 'auto-reconnect succeeded');
-          appState.touchActivity?.();
-        })
-        .catch((e) => {
-          log.error(TAG, `auto-reconnect failed: ${e.message}`);
-          throw e;
-        })
-        .finally(() => { appState._reconnecting = null; });
-    }
-
-    await appState._reconnecting;
+    if (appState.ensureSession) return appState.ensureSession();
+    if (!appState.sessionManager?.isAuthenticated()) throw new Error('Not connected to a portal. Configure portal first.');
   }
 
   // GET /api/stream/keepalive — touch activity to prevent idle disconnect

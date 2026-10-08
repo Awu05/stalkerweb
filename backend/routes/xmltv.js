@@ -26,6 +26,7 @@ const { exportFilterFor } = require('../lib/exportFilter');
 const { standardCategories } = require('../lib/guideCategories');
 const { isAdult } = require('../lib/exportFilter');
 const { channelGenre } = require('./m3u');
+const { readyForClient } = require('../lib/clientSession');
 const TAG = 'xmltv';
 const gzip = promisify(zlib.gzip);
 
@@ -177,6 +178,7 @@ module.exports = function xmltvModule(appState) {
   let cache = null; // { channels, channelCount, filterKey, groups, epgData, period, filler, categories, builtAt, raw, gzipped }
 
   router.get('/', async (req, res) => {
+    await readyForClient(appState, { waitForChannels: true });  // after an idle disconnect
     const { channelManager, guideManager } = appState;
 
     if (!channelManager) {

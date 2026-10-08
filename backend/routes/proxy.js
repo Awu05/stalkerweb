@@ -18,7 +18,9 @@ const http  = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const log = require('../logger');
+const { baseUrl } = require('../lib/publicUrl');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
+const { readyForClient } = require('../lib/clientSession');
 const TAG = 'proxy';
 
 // Dedicated HTTP clients for CDN stream/segment fetches with a PERSISTENT
@@ -220,6 +222,14 @@ module.exports = function proxyModule(appState) {
     return true;
   }
 
+  // For the links outside players open directly (M3U, Xtream, Stremio): a
+  // session that idled out is brought back first, so playback doesn't depend
+  // on someone opening the web UI.
+  async function requireSessionReconnecting(res) {
+    if (!appState.client || !appState.channelManager) await readyForClient(appState);
+    return requireSession(res);
+  }
+
   // Fetch a live stream URL and serve it. If the portal returns an HLS playlist
   // we rewrite its URLs through the proxy; if it returns raw MPEG-TS (or any
   // other binary container) we pipe the bytes straight through — exactly like a
@@ -313,7 +323,7 @@ module.exports = function proxyModule(appState) {
         }
         body = Buffer.concat(rest);
       }
-      const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+      const proxyOrigin = baseUrl(req);
       const rewritten = rewriteM3u8(body.toString('utf8'), realUrl, proxyOrigin, proxySecret, channelId);
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
@@ -421,7 +431,7 @@ module.exports = function proxyModule(appState) {
     }
 
     const body = Buffer.from(response.data).toString('utf8');
-    const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+    const proxyOrigin = baseUrl(req);
     const rewritten = rewriteM3u8(body, realUrl, proxyOrigin, proxySecret, channelId);
 
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
@@ -439,7 +449,7 @@ module.exports = function proxyModule(appState) {
   router.get(/^\/vod\/stream/, async (req, res) => {
     // Fix: use requireSession (not just !client) so channelManager is also checked,
     // and unauthenticated requests are rejected consistently with other proxy routes.
-    if (!requireSession(res)) return;
+    if (!(await requireSessionReconnecting(res))) return;
 
     const { vodManager, client } = appState;  // snapshot before any await to avoid race
     if (!vodManager) return res.status(503).send('VOD not available');
@@ -550,7 +560,7 @@ module.exports = function proxyModule(appState) {
           response.data.on('end', resolve);
           response.data.on('error', reject);
         });
-        const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+        const proxyOrigin = baseUrl(req);
         const rewritten   = rewriteM3u8(Buffer.concat(allChunks).toString('utf8'), streamUrl, proxyOrigin, proxySecret);
         res.set('Content-Type', 'application/vnd.apple.mpegurl');
         res.set('Cache-Control', 'no-cache, no-store');
@@ -587,7 +597,7 @@ module.exports = function proxyModule(appState) {
 
   // ── GET /proxy/stream/:channelId ──────────────────────────────────────────
   router.get('/stream/:channelId', channelIdRules, async (req, res) => {
-    if (!requireSession(res)) return;
+    if (!(await requireSessionReconnecting(res))) return;
     appState.attachStreamHeartbeat?.(req, res);   // covers both finite playlists and single long-lived pipes
 
     const { channelManager } = appState;
@@ -796,7 +806,7 @@ module.exports = function proxyModule(appState) {
         log.error(TAG, `segment playlist read failed: ${e.message}`);
         return res.status(502).send(`Fetch failed: ${e.message}`);
       }
-      const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+      const proxyOrigin = baseUrl(req);
       const rewritten = rewriteM3u8(Buffer.concat(rest).toString('utf8'), realUrl, proxyOrigin, proxySecret, ch);
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');

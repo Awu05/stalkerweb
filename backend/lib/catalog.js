@@ -16,6 +16,7 @@ const ALL_CATEGORIES_ID = '*';              // the portal's "everything" pseudo-
 const SYNTHETIC_CATEGORY_BASE = 900000;     // live categories with no numeric portal id
 const SERIES_INFO_TTL_MS = 60 * 60 * 1000;
 const ALL_TITLES_WAIT_MS = 20 * 1000;       // see listTitles
+const NO_SERIES_RECHECK_MS = 30 * 60 * 1000; // see seriesSource
 
 // Live categories in playlist order. Portal genre ids are kept where numeric
 // (Xtream clients parse category ids as integers); others get a synthetic id.
@@ -42,11 +43,14 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   //            movie's cmd at play time, and a show's episodes when the portal
   //            has no seasons. Keyed by type: a movie and a show can share an id.
   //   seasons: seriesId → { value: portal seasons + episodes, ts }
-  let scope = { portal: null, titles: new Map(), seasons: new Map() };
+  //   noSeriesUntil: when the portal rejected type=series, the time until which
+  //            it is taken to have no series section (so it isn't asked again
+  //            on every request — a failure is not cached by VodManager).
+  let scope = { portal: null, titles: new Map(), seasons: new Map(), noSeriesUntil: 0 };
   const currentPortal = () => appState.client?.getBasePath?.() || '';
   function state() {
     const portal = currentPortal();
-    if (scope.portal !== portal) scope = { portal, titles: new Map(), seasons: new Map() };
+    if (scope.portal !== portal) scope = { portal, titles: new Map(), seasons: new Map(), noSeriesUntil: 0 };
     return scope;
   }
 
@@ -97,11 +101,15 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   // without a series module reject type=series outright; that means "no
   // series section", not an error.
   async function seriesSource() {
+    const s = state();
     let own = [];
-    try {
-      own = await visibleCategories('series');
-    } catch (e) {
-      log.debug(TAG, `series categories unavailable (${e.message}) — using movie categories`);
+    if (Date.now() >= s.noSeriesUntil) {
+      try {
+        own = await visibleCategories('series');
+      } catch (e) {
+        s.noSeriesUntil = Date.now() + NO_SERIES_RECHECK_MS;
+        log.debug(TAG, `series categories unavailable (${e.message}) — using movie categories`);
+      }
     }
     return own.length ? { type: 'series', categories: own, all: true } : { type: 'vod', categories: await visibleCategories('vod'), all: false };
   }
@@ -179,8 +187,10 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
       : await seriesSource();
     const visible = new Set(src.categories.map((c) => String(c.id)));
     const adult = showAdult();
-    const { items } = await appState.vodManager.getItems({ type: src.type, categoryId: ALL_CATEGORIES_ID, search: query });
+    // Taken before the portal call: if the portal changes meanwhile, these
+    // results must not land in the new portal's titles.
     const { titles } = state();
+    const { items } = await appState.vodManager.getItems({ type: src.type, categoryId: ALL_CATEGORIES_ID, search: query });
     const out = [];
     for (const item of items) {
       if (kind === 'movie' ? item.isSeries : !(src.all || item.isSeries)) continue;
@@ -190,6 +200,32 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
       out.push({ item, categoryId: String(item.categoryId || '') });
     }
     return out;
+  }
+
+  /**
+   * One screen of a movie or series category: titles `skip`…`skip + limit - 1`.
+   * Served from the full listing when it is cached; otherwise only the portal
+   * pages covering the screen are read, so a big category answers quickly,
+   * and the full listing is read in the background for the screens after it.
+   * Titles of the other kind (shows among movies, when the portal mixes them)
+   * are dropped, so a screen read that way can come up short.
+   * Returns [{ item, categoryId }].
+   */
+  async function pageOfTitles(kind, categoryId, skip, limit) {
+    const src = kind === 'movie' ? { type: 'vod', all: false } : await seriesSource();
+    const keep = (item) => (kind === 'movie' ? !item.isSeries : (src.all || item.isSeries));
+    const { vodManager } = appState;
+    const { titles } = state();
+    let items;
+    const full = vodManager.peekAllItems(src.type, categoryId);
+    if (full) {
+      items = full.filter(keep).slice(skip, skip + limit);
+    } else {
+      items = (await vodManager.getRange(src.type, categoryId, skip, limit)).items.filter(keep);
+      vodManager.getAllItems(src.type, categoryId).catch((e) => log.warn(TAG, `listing ${src.type}/${categoryId}: ${e.message}`));
+    }
+    for (const item of items) titles.set(`${src.type}:${item.id}`, item);
+    return items.map((item) => ({ item, categoryId: String(categoryId) }));
   }
 
   const findMovie = (id) => state().titles.get(`vod:${id}`);
@@ -287,7 +323,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   return {
     currentPortal, logoFor, posterFor,
     liveData, visibleCategories, seriesSource,
-    listMovies, listShows, searchTitles, findMovie, findShow, seasonsOf,
+    listMovies, listShows, pageOfTitles, searchTitles, findMovie, findShow, seasonsOf,
     liveProxyPath, movieProxyPath, episodeProxyPath,
   };
 }

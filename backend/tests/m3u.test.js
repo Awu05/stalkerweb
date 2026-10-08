@@ -69,6 +69,28 @@ describe('GET /api/m3u', () => {
     expect(lines[4]).toContain(`tvg-name="Sports 'Live'"`)
   })
 
+  it('reconnects to the portal when the session idled out', async () => {
+    const reconnected = []
+    const state = {
+      channelManager: null,
+      ensureSession: async () => {
+        reconnected.push(true)
+        state.channelManager = { getGroups: () => groups, getChannels: () => [ch('b', 'News 1', 1, '1')] }
+      },
+    }
+    const app = express()
+    app.use('/api/m3u', m3uModule(state, null))
+    const s = await new Promise((r) => { const srv = app.listen(0, '127.0.0.1', () => r(srv)) })
+    try {
+      const res = await fetch(`http://127.0.0.1:${s.address().port}/api/m3u`)
+      expect(res.status).toBe(200)
+      expect(reconnected).toEqual([true])
+      expect(await res.text()).toContain('News 1')
+    } finally {
+      s.close()
+    }
+  })
+
   it('writes the category into each name with ?prefix=1', async () => {
     const body = await (await fetch(`${base}/api/m3u?prefix=1`)).text()
     const lines = body.trim().split('\n')

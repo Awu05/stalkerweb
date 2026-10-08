@@ -21,7 +21,9 @@
 
 const express = require('express');
 const log = require('../logger');
+const { baseUrl } = require('../lib/publicUrl');
 const { createCatalog } = require('../lib/catalog');
+const { readyForClient } = require('../lib/clientSession');
 const TAG = 'xtream';
 
 const CONTAINER = 'mp4';
@@ -39,8 +41,6 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   const router = express.Router();
   const cat = catalog ?? createCatalog(appState, { logoManager, idStore, allTitlesWaitMs });
 
-  const baseOf = (req) => `${req.protocol}://${req.get('host')}`;
-
   // ── Account ────────────────────────────────────────────────────────────────
 
   function accountInfo(req) {
@@ -48,7 +48,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     // Players rebuild stream URLs from these, so report the address they used.
     // Parsed as a URL so an IPv6 host ([::1]:8983) keeps its port.
     let port = '';
-    try { port = new URL(baseOf(req)).port; } catch { /* malformed Host — use the default */ }
+    try { port = new URL(baseUrl(req)).port; } catch { /* malformed Host — use the default */ }
     port = port || (req.protocol === 'https' ? '443' : '80');
     return {
       user_info: {
@@ -105,7 +105,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     year: item.year,
     stream_type: 'movie',
     stream_id: asNumber(item.id),
-    stream_icon: cat.posterFor(baseOf(req), item.screenshotUri),
+    stream_icon: cat.posterFor(baseUrl(req), item.screenshotUri),
     rating: '',
     rating_5based: 0,
     added: toUnix(item.added),
@@ -124,7 +124,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     title: item.name,
     year: item.year,
     series_id: asNumber(item.id),
-    cover: cat.posterFor(baseOf(req), item.screenshotUri),
+    cover: cat.posterFor(baseUrl(req), item.screenshotUri),
     plot: item.description,
     cast: item.actors,
     director: item.director,
@@ -143,7 +143,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
 
   function vodInfo(req, vodId) {
     const item = cat.findMovie(vodId);
-    const cover = cat.posterFor(baseOf(req), item?.screenshotUri);
+    const cover = cat.posterFor(baseUrl(req), item?.screenshotUri);
     const secs = (item?.durationMin || 0) * 60;
     return {
       info: {
@@ -176,7 +176,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   }
 
   async function seriesInfo(req, seriesId) {
-    const base = baseOf(req);
+    const base = baseUrl(req);
     const show = cat.findShow(seriesId);
     const seasons = [];
     const episodes = {};
@@ -245,6 +245,8 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     const action = String(req.query.action || req.body?.action || '');
     if (!action) return res.json(accountInfo(req));
 
+    // Players poll long after the idle auto-disconnect; reconnect first.
+    await readyForClient(appState, { waitForChannels: true, timeoutMs: 30_000 });
     if (!appState.channelManager || !appState.vodManager) {
       return res.status(503).json({ error: 'Not connected to portal — connect first via the web UI' });
     }

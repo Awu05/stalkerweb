@@ -498,6 +498,7 @@ export default function SetupPage() {
   const [idleNever, setIdleNever]       = useState(false)
   const [idleSaved, setIdleSaved]       = useState(null)
   const [idleDefault, setIdleDefault]   = useState(30)
+  const [httpsPort, setHttpsPort]       = useState(null)  // HTTPS_PORT, for the Stremio link
   const [idleSaving, setIdleSaving]     = useState(false)
   const [idleNotice, setIdleNotice]     = useState(null)
   const [logoStats, setLogoStats]   = useState(null)
@@ -575,6 +576,7 @@ export default function SetupPage() {
         setEpg(s.epg_enabled !== false)
         setDownloadDir(s.download_dir || '')
         if (s.idle_timeout_default != null) setIdleDefault(s.idle_timeout_default)
+        setHttpsPort(s.https_port || null)
         if (s.idle_timeout_minutes != null) {
           setIdleSaved(s.idle_timeout_minutes)
           setIdleNever(s.idle_timeout_minutes === 0)
@@ -1013,6 +1015,12 @@ export default function SetupPage() {
         {/* ── IPTV Links (M3U / XMLTV) ─────────────────────────────────────── */}
         {(() => {
           const origin = (typeof window !== 'undefined' && window.location?.origin) || ''
+          // Stremio only installs addons over HTTPS. When the page is open over
+          // HTTP but the built-in HTTPS listener is on, offer that address.
+          const loc = typeof window !== 'undefined' ? window.location : null
+          const stremioOrigin = loc?.protocol === 'http:' && httpsPort
+            ? `https://${loc.hostname}:${httpsPort}`  // hostname keeps an IPv6 address's brackets
+            : origin
           return (
             <Card title="IPTV Links" description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs.">
               <LinkRow
@@ -1024,8 +1032,10 @@ export default function SetupPage() {
               <LinkRow
                 label="Stremio Addon"
                 icon={Server}
-                url={`${origin}/stremio/manifest.json`}
-                hint={<>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install. Stremio needs an <strong>https://</strong> address here unless Stremio runs on this same computer and the link starts with http://127.0.0.1 — see the README for HTTPS.</>}
+                url={`${stremioOrigin}/stremio/manifest.json`}
+                hint={stremioOrigin.startsWith('https:')
+                  ? <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install.</>
+                  : <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install. Stremio needs an <strong>https://</strong> address unless it runs on this same computer and the link starts with http://127.0.0.1 — see the README for HTTPS.</>}
               />
               <LinkRow
                 label="M3U Playlist"
@@ -1051,7 +1061,7 @@ export default function SetupPage() {
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
               />
               <p className="text-xs text-[var(--color-muted)]">
-                These links leave out the genres and languages hidden under Genre Filters, and adult channels unless Show Adult Content is on. Add <code className="font-mono">?all=1</code> to a link to include every channel.
+                All of these leave out the genres and languages hidden under Genre Filters, and adult content unless Show Adult Content is on. Add <code className="font-mono">?all=1</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
               </p>
               {!connected && (
                 <p className="text-xs text-[var(--color-muted)]">

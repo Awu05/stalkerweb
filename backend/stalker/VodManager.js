@@ -31,6 +31,7 @@ class VodManager {
     this._linkCache = new Map(); // `${videoId}:${series}` → { url, ts }
     this._categoryCache = new Map(); // type → { value, ts } | { pending }
     this._listingCache = new Map();  // `${type}:${categoryId}` → { value, ts } | { pending }
+    this._pageCache = new Map();     // `${type}:${categoryId}:${page}` → { value, ts } | { pending }
   }
 
   // Returns the cached value for `key`, or runs `fetch` once for every caller
@@ -142,42 +143,89 @@ class VodManager {
     return this._peek(this._listingCache, `${type}:${categoryId}`)?.items;
   }
 
+  // One portal page of a category: { items, total, perPage }. Cached, and
+  // shared by getAllItems and getRange so neither reads a page the other has.
+  _getPage(type, categoryId, p) {
+    return this._cached(this._pageCache, `${type}:${categoryId}:${p}`, () => LISTING_TTL_MS, async () => {
+      const r = await this.client._stalkerCall({
+        type, action: 'get_ordered_list', category: categoryId, sortby: 'added', fav: '0', p: String(p),
+      });
+      const js = r?.js || {};
+      const data = Array.isArray(js.data) ? js.data : [];
+      const items = data.map((raw) => {
+        const item = this._normalizeItem(raw);
+        if (!item.categoryId) item.categoryId = categoryId;
+        return item;
+      });
+      return {
+        items,
+        total:   parseInt(js.total_items || '0', 10) || data.length,
+        perPage: parseInt(js.max_page_items || '14', 10) || 14,
+      };
+    });
+  }
+
+  // Reads page `p`, pausing first when it isn't cached and isn't the first
+  // read of a walk — so a walk never bursts into the portal's rate limit.
+  async _readPage(type, categoryId, p, pause) {
+    if (pause && this._pageGapMs && this._peek(this._pageCache, `${type}:${categoryId}:${p}`) === undefined) {
+      await new Promise((r) => setTimeout(r, this._pageGapMs));
+    }
+    return this._getPage(type, categoryId, p);
+  }
+
   async _fetchAllItems(type, categoryId) {
     const items = [];
     let complete = true;
-    let pages = 1;
+    const first = await this._getPage(type, categoryId, 1);
+    const pages = Math.max(1, Math.ceil(first.total / first.perPage));
+    if (pages > LISTING_MAX_PAGES) {
+      log.warn(TAG, `listing ${type}/${categoryId}: ${first.total} titles — reading the newest ${LISTING_MAX_PAGES * first.perPage}`);
+    }
     for (let p = 1; p <= Math.min(pages, LISTING_MAX_PAGES); p++) {
-      if (p > 1 && this._pageGapMs) await new Promise((r) => setTimeout(r, this._pageGapMs));
-      let js;
+      let page;
       try {
-        const r = await this.client._stalkerCall({
-          type, action: 'get_ordered_list', category: categoryId, sortby: 'added', fav: '0', p: String(p),
-        });
-        js = r?.js || {};
+        page = p === 1 ? first : await this._readPage(type, categoryId, p, true);
       } catch (e) {
-        if (p === 1) throw e;
         log.warn(TAG, `listing ${type}/${categoryId}: page ${p} failed (${e.message}) — keeping ${items.length} titles for now`);
         complete = false;
         break;
       }
-      const data = Array.isArray(js.data) ? js.data : [];
-      if (p === 1) {
-        const total   = parseInt(js.total_items || '0', 10) || data.length;
-        const perPage = parseInt(js.max_page_items || '14', 10) || 14;
-        pages = Math.max(1, Math.ceil(total / perPage));
-        if (pages > LISTING_MAX_PAGES) {
-          log.warn(TAG, `listing ${type}/${categoryId}: ${total} titles — reading the newest ${LISTING_MAX_PAGES * perPage}`);
-        }
-      }
-      if (!data.length) break;
-      for (const raw of data) {
-        const item = this._normalizeItem(raw);
-        if (!item.categoryId) item.categoryId = categoryId;
-        items.push(item);
-      }
+      if (!page.items.length) break;
+      items.push(...page.items);
     }
     log.info(TAG, `listing ${type}/${categoryId}: ${items.length} titles`);
     return { items, complete };
+  }
+
+  /**
+   * Titles `start`…`start + count - 1` of a category, reading only the portal
+   * pages that cover them — a client paging through a big category gets its
+   * first screen without waiting for the whole category. A page that fails
+   * after the first ends the range early.
+   * @returns {Promise<{ items: object[], total: number }>}
+   */
+  async getRange(type, categoryId, start, count) {
+    const cat = String(categoryId);
+    const first = await this._getPage(type, cat, 1);
+    const { total, perPage } = first;
+    const end = Math.min(total, start + count, LISTING_MAX_PAGES * perPage);
+    if (start >= end) return { items: [], total };
+    const firstPage = Math.floor(start / perPage) + 1;
+    const lastPage  = Math.floor((end - 1) / perPage) + 1;
+    const items = [];
+    for (let p = firstPage; p <= lastPage; p++) {
+      try {
+        const page = p === 1 ? first : await this._readPage(type, cat, p, p > firstPage);
+        if (!page.items.length) break;
+        items.push(...page.items);
+      } catch (e) {
+        log.warn(TAG, `range ${type}/${cat}: page ${p} failed (${e.message})`);
+        break;
+      }
+    }
+    const offset = start - (firstPage - 1) * perPage;
+    return { items: items.slice(offset, offset + (end - start)), total };
   }
 
   // ── Seasons / Episodes (TV-show drill-down) ─────────────────────────────────

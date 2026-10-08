@@ -188,6 +188,34 @@ appState.setIdleTimeoutMinutes = function setIdleTimeoutMinutes(minutes) {
   if (appState.sessionManager) armIdleTimer();
 };
 
+// Reconnects to the saved portal if the session is down (idle auto-disconnect,
+// restart). Called where an outside client arrives without going through the
+// web UI — stream links, playlists, the guide, the Xtream API, the Stremio
+// addon — so those keep working after the idle disconnect. Not called for the
+// web UI's own API polling, which would otherwise keep the session up forever.
+// Concurrent callers share one attempt. Resolves true when connected; throws
+// when there is no saved portal or the reconnect fails.
+appState.ensureSession = async function ensureSession() {
+  if (appState.sessionManager?.isAuthenticated() && appState.channelManager) return true;
+  if (!appState._reconnecting) {
+    const saved = new (require('./cache/CacheManager'))(config.dataDir).load();
+    if (!saved?.portal || !saved?.mac) throw new Error('Not connected to a portal. Configure portal first.');
+    log.info('server', 'session inactive — auto-reconnecting for an incoming request');
+    appState._reconnecting = connectPortal(saved)
+      .then(() => {
+        log.info('server', 'auto-reconnect succeeded');
+        appState.touchActivity();
+      })
+      .catch((e) => {
+        log.error('server', `auto-reconnect failed: ${e.message}`);
+        throw e;
+      })
+      .finally(() => { appState._reconnecting = null; });
+  }
+  await appState._reconnecting;
+  return true;
+};
+
 appState.touchActivity = function touchActivity() {
   appState.lastActivityAt = new Date().toISOString();
   armIdleTimer();
@@ -382,14 +410,35 @@ const httpServer = app.listen(config.port, () => {
 // Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS
 // (except from 127.0.0.1), so this lets a TV or phone use the Stremio addon
 // without a reverse proxy. Set HTTPS_PORT, HTTPS_CERT and HTTPS_KEY (PEM files).
+// Problems here are logged and HTTP keeps serving — HTTPS is an add-on.
+// Renewed certificates (Let's Encrypt, Tailscale: every ~90 days) are picked
+// up without a restart: the files are checked every minute and reloaded when
+// they change.
 let httpsServer = null;
 if (config.httpsPort) {
+  const readTls = () => ({ cert: fs.readFileSync(config.httpsCert), key: fs.readFileSync(config.httpsKey) });
   try {
-    const tls = { cert: fs.readFileSync(config.httpsCert), key: fs.readFileSync(config.httpsKey) };
-    httpsServer = require('https').createServer(tls, app).listen(config.httpsPort, () => {
+    httpsServer = require('https').createServer(readTls(), app);
+    httpsServer.on('error', (e) => {
+      log.error('server', `HTTPS listener on port ${config.httpsPort} failed (${e.code || e.message}) — HTTP is still up on ${config.port}`);
+    });
+    httpsServer.listen(config.httpsPort, () => {
       log.info('server', `stalkerweb also on https://0.0.0.0:${config.httpsPort}`);
     });
+    const reload = (curr, prev) => {
+      if (curr.mtimeMs === prev.mtimeMs) return;
+      try {
+        httpsServer.setSecureContext(readTls());
+        log.info('server', 'HTTPS certificate reloaded');
+      } catch (e) {
+        log.warn('server', `HTTPS certificate changed but could not be reloaded (keeping the old one): ${e.message}`);
+      }
+    };
+    for (const file of new Set([config.httpsCert, config.httpsKey])) {
+      fs.watchFile(file, { interval: 60_000 }, reload).unref?.();
+    }
   } catch (e) {
+    httpsServer = null;
     log.error('server', `HTTPS not started — check HTTPS_CERT and HTTPS_KEY: ${e.message}`);
   }
 }

@@ -90,6 +90,27 @@ describe('VodManager.getItems paging', () => {
     }
   })
 
+  it('getRange reads only the pages covering the range', async () => {
+    const client = fakeClient()
+    const vm = new VodManager(client, { pageGapMs: 0 })
+
+    const { items, total } = await vm.getRange('vod', '1', 20, 30)   // titles 21–50
+    expect(total).toBe(TOTAL)
+    expect(items.map((i) => i.id)).toEqual(Array.from({ length: 30 }, (_, i) => String(21 + i)))
+    expect(client.requested).toEqual([1, 2, 3, 4])                    // page 1 for the totals, then 2–4
+
+    expect((await vm.getRange('vod', '1', 90, 100)).items).toHaveLength(10)  // past the end
+    expect((await vm.getRange('vod', '1', 200, 100)).items).toEqual([])
+  })
+
+  it('getAllItems reuses the pages getRange already read', async () => {
+    const client = fakeClient()
+    const vm = new VodManager(client, { pageGapMs: 0 })
+    await vm.getRange('vod', '1', 0, 30)
+    await vm.getAllItems('vod', '1')
+    expect(client.requested).toEqual([1, 2, 3, 4, 5, 6, 7, 8])        // each page once
+  })
+
   it('reports a single page for a category that fits in one batch', async () => {
     const vm = new VodManager({
       _stalkerCall: async () => ({ js: { total_items: '5', max_page_items: '14', data: [{ id: '1' }] } }),

@@ -41,6 +41,9 @@ module.exports = function settingsModule(config, appState = null) {
       // Effective value (saved, else IDLE_TIMEOUT_MINUTES). 0 = never.
       idle_timeout_minutes:    appState ? Math.round(appState.idleTimeoutMs / 60000) : null,
       idle_timeout_default:    appState?.idleTimeoutDefaultMinutes ?? null,
+      // Built-in HTTPS port (HTTPS_PORT), so the Setup page can offer an
+      // https:// Stremio link while the UI itself is open over HTTP.
+      https_port:              config.httpsPort || null,
     });
   });
 
