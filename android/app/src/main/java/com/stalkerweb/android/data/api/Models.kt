@@ -85,6 +85,8 @@ data class NowNextEntry(
 data class SettingsResponse(
     @param:Json(name = "epg_enabled") val epgEnabled: Boolean = true,
     @param:Json(name = "vod_enabled") val vodEnabled: Boolean = true,
+    // With ACCESS_KEY set on the server: the playback-only token for links.
+    @param:Json(name = "access_share_token") val accessShareToken: String? = null,
 )
 
 // ── VOD ───────────────────────────────────────────────────────────────────────

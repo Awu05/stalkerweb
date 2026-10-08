@@ -93,12 +93,20 @@ interface StalkerApi {
     ): VodStreamResponse
 
     companion object {
-        fun create(baseUrl: String): StalkerApi {
+        /** [accessKey]: the server's ACCESS_KEY, sent on every request when set. */
+        fun create(baseUrl: String, accessKey: String? = null): StalkerApi {
             val moshi = Moshi.Builder()
                 .addLast(KotlinJsonAdapterFactory())
                 .build()
 
             val client = OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    val request = chain.request()
+                    chain.proceed(
+                        if (accessKey.isNullOrBlank()) request
+                        else request.newBuilder().header("Authorization", "Bearer $accessKey").build()
+                    )
+                }
                 .addInterceptor(HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BASIC
                 })

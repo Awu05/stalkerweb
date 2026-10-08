@@ -10,6 +10,8 @@ const config = {
   httpsPort: parseInt(process.env.HTTPS_PORT || '0', 10) || 0,
   httpsCert: process.env.HTTPS_CERT || '',
   httpsKey: process.env.HTTPS_KEY || '',
+  // Optional access key (see lib/access.js). Unset = no login, as before.
+  accessKey: (process.env.ACCESS_KEY || '').trim(),
 };
 
 config.cacheDir = path.join(config.dataDir, 'cache');

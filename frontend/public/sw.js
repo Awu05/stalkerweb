@@ -28,11 +28,12 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Never intercept API, proxy or Stremio-addon requests — always go to network.
+  // Never intercept API, proxy, Stremio-addon or access-key (/k/…) links —
+  // always go to network.
   // (Opened in a tab, /stremio/manifest.json would otherwise be cached as the
   // app shell.)
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/proxy/') ||
-      url.pathname.startsWith('/stremio/')) return;
+      url.pathname.startsWith('/stremio/') || url.pathname.startsWith('/k/')) return;
 
   // Navigation requests (the HTML shell): network-first. The shell references
   // content-hashed JS/CSS, so a stale cached shell points at chunks that no

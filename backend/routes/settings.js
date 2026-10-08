@@ -22,7 +22,7 @@ const DEFAULTS = {
   stbemu_firmware: '0.2.18-r14-pub-250',
 };
 
-module.exports = function settingsModule(config, appState = null) {
+module.exports = function settingsModule(config, appState = null, access = null) {
   const router = express.Router();
   const cache = new CacheManager(config.dataDir);
 
@@ -44,6 +44,10 @@ module.exports = function settingsModule(config, appState = null) {
       // Built-in HTTPS port (HTTPS_PORT), so the Setup page can offer an
       // https:// Stremio link while the UI itself is open over HTTP.
       https_port:              config.httpsPort || null,
+      // With ACCESS_KEY set: the token the Setup page puts in the links it
+      // shows (playback only — see lib/access.js). Only full access reads this.
+      access_enabled:          !!access?.enabled,
+      access_share_token:      access?.shareToken ?? null,
     });
   });
 

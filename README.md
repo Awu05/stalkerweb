@@ -47,6 +47,9 @@ services:
       # This is the default; Settings → App Preferences can change it (or
       # turn it off) at runtime, and a value saved there takes precedence.
       # - IDLE_TIMEOUT_MINUTES=30
+      # Optional: require a key to use StalkerWeb — set this before exposing
+      # it to the internet. See "Access key" below.
+      # - ACCESS_KEY=a-long-passphrase-only-you-know
 ```
 
 ```bash
@@ -92,8 +95,41 @@ side by side on the same device.
 **Phone and tablet only:** Google Cast and picture-in-picture.
 **TV only:** leanback launcher entry, D-pad focus handling and overscan-safe padding.
 
+## Access key
+
+Without an access key, anyone who can reach StalkerWeb can use it: watch on
+your portal account, see and change your portal settings, and use the
+playlists. That's fine on a home network. Before you make it reachable from the
+internet (a Cloudflare tunnel, a port forward, a public reverse proxy), set
+`ACCESS_KEY`:
+
+```yaml
+    environment:
+      - ACCESS_KEY=a-long-passphrase-only-you-know
+```
+
+Use at least 12 characters. With it set:
+
+- **Web UI:** asks for the key once per browser and stays signed in for a
+  year (Sign out is at the bottom of the sidebar).
+- **Android app:** enter the key in the app's **Access key** field, under the
+  server address. The app sends it in a header; the stream and logo links it
+  builds carry the playback token instead.
+- **Playlists, guide, Stremio, Xtream:** the links on the Profiles page include
+  a token, such as `https://your-host/k/<token>/api/m3u`. Xtream players use
+  the server address with any username, and the token as the password (shown on
+  the Profiles page as *Xtream Password*). The token only allows playback. Anyone
+  with a link can watch, but can't open the settings or change the portal.
+
+Changing `ACCESS_KEY` signs every browser out and stops every old link. After
+20 wrong keys from one address in 15 minutes (or 200 from everywhere), signing
+in with the key is refused for 15 minutes; links and signed-in browsers keep
+working. With an access key, the log monitor (`/api/logs`) needs the key too,
+unless `LOG_MONITOR_TOKEN` is set.
+
 ## Security
 
+- **Access key** — Optional sign-in for the web UI and token-carrying links for players (see above).
 - **Rate Limiting** — Auth endpoints are rate-limited to prevent brute-force attacks.
 - **SSRF Protection** — The HLS proxy validates all proxied URLs match the connected portal domain.
 - **Input Validation** — Express-validator middleware sanitizes channel IDs, URLs, and auth fields on all critical routes.
@@ -195,7 +231,9 @@ players understand. Players that speak it show live TV, movies and series each
 by category, the way the portal lays them out.
 
 - **Server:** `http://your-host:8983`
-- **Username / password:** anything; they aren't checked
+- **Username / password:** anything; they aren't checked. With an
+  [access key](#access-key), the password must be the *Xtream Password* from
+  the Profiles page.
 
 In Jellyfin, install the community **Jellyfin Xtream** plugin (it comes from its
 own plugin repository; see the plugin's README) and enter the server above.
@@ -224,8 +262,10 @@ StalkerWeb is also a Stremio addon. Live TV, movies and series appear in
 Stremio's Discover tab, each with the portal's categories in the genre
 dropdown, and movies and series show up in Stremio's search.
 
-1. In Stremio, open **Addons** and paste the addon link into the search box:
-   `https://your-host:8443/stremio/manifest.json`
+1. In Stremio, open **Addons** and paste the addon link from the Profiles page
+   into the search box, such as `https://your-host:8443/stremio/manifest.json`.
+   With an [access key](#access-key) it includes the token,
+   `https://your-host/k/<token>/stremio/manifest.json`.
 2. Click **Install**.
 
 Stremio only installs addons over **HTTPS**, with one exception:
@@ -233,8 +273,10 @@ Stremio only installs addons over **HTTPS**, with one exception:
 same computer as StalkerWeb. For a TV, phone or another computer, serve
 StalkerWeb over HTTPS in one of these ways:
 
-- **A reverse proxy you already run** (Caddy, nginx, Traefik) with a
-  certificate for its domain. Install from that `https://` address.
+- **A reverse proxy or tunnel you already run** (Caddy, nginx, Traefik, a
+  Cloudflare tunnel) with a certificate for its domain. Install from that
+  `https://` address. If it's reachable from the internet, set an
+  [access key](#access-key) first.
 - **Tailscale.** On the StalkerWeb host, `tailscale serve --bg 8983` gives it a
   trusted `https://<machine>.<tailnet>.ts.net` address, reachable from your
   other Tailscale devices. Install from

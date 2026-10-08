@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Tv2, BookOpen, Settings, Heart, RefreshCw, Timer, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Tv2, BookOpen, Settings, Heart, RefreshCw, Timer, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
-import { getStatus, getSettings } from './stalkerApi'
+import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED } from './stalkerApi'
+import LoginPage from './pages/LoginPage'
 import { syncVodProgressFromBackend } from '@/lib/vodProgress'
 import { fetchProfiles, getActiveProfileId, getProfileGenres } from '@/lib/profiles'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -123,7 +124,7 @@ function LogoMark({ collapsed }) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
-function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, collapsed, onToggle, mobileOpen, onCloseMobile }) {
+function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile }) {
   const { reminders, removeReminder } = useReminders()
 
   const navItems = connected && (
@@ -200,6 +201,19 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, collaps
           )}
 
           <NavItem to="/settings" icon={Settings} label="Profiles" collapsed={collapsed} onNavigate={onCloseMobile} />
+          {accessEnabled && (
+            <button
+              onClick={() => accessLogout().finally(() => window.location.reload())}
+              title={collapsed ? 'Sign out' : undefined}
+              className={cn(
+                'flex items-center gap-3 rounded-[var(--radius-md)] text-sm font-medium h-10 text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)]/70 transition-all duration-150',
+                collapsed ? 'justify-center w-10 mx-auto' : 'px-3 w-full'
+              )}
+            >
+              <LogOut size={18} className="shrink-0" />
+              {!collapsed && <span className="truncate">Sign out</span>}
+            </button>
+          )}
         </div>
       </aside>
     </>
@@ -221,6 +235,9 @@ function AppInner() {
   const [lastPingAt, setLastPingAt] = useState(null)
   const [idleInfo, setIdleInfo] = useState(null) // { lastActivityAt, idleTimeoutMs }
   const [version, setVersion] = useState(null)
+  // ACCESS_KEY: whether the server has one, and whether this browser must sign in.
+  const [accessEnabled, setAccessEnabled] = useState(false)
+  const [needsLogin, setNeedsLogin] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sw:sidebarCollapsed') === '1')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -242,8 +259,25 @@ function AppInner() {
     )
   }
 
+  // Any API call answered "sign in first" (the cookie expired or the key changed).
   useEffect(() => {
+    const onRequired = () => setNeedsLogin(true)
+    window.addEventListener(ACCESS_REQUIRED, onRequired)
+    return () => window.removeEventListener(ACCESS_REQUIRED, onRequired)
+  }, [])
+
+  useEffect(() => {
+    let id = null
     async function load() {
+      const access = await getAccessStatus().catch(() => null)
+      if (access?.enabled) {
+        setAccessEnabled(true)
+        if (!access.authenticated) {
+          setNeedsLogin(true)
+          setStatusLoaded(true)
+          return false
+        }
+      }
       try {
         // Profiles must be fetched (and any leftover localStorage profiles
         // migrated in) before anything reads getActiveProfileId() — including
@@ -265,9 +299,9 @@ function AppInner() {
       } finally {
         setStatusLoaded(true)
       }
+      return true
     }
-    load()
-    const id = setInterval(async () => {
+    const poll = async () => {
       try {
         const s = await getStatus()
         setConnected(s.connected)
@@ -278,8 +312,10 @@ function AppInner() {
       } catch {
         setConnected(false)
       }
-    }, 30_000)
-    return () => clearInterval(id)
+    }
+    let cancelled = false
+    load().then(ok => { if (ok && !cancelled) id = setInterval(poll, 30_000) })
+    return () => { cancelled = true; clearInterval(id) }
   }, [])
 
   // Memoize so consumers don't re-render just because AppInner re-rendered
@@ -289,6 +325,8 @@ function AppInner() {
     () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo }),
     [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages]
   )
+
+  if (needsLogin) return <LoginPage />
 
   if (!statusLoaded) {
     return (
@@ -307,6 +345,7 @@ function AppInner() {
           lastPingAt={lastPingAt}
           idleInfo={idleInfo}
           version={version}
+          accessEnabled={accessEnabled}
           collapsed={sidebarCollapsed}
           onToggle={toggleSidebar}
           mobileOpen={mobileNavOpen}

@@ -16,24 +16,35 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.stalkerweb.android.data.repository.ChannelRepository
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.net.URI
 
-private fun parseUrl(raw: String): Pair<String, String> {
+private data class ServerAddress(val host: String, val port: String)
+
+private fun parseUrl(raw: String): ServerAddress {
     // Blank config → empty port (not a forced 3000). A pre-filled port silently
     // breaks reverse-proxied FQDNs like https://iptv.example.com, where the port
     // is implied (443). The Port field's placeholder still hints "3000".
-    if (raw.isBlank()) return "http://" to ""
+    if (raw.isBlank()) return ServerAddress("http://", "")
     return runCatching {
         val uri = URI(raw)
         val scheme = uri.scheme ?: "http"
         val host   = uri.host   ?: ""
         val port   = if (uri.port > 0) uri.port.toString() else ""
-        "$scheme://$host" to port
-    }.getOrElse { raw to "" }
+        ServerAddress("$scheme://$host", port)
+    }.getOrElse { ServerAddress(raw, "") }
+}
+
+private fun connectError(e: Throwable): String = when ((e as? HttpException)?.code()) {
+    401  -> "Wrong or missing access key"
+    403  -> "That key only allows playback — enter the access key itself, not the Xtream password"
+    429  -> "Too many wrong access keys — try again in 15 minutes"
+    else -> "Cannot reach server: ${e.message}"
 }
 
 @Composable
@@ -42,9 +53,11 @@ fun SetupScreen(
     onConnected: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
-    val (initHost, initPort) = remember { parseUrl(repository.getServerUrl() ?: "") }
-    var host    by remember { mutableStateOf(initHost) }
-    var port    by remember { mutableStateOf(initPort) }
+    val initial = remember { parseUrl(repository.getServerUrl() ?: "") }
+    var host    by remember { mutableStateOf(initial.host) }
+    var port    by remember { mutableStateOf(initial.port) }
+    // Only needed when the server sets ACCESS_KEY; sent as a header, never in links.
+    var accessKey by remember { mutableStateOf(repository.getAccessKey() ?: "") }
     var testing by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(null) }
     val scope   = rememberCoroutineScope()
@@ -74,20 +87,21 @@ fun SetupScreen(
             p.isNotEmpty()  -> "$h:$p"
             else            -> h
         }
+        val key = accessKey.trim()
         error   = null
         testing = true
         scope.launch {
             runCatching {
                 // Test first; only persist the URL once it actually connects so a
                 // failed/abandoned edit never leaves the app on a broken server.
-                repository.testServerUrl(fullUrl)
+                repository.testServerUrl(fullUrl, key)
             }.onSuccess {
                 testing = false
-                repository.setServerUrl(fullUrl)
+                repository.setServerUrl(fullUrl, key)
                 onConnected()
             }.onFailure { e ->
                 testing = false
-                error = "Cannot reach server: ${e.message}"
+                error = connectError(e)
             }
         }
     }
@@ -157,6 +171,24 @@ fun SetupScreen(
                 isError = error != null,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Next,
+                ),
+                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            // Only needed when the server sets ACCESS_KEY.
+            OutlinedTextField(
+                value = accessKey,
+                onValueChange = { accessKey = it; error = null },
+                label = { Text("Access key (if set)") },
+                singleLine = true,
+                isError = error != null,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Go,
                 ),
                 keyboardActions = KeyboardActions(onGo = { tryConnect() }),
