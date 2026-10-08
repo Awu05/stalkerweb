@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, us
 import { isLanguageDisabled } from '../lib/languages'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Search, Tv2, AlertCircle, AlertTriangle, RefreshCw, Heart, Clock, X, Image, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, Tv2, AlertCircle, AlertTriangle, RefreshCw, Heart, Clock, X, Check, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -36,6 +36,28 @@ function healthTitle(errors) {
 // grid re-renders on every scroll tick and on health/now-next polls. memo +
 // stable callback props keep all but the genuinely-changed cards from
 // re-rendering.
+// Always-visible edit control at the top of a tile. Editing used to be a hover
+// overlay on the logo, which hid it on touch screens and made clicking the logo
+// edit instead of play; the logo is now part of the tile's play target.
+// A span (not a nested <button>, which is invalid inside the tile's button)
+// with button semantics and keyboard support.
+function EditButton({ channel, onEdit, className, size }) {
+  const edit = (e) => { e.stopPropagation(); e.preventDefault(); onEdit(channel) }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={edit}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') edit(e) }}
+      title="Edit channel"
+      aria-label={`Edit ${channel.name}`}
+      className={cn('absolute z-10 p-1 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-colors', className)}
+    >
+      <Pencil size={size} />
+    </span>
+  )
+}
+
 const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, onToggleFavorite, onClick, onSetLogo, compact, nowNext, health }) {
   const [imgError, setImgError] = useState(false)
   const logo = logoUrl || getProxiedLogoUrl(channel.iconPath) || ''
@@ -57,19 +79,11 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
             <AlertTriangle size={11} fill="currentColor" className="drop-shadow" />
           </span>
         )}
-        <div className="relative group/logo flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
+        {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-1 right-1" size={11} />}
+        <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
           {logo && !imgError
             ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-0.5" />
             : <Tv2 size={18} className="text-[var(--color-muted)]" />}
-          {onSetLogo && (
-            <button
-              onClick={e => { e.stopPropagation(); onSetLogo(channel) }}
-              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover/logo:opacity-100 transition-opacity"
-              aria-label="Set logo"
-            >
-              <Image size={12} className="text-white" />
-            </button>
-          )}
         </div>
         <p className="text-[10px] font-medium text-[var(--color-text)] leading-tight text-center break-words line-clamp-2 w-full">{channel.name}</p>
       </button>
@@ -83,7 +97,7 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
     >
       <button
         onClick={e => { e.stopPropagation(); onToggleFavorite(channel) }}
-        className={cn('absolute top-2 right-2 p-1 rounded transition-colors',
+        className={cn('absolute top-2 right-9 p-1 rounded transition-colors',
           isFavorite ? 'text-rose-500' : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 hover:text-rose-400')}
         aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
       >
@@ -98,19 +112,11 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
           <AlertTriangle size={12} fill="currentColor" />
         </span>
       )}
-      <div className="relative group/logo flex h-16 w-16 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
+      {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-2 right-2" size={14} />}
+      <div className="flex h-16 w-16 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
         {logo && !imgError
           ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-1" />
           : <Tv2 size={28} className="text-[var(--color-muted)]" />}
-        {onSetLogo && (
-          <button
-            onClick={e => { e.stopPropagation(); onSetLogo(channel) }}
-            className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover/logo:opacity-100 transition-opacity"
-            aria-label="Set logo"
-          >
-            <Image size={16} className="text-white" />
-          </button>
-        )}
       </div>
       <div className="w-full text-center">
         <p className="text-xs text-[var(--color-muted)] mb-0.5">Ch {channel.number}</p>
@@ -469,7 +475,11 @@ export default function ChannelsPage() {
       {jumpDigits && <NumberJumpOverlay digits={jumpDigits} />}
 
       {/* Sticky filter bar */}
-      <div className="sticky top-14 z-30 bg-[var(--color-bg)]/90 backdrop-blur-sm border-b border-[var(--color-border)] px-6 py-4 flex flex-col gap-4">
+      {/* Not sticky: the channel list scrolls in its own container below, so the
+          bar never moves. `sticky top-14` (for the mobile header) pushed it 56px
+          down on desktop, over the top of the list — hiding "Recently Watched"
+          and clipping the first row of tiles. */}
+      <div className="shrink-0 relative z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-4 flex flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none" />
@@ -552,7 +562,7 @@ export default function ChannelsPage() {
                   />
                   <button
                     onClick={() => removeRecentChannel(r.uniqueId)}
-                    className="absolute -top-1.5 -right-1.5 z-10 flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-border)] text-[var(--color-muted)] opacity-0 group-hover/recent:opacity-100 hover:!opacity-100 hover:text-[var(--color-text)] transition-opacity"
+                    className="absolute -top-1.5 -left-1.5 z-20 flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-border)] text-[var(--color-muted)] opacity-0 group-hover/recent:opacity-100 hover:!opacity-100 hover:text-[var(--color-text)] transition-opacity"
                     aria-label="Remove from recently watched"
                   >
                     <X size={9} />
