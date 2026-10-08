@@ -12,16 +12,34 @@ const TAG = 'VodManager';
 // timeouts). Cache the resolved URL briefly so player reloads/seeks/recovery
 // don't re-resolve — which previously fell into the nothing_to_play fallback.
 const VOD_LINK_TTL_MS = 5 * 60 * 1000;
+const CATEGORY_TTL_MS = 30 * 60 * 1000;
 
 class VodManager {
   constructor(client) {
     this.client = client;
     this._linkCache = new Map(); // `${videoId}:${series}` → { url, ts }
+    this._categoryCache = new Map(); // type → { value, ts } | { pending }
   }
 
   // ── Categories ─────────────────────────────────────────────────────────────
 
-  async getCategories(type = 'vod') {
+  // Cached: the category list barely changes, yet /api/vod/categories and
+  // /api/channels/languages both ask for it on every request. Concurrent
+  // callers share one in-flight portal request.
+  getCategories(type = 'vod') {
+    const hit = this._categoryCache.get(type);
+    if (hit && (hit.pending || Date.now() - hit.ts < CATEGORY_TTL_MS)) {
+      return hit.pending || Promise.resolve(hit.value);
+    }
+    const pending = this._fetchCategories(type).then(
+      (value) => { this._categoryCache.set(type, { value, ts: Date.now() }); return value; },
+      (e)     => { this._categoryCache.delete(type); throw e; },
+    );
+    this._categoryCache.set(type, { pending });
+    return pending;
+  }
+
+  async _fetchCategories(type) {
     const r = await this.client._stalkerCall({ type, action: 'get_categories' });
     const cats = r?.js;
     if (!Array.isArray(cats)) return [];

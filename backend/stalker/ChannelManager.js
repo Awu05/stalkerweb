@@ -135,13 +135,21 @@ class ChannelManager {
     if (allData?.js?.data) {
       this._parseChannels(allData);
     }
-    log.info(TAG, `channel load [2/3]: seeded ${this._channels.length} channels`);
+    const seededCount = this._channels.length;
+    log.info(TAG, `channel load [2/3]: seeded ${seededCount} channels`);
 
-    // Step 2: get_ordered_list (paginated, concurrent)
+    // Step 2: get_ordered_list (paginated, concurrent) — only when needed.
+    // get_all_channels already returns the full list in one response on most
+    // portals, so paging through get_ordered_list as well re-downloads every
+    // channel a second time, one request per page. On large portals that is
+    // hundreds of requests and trips the portal's rate limit (HTTP 429). Page
+    // 1 is still fetched to learn total_items; the rest only when the seed
+    // came up short (e.g. a portal that leaves some genres out of it).
     const GENRE = '*';
-    const MAX_CONCURRENT     = 10;
-    const RETRY_CONCURRENCY  = 4;   // ease portal contention on the retry passes
+    const MAX_CONCURRENT     = 3;
+    const RETRY_CONCURRENCY  = 2;   // ease portal contention on the retry passes
     const MAX_RETRY_ROUNDS   = 2;
+    const RETRY_BACKOFF_MS   = 3000; // × round — give a rate-limited portal room
 
     let totalItems = 0, pagesOk = 0, pagesFailed = 0, maxPages = 0;
 
@@ -185,13 +193,17 @@ class ChannelManager {
       this._progress.channelCount = this._channels.length;
 
       let failed = [];
-      if (maxPages > 1) {
+      const seedComplete = totalItems > 0 && seededCount >= totalItems;
+      if (seedComplete && maxPages > 1) {
+        log.info(TAG, `channel load [3/3]: get_all_channels already covered all ${totalItems} items — skipping ${maxPages - 1} get_ordered_list page(s)`);
+      } else if (maxPages > 1) {
         const pages = Array.from({ length: maxPages - 1 }, (_, i) => i + 2);
         failed = await fetchPages(pages, MAX_CONCURRENT, '');
 
         // Retry passes for timed-out pages at lower concurrency so a transiently
         // overloaded portal doesn't silently cost us thousands of channels.
         for (let round = 1; round <= MAX_RETRY_ROUNDS && failed.length > 0; round++) {
+          await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * round));
           log.info(TAG, `channel load [3/3]: retry ${round}/${MAX_RETRY_ROUNDS} — re-fetching ${failed.length} failed page(s) at concurrency ${RETRY_CONCURRENCY}`);
           failed = await fetchPages(failed, RETRY_CONCURRENCY, ` retry${round}`);
         }

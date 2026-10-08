@@ -105,3 +105,40 @@ describe('ChannelManager uniqueId derivation', () => {
     expect(ch.uniqueId).toMatch(/^\d+$/)
   })
 })
+
+describe('ChannelManager load request volume', () => {
+  // A portal with 5 pages of 2 channels each. get_all_channels returns either
+  // the whole list or only part of it; get_ordered_list serves pages.
+  const ALL = Array.from({ length: 10 }, (_, i) => channel(`Ch${i}`, i + 1))
+  const fakeClient = (seed) => {
+    const calls = { ordered: [] }
+    return {
+      calls,
+      getBasePath: () => 'http://portal.example.com/c/',
+      itvGetGenres: async () => ({ js: [] }),
+      itvGetAllChannels: async () => ({ js: { data: seed } }),
+      itvGetOrderedList: async (_genre, p) => {
+        calls.ordered.push(p)
+        return { js: { total_items: 10, max_page_items: 2, data: ALL.slice((p - 1) * 2, p * 2) } }
+      },
+    }
+  }
+
+  it('skips get_ordered_list paging when get_all_channels returned everything', async () => {
+    const client = fakeClient(ALL)
+    const cm = new ChannelManager(client)
+    await cm.loadChannels()
+
+    expect(client.calls.ordered).toEqual([1])
+    expect(cm.getChannels()).toHaveLength(10)
+  })
+
+  it('still pages when get_all_channels came up short', async () => {
+    const client = fakeClient(ALL.slice(0, 3))
+    const cm = new ChannelManager(client)
+    await cm.loadChannels()
+
+    expect(client.calls.ordered.sort()).toEqual([1, 2, 3, 4, 5])
+    expect(cm.getChannels()).toHaveLength(10)
+  })
+})
