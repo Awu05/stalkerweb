@@ -409,7 +409,10 @@ module.exports = function proxyModule(appState) {
       // Sub-playlist token expired — record + evict so the next zap re-tokenizes.
       if (channelId) appState.channelManager?.recordStreamError(channelId);
       setCors();
-      return res.status(502).send(`Portal returned HTTP ${response.status}`);
+      // 410, not 502: players retry 5xx with backoff (hls.js ~30s across its
+      // retries), but an expired token never comes back. A 4xx fails fast so
+      // the player reconnects through /proxy/stream for a fresh create_link.
+      return res.status(410).send(`Portal returned HTTP ${response.status} — stream token expired`);
     }
     if (response.status >= 400) {
       if (channelId) appState.channelManager?.recordStreamError(channelId);
@@ -733,7 +736,8 @@ module.exports = function proxyModule(appState) {
       log.warn(TAG, `portal returned ${response.status} on segment — stream may have expired`);
       // Token expired mid-stream — record + evict so the next play re-tokenizes.
       if (ch) appState.channelManager?.recordStreamError(ch);
-      return res.status(502).send(`Portal returned HTTP ${response.status}`);
+      // 410 so the player fails fast instead of retrying a dead token (see servePlaylist).
+      return res.status(410).send(`Portal returned HTTP ${response.status} — stream token expired`);
     }
     if (response.status >= 400) {
       response.data.destroy();

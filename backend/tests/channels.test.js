@@ -142,3 +142,27 @@ describe('ChannelManager load request volume', () => {
     expect(cm.getChannels()).toHaveLength(10)
   })
 })
+
+describe('ChannelManager stream link refresh after expiry', () => {
+  it('calls create_link again once the stream reported an expired token', async () => {
+    let n = 0
+    const client = {
+      getBasePath: () => 'http://portal.example.com/c/',
+      itvCreateLink: async () => ({ js: { cmd: `ffmpeg http://cdn.example.com/s/index.m3u8?token=t${++n}` } }),
+    }
+    const cm = new ChannelManager(client)
+    cm._parseChannels(page([{ ...channel('News', 1), id: '1896', cmd: 'ffrt http://localhost/ch/1896' }]))
+    const ch = cm.getChannel('1896')
+
+    const first = await cm.resolveStream(ch)
+    // Within the 15s bridge window the same link is reused…
+    expect((await cm.resolveStream(ch)).url).toBe(first.url)
+
+    // …but a 403 from the CDN (recorded by the proxy) must force a fresh token.
+    cm.recordStreamError('1896')
+    const second = await cm.resolveStream(ch)
+
+    expect(first.url).toContain('token=t1')
+    expect(second.url).toContain('token=t2')
+  })
+})

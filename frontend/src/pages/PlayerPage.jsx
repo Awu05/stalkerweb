@@ -635,6 +635,18 @@ export default function PlayerPage() {
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return
 
+          // The server answered with an HTTP error — almost always the CDN
+          // rejecting an expired stream token (proxied back as 502). Retrying
+          // the same URL can't help, and it's a real HLS stream so the mpegts.js
+          // fallback below would loop. Reconnect: re-attaching hits
+          // /proxy/stream again, which calls create_link for a fresh token.
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response?.code >= 400) {
+            hls.destroy()
+            hlsRef.current = null
+            recoverStream()
+            return
+          }
+
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !networkErrorRetriedRef.current) {
             // A transient network blip (manifest/segment timeout) on a real HLS
             // stream — retry loading before assuming anything more drastic.
