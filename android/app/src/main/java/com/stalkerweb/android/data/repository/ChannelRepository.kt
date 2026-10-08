@@ -56,7 +56,7 @@ class ChannelRepository(private val prefs: AppPrefs) {
     /** Called once on app start — restores a previously saved URL. */
     fun initFromPrefs() {
         val url = prefs.serverUrl ?: return
-        api = runCatching { StalkerApi.create(url) }.getOrElse {
+        api = runCatching { StalkerApi.create(url, prefs.accessKey) }.getOrElse {
             // Stored URL is somehow invalid (e.g. data corruption). Clear it so
             // the user lands on the Setup screen rather than crashing on every launch.
             prefs.serverUrl = null
@@ -64,23 +64,41 @@ class ChannelRepository(private val prefs: AppPrefs) {
         }
     }
 
-    /** Persists the URL and rebuilds the Retrofit client. */
-    fun setServerUrl(url: String) {
+    /** Persists the URL and access key, and rebuilds the Retrofit client. */
+    fun setServerUrl(url: String, accessKey: String? = null) {
         val normalized = url.trimEnd('/')
+        val key = accessKey?.trim()?.ifEmpty { null }
         // Drop the cached channel/logo snapshot when pointing at a different
         // server so the old server's channels don't flash before the refresh.
         if (normalized != prefs.serverUrl) prefs.clearChannelCache()
+        if (normalized != prefs.serverUrl || key != prefs.accessKey) prefs.shareToken = null
         prefs.serverUrl = normalized
-        api = runCatching { StalkerApi.create(normalized) }.getOrNull()
+        prefs.accessKey = key
+        api = runCatching { StalkerApi.create(normalized, key) }.getOrNull()
         invalidateDisabledGenres()
     }
 
     fun getServerUrl(): String? = prefs.serverUrl
 
-    fun defaultStreamUrl(channelId: String): String {
+    fun getAccessKey(): String? = prefs.accessKey
+
+    /**
+     * Base for links the player, Coil or a cast device open: they can't send
+     * the access key header, so with a key set the links carry the server's
+     * playback-only token (/k/<token>) instead.
+     */
+    private fun mediaBase(): String {
         val base = prefs.serverUrl?.trimEnd('/') ?: ""
-        return "$base/proxy/stream/$channelId"
+        return prefs.shareToken?.let { "$base/k/$it" } ?: base
     }
+
+    /** Fetches the playback token when a key is set and it isn't known yet. */
+    private suspend fun ensureShareToken() {
+        if (prefs.accessKey.isNullOrBlank() || prefs.shareToken != null) return
+        runCatching { requireApi().getSettings() }.getOrNull()?.let { prefs.shareToken = it.accessShareToken }
+    }
+
+    fun defaultStreamUrl(channelId: String): String = "${mediaBase()}/proxy/stream/$channelId"
 
     /**
      * Resolves a channel to a playable URL + engine type by asking the backend
@@ -90,7 +108,8 @@ class ChannelRepository(private val prefs: AppPrefs) {
      * assuming HLS, so playback still attempts rather than dead-ending.
      */
     suspend fun resolveStream(channelId: String): StreamInfo {
-        val base = prefs.serverUrl?.trimEnd('/') ?: ""
+        ensureShareToken()
+        val base = mediaBase()
         prefs.getStreamOverride(channelId)?.let { return StreamInfo(it, inferStreamType(it)) }
         return runCatching {
             val resp = requireApi().getStream(channelId)
@@ -123,8 +142,8 @@ class ChannelRepository(private val prefs: AppPrefs) {
     /** Tests a candidate server URL without persisting it or touching the live
      *  client — so an abandoned/failed edit never leaves the app pointed at a
      *  broken server. Commit with [setServerUrl] only after this succeeds. */
-    suspend fun testServerUrl(url: String): StatusResponse =
-        StalkerApi.create(url.trimEnd('/')).getStatus()
+    suspend fun testServerUrl(url: String, accessKey: String? = null): StatusResponse =
+        StalkerApi.create(url.trimEnd('/'), accessKey?.trim()?.ifEmpty { null }).getStatus()
 
     // ── Portal management ─────────────────────────────────────────────────────
 
@@ -246,7 +265,8 @@ class ChannelRepository(private val prefs: AppPrefs) {
     // needs an absolute URL. Prefix them with the server base.
     suspend fun getLogoMap(): Map<String, String> =
         runCatching {
-            val base = prefs.serverUrl?.trimEnd('/') ?: ""
+            ensureShareToken()
+            val base = mediaBase()
             requireApi().getLogoMap().mapValues { (_, url) ->
                 if (url.startsWith("http", ignoreCase = true)) url else "$base$url"
             }.also { prefs.cacheLogoMap(it) }
@@ -269,7 +289,9 @@ class ChannelRepository(private val prefs: AppPrefs) {
 
     /** Whether the VOD section should be shown (controlled from the web Profiles page). */
     suspend fun isVodEnabled(): Boolean =
-        runCatching { requireApi().getSettings().vodEnabled }.getOrDefault(false)
+        runCatching {
+            requireApi().getSettings().also { if (!prefs.accessKey.isNullOrBlank()) prefs.shareToken = it.accessShareToken }.vodEnabled
+        }.getOrDefault(false)
 
     // ── VOD ─────────────────────────────────────────────────────────────────────
 
@@ -277,6 +299,7 @@ class ChannelRepository(private val prefs: AppPrefs) {
         runCatching { requireApi().getVodCategories(type).categories }.getOrDefault(emptyList())
 
     suspend fun getVodItems(type: String, category: String, page: Int, search: String): VodItemsResponse {
+        ensureShareToken()
         val resp = requireApi().getVodItems(type, category, page, search)
         return resp.copy(items = resp.items.map { it.copy(screenshotUrl = absoluteUrl(it.screenshotUrl)) })
     }
@@ -299,7 +322,7 @@ class ChannelRepository(private val prefs: AppPrefs) {
     private fun absoluteUrl(url: String?): String? = when {
         url.isNullOrBlank()                      -> url
         url.startsWith("http", ignoreCase = true) -> url
-        else                                     -> "${prefs.serverUrl?.trimEnd('/') ?: ""}$url"
+        else                                     -> "${mediaBase()}$url"
     }
 
     /** Resolves a VOD stream and returns the absolute, playable proxy URL. */
@@ -310,8 +333,9 @@ class ChannelRepository(private val prefs: AppPrefs) {
         seasonId: String = "",
         episodeId: String = "",
     ): String {
+        ensureShareToken()
         val resp = requireApi().getVodStream(videoId, cmd, series, seasonId, episodeId)
-        val base = prefs.serverUrl?.trimEnd('/') ?: ""
+        val base = mediaBase()
         return if (resp.streamUrl.startsWith("http", ignoreCase = true)) resp.streamUrl
                else "$base${resp.streamUrl}"
     }

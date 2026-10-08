@@ -112,8 +112,9 @@ Use at least 12 characters. With it set:
 
 - **Web UI:** asks for the key once per browser and stays signed in for a
   year (Sign out is at the bottom of the sidebar).
-- **Android app:** enter the key in the app's **Access key** field, next to the
-  server address.
+- **Android app:** enter the key in the app's **Access key** field, under the
+  server address. The app sends it in a header; the stream and logo links it
+  builds carry the playback token instead.
 - **Playlists, guide, Stremio, Xtream:** the links on the Profiles page include
   a token, such as `https://your-host/k/<token>/api/m3u`. Xtream players use
   the server address with any username, and the token as the password (shown on
@@ -121,7 +122,10 @@ Use at least 12 characters. With it set:
   with a link can watch, but can't open the settings or change the portal.
 
 Changing `ACCESS_KEY` signs every browser out and stops every old link. After
-20 wrong keys in 15 minutes, an address is locked out for 15 minutes.
+20 wrong keys from one address in 15 minutes (or 200 from everywhere), signing
+in with the key is refused for 15 minutes; links and signed-in browsers keep
+working. With an access key, the log monitor (`/api/logs`) needs the key too,
+unless `LOG_MONITOR_TOKEN` is set.
 
 ## Security
 

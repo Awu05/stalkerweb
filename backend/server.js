@@ -31,10 +31,12 @@ const app = express();
 // blocks as mixed content when the public URL is served over HTTPS.
 app.set('trust proxy', 1);
 
-// Optional access key (ACCESS_KEY). First, so a /k/<token> link prefix is
-// checked and taken off before anything logs or routes the URL.
-const access = require('./lib/access').createAccess({ key: config.accessKey });
-app.use(access.stripPrefix);
+// Optional access key (ACCESS_KEY) — see lib/access.js. Its middleware runs
+// after the request log (so refused requests are logged) and before any route.
+const access = require('./lib/access').createAccess({
+  key: config.accessKey,
+  logToken: !!process.env.LOG_MONITOR_TOKEN,
+});
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(helmet({
@@ -48,8 +50,6 @@ app.use(helmet({
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use('/api/access', access.routes());
-app.use(access.gate);
 
 // ── Shared application state (single active session) ──────────────────────
 const appState = {
@@ -129,12 +129,16 @@ app.use((req, res, next) => {
   // from req.url before calling the route handler, so reading it inside the
   // 'finish' callback would give "/hls?…" instead of "/proxy/hls?…", breaking
   // the httpLogLevel quiet-path check and causing HLS playlist poll spam at INFO.
-  // Xtream players send the access token as their password; keep it out of logs.
-  const url = req.url
+  // Keep access tokens out of the log: the /k/<token> link prefix, and the
+  // password Xtream players send. The level is judged on the path without
+  // the prefix, as it is routed.
+  const routed = req.url.replace(/^\/k\/[^/?#]+/i, '') || '/';
+  const hide = (u) => u
     .replace(/([?&]password=)[^&]*/i, '$1***')
-    .replace(/^\/(live|movie|series)\/([^/]+)\/[^/]+\//, '/$1/$2/***/');
+    .replace(/^\/(live|movie|series)\/([^/]+)\/[^/]+(?=\/|$)/i, '/$1/$2/***');
+  const url = (routed === req.url ? '' : '/k/***') + hide(routed);
   res.on('finish', () => {
-    const path  = url.split('?')[0];
+    const path  = routed.split('?')[0];
     const level = httpLogLevel(path, res.statusCode);
     if (!level) return;
     const ms = Date.now() - start;
@@ -142,6 +146,10 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+app.use(access.stripPrefix);
+app.use('/api/access', access.routes());
+app.use(access.gate);
 
 // Timeout comes from IDLE_TIMEOUT_MINUTES, overridden by a value saved on the
 // Settings page (see routes/settings.js). 0 = never auto-disconnect.

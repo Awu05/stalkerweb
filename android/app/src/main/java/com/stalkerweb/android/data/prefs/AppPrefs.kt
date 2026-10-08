@@ -19,6 +19,17 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_SERVER_URL, null)
         set(value) = prefs.edit().putString(KEY_SERVER_URL, value).apply()
 
+    // The server's ACCESS_KEY, if it has one — sent as an Authorization header.
+    var accessKey: String?
+        get() = prefs.getString(KEY_ACCESS_KEY, null)
+        set(value) = prefs.edit().putString(KEY_ACCESS_KEY, value).apply()
+
+    // The server's playback-only token, put in stream and image links (players
+    // and cast devices can't send the header). Fetched from the server.
+    var shareToken: String?
+        get() = prefs.getString(KEY_SHARE_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_SHARE_TOKEN, value).apply()
+
     // ── Watch history ─────────────────────────────────────────────────────────
 
     fun pushWatchedChannel(uniqueId: String, name: String, logoUrl: String?) {
@@ -179,6 +190,8 @@ class AppPrefs(context: Context) {
 
     companion object {
         private const val KEY_SERVER_URL      = "server_url"
+        private const val KEY_ACCESS_KEY      = "access_key"
+        private const val KEY_SHARE_TOKEN     = "share_token"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"

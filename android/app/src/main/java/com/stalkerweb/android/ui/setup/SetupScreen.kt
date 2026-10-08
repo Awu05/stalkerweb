@@ -20,30 +20,24 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.stalkerweb.android.data.repository.ChannelRepository
 import com.stalkerweb.android.ui.utils.rememberIsTV
-import android.net.Uri
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.net.URI
 
-private data class ServerAddress(val host: String, val port: String, val accessKey: String)
+private data class ServerAddress(val host: String, val port: String)
 
-// The saved URL is scheme://host[:port][/k/<access key>] — with an ACCESS_KEY
-// on the server, every request goes under /k/<key>, which also covers the
-// stream and logo links the app builds from this base.
 private fun parseUrl(raw: String): ServerAddress {
     // Blank config → empty port (not a forced 3000). A pre-filled port silently
     // breaks reverse-proxied FQDNs like https://iptv.example.com, where the port
     // is implied (443). The Port field's placeholder still hints "3000".
-    if (raw.isBlank()) return ServerAddress("http://", "", "")
+    if (raw.isBlank()) return ServerAddress("http://", "")
     return runCatching {
         val uri = URI(raw)
         val scheme = uri.scheme ?: "http"
         val host   = uri.host   ?: ""
         val port   = if (uri.port > 0) uri.port.toString() else ""
-        val path   = uri.rawPath ?: ""
-        val key    = if (path.startsWith("/k/")) Uri.decode(path.removePrefix("/k/").trimEnd('/')) else ""
-        ServerAddress("$scheme://$host", port, key)
-    }.getOrElse { ServerAddress(raw, "", "") }
+        ServerAddress("$scheme://$host", port)
+    }.getOrElse { ServerAddress(raw, "") }
 }
 
 private fun connectError(e: Throwable): String = when ((e as? HttpException)?.code()) {
@@ -62,7 +56,8 @@ fun SetupScreen(
     val initial = remember { parseUrl(repository.getServerUrl() ?: "") }
     var host    by remember { mutableStateOf(initial.host) }
     var port    by remember { mutableStateOf(initial.port) }
-    var accessKey by remember { mutableStateOf(initial.accessKey) }
+    // Only needed when the server sets ACCESS_KEY; sent as a header, never in links.
+    var accessKey by remember { mutableStateOf(repository.getAccessKey() ?: "") }
     var testing by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(null) }
     val scope   = rememberCoroutineScope()
@@ -87,23 +82,22 @@ fun SetupScreen(
         // blank port lets the scheme default apply (80/443) — needed for reverse-
         // proxied FQDNs like https://iptv.example.com with no port.
         val hasExplicitPort = runCatching { URI(h).port > 0 }.getOrDefault(false)
-        val serverUrl = when {
+        val fullUrl = when {
             hasExplicitPort -> h
             p.isNotEmpty()  -> "$h:$p"
             else            -> h
         }
         val key = accessKey.trim()
-        val fullUrl = if (key.isEmpty()) serverUrl else "$serverUrl/k/${Uri.encode(key)}"
         error   = null
         testing = true
         scope.launch {
             runCatching {
                 // Test first; only persist the URL once it actually connects so a
                 // failed/abandoned edit never leaves the app on a broken server.
-                repository.testServerUrl(fullUrl)
+                repository.testServerUrl(fullUrl, key)
             }.onSuccess {
                 testing = false
-                repository.setServerUrl(fullUrl)
+                repository.setServerUrl(fullUrl, key)
                 onConnected()
             }.onFailure { e ->
                 testing = false
