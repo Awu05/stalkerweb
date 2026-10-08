@@ -9,14 +9,30 @@ import { getChannelEpg, getProxiedLogoUrl } from '../stalkerApi'
 import { useReminders } from '@/lib/useReminders'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CHANNEL_COL_WIDTH = 180   // px — fixed left column
-const HOUR_WIDTH = 120          // px — 1 hour = 120px → 30min = 60px
+const CHANNEL_COL_WIDTH = 220   // px — sticky left column
+const CHANNEL_COL_WIDTH_SM = 132 // px — on phones
+const HOUR_WIDTH = 280          // px — 1 hour = 280px → 30min = 140px
 const SLOT_MINS = 30            // time column slot width in minutes
 const PAST_HOURS = 2            // hours before now to show
 const FUTURE_HOURS = 12         // hours after now to show
 const TOTAL_HOURS = PAST_HOURS + FUTURE_HOURS  // 14h window
 const BATCH_SIZE = 50           // first N channels to eagerly load EPG for
-const ROW_HEIGHT = 56           // px
+const ROW_HEIGHT = 64           // px
+const HEADER_HEIGHT = 36        // px
+const MIN_TEXT_WIDTH = 28       // px — narrower blocks show no text, only a tooltip
+
+const SMALL_SCREEN = '(max-width: 639px)'
+function useChannelColWidth() {
+  const [small, setSmall] = useState(() => typeof window !== 'undefined' && window.matchMedia?.(SMALL_SCREEN).matches)
+  useEffect(() => {
+    const mq = window.matchMedia?.(SMALL_SCREEN)
+    if (!mq) return
+    const onChange = e => setSmall(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return small ? CHANNEL_COL_WIDTH_SM : CHANNEL_COL_WIDTH
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function pxFromTimestamp(ts, gridStartMs) {
@@ -50,7 +66,11 @@ function clampWidth(startPx, endPx, gridWidth) {
 }
 
 // ── Programme block ───────────────────────────────────────────────────────────
-function ProgrammeBlock({ prog, gridStartMs, gridWidthPx, onSelect }) {
+// The title sticks to the channel column's edge while the block scrolls under
+// it, so a show that started off-screen still says what it is. That needs the
+// block to clip with overflow:clip — overflow:hidden would make the block the
+// sticky title's scroll container and pin it in place.
+function ProgrammeBlock({ prog, gridStartMs, gridWidthPx, stickyLeft, onSelect }) {
   const startPx = pxFromTimestamp(prog.startTime, gridStartMs)
   const endPx   = pxFromTimestamp(prog.endTime,   gridStartMs)
   const left     = Math.max(0, startPx)
@@ -68,22 +88,30 @@ function ProgrammeBlock({ prog, gridStartMs, gridWidthPx, onSelect }) {
       tabIndex={0}
       onClick={() => onSelect(prog)}
       onKeyDown={e => e.key === 'Enter' && onSelect(prog)}
-      title={prog.title}
-      style={{ left, width: width - 2, height: ROW_HEIGHT - 2 }}
+      title={`${prog.title} · ${formatTimeRange(prog.startTime, prog.endTime)}`}
+      style={{ left, width: width - 2 }}
       className={cn(
-        'absolute top-0 flex items-center overflow-hidden cursor-pointer select-none transition-opacity',
-        'rounded-[var(--radius-sm)] border px-2 text-xs',
+        'absolute top-1 bottom-1 flex items-center overflow-clip cursor-pointer select-none transition-opacity',
+        'rounded-[var(--radius-sm)] border',
+        width >= MIN_TEXT_WIDTH ? 'px-2' : 'px-0',
         live  && 'bg-[var(--color-primary)]/20 border-[var(--color-primary)]/60 border-l-2 border-l-[var(--color-primary)]',
         past  && !live && 'bg-[var(--color-surface)] border-[var(--color-border)] opacity-50',
         future && !live && 'bg-[var(--color-surface-2)] border-[var(--color-border)] hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-2)]'
       )}
     >
-      <span className={cn(
-        'truncate font-medium leading-tight',
-        live ? 'text-[var(--color-primary-light)]' : 'text-[var(--color-text)]'
-      )}>
-        {prog.title}
-      </span>
+      {width >= MIN_TEXT_WIDTH && (
+        <div className="sticky min-w-0 max-w-full" style={{ left: stickyLeft }}>
+          <p className={cn(
+            'text-[13px] font-medium leading-snug line-clamp-2',
+            live ? 'text-[var(--color-primary-light)]' : 'text-[var(--color-text)]'
+          )}>
+            {prog.title}
+          </p>
+          <p className="text-[11px] text-[var(--color-muted)] whitespace-nowrap truncate">
+            {formatTimeRange(prog.startTime, prog.endTime)}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -251,6 +279,7 @@ export default function EpgGridPage() {
   // IntersectionObserver for rows beyond the first batch
   const rowObserver = useRef(null)
   useEffect(() => {
+    rowObserver.current?.disconnect()
     rowObserver.current = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
@@ -302,29 +331,26 @@ export default function EpgGridPage() {
     return () => clearInterval(id)
   }, [gridStartMs])
 
-  // ── Scroll refs ───────────────────────────────────────────────────────────
-  const headerScrollRef = useRef(null)
-  const bodyScrollRef   = useRef(null)
+  // ── Scrolling ─────────────────────────────────────────────────────────────
+  // One scroll container holds the whole grid. The time header sticks to the
+  // top and the channel column to the left, so a channel and its programmes
+  // can never drift apart (they did as two separately scrolling panes).
+  const colWidth = useChannelColWidth()
+  const scrollRef = useRef(null)
 
-  // Sync horizontal scroll between header and body
-  const handleBodyScroll = useCallback(() => {
-    if (headerScrollRef.current && bodyScrollRef.current) {
-      headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft
-    }
-  }, [])
-
-  // Auto-scroll to "now" minus 30px on mount
+  // Start scrolled to just before "now" — once, not on every minute tick.
+  const scrolledToNow = useRef(false)
   useEffect(() => {
-    if (!bodyScrollRef.current) return
-    const targetScroll = Math.max(0, nowPx - 80)
-    bodyScrollRef.current.scrollLeft = targetScroll
-    if (headerScrollRef.current) headerScrollRef.current.scrollLeft = targetScroll
-  }, [nowPx])
+    const el = scrollRef.current
+    if (!el || scrolledToNow.current) return
+    scrolledToNow.current = true
+    el.scrollLeft = Math.max(0, nowPx - 80)
+  }, [loadingChannels, nowPx])
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (loadingChannels) {
     return (
-      <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
+      <div className="flex h-[calc(100dvh-3.5rem)] lg:h-dvh items-center justify-center">
         <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
       </div>
     )
@@ -332,147 +358,127 @@ export default function EpgGridPage() {
 
   if (channelError) {
     return (
-      <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
+      <div className="flex h-[calc(100dvh-3.5rem)] lg:h-dvh items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
         <AlertCircle size={16} /> {channelError}
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden bg-[var(--color-bg)]">
+    <div
+      ref={scrollRef}
+      className="h-[calc(100dvh-3.5rem)] lg:h-dvh overflow-auto overscroll-contain bg-[var(--color-bg)]"
+    >
+      <div className="relative" style={{ width: colWidth + gridWidthPx }}>
 
-      {/* ── Time header row ─────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] z-20">
-        {/* Corner cell */}
+        {/* ── Time header row (sticks to the top) ──────────────────────────── */}
         <div
-          className="shrink-0 flex items-center px-3 border-r border-[var(--color-border)]"
-          style={{ width: CHANNEL_COL_WIDTH }}
+          className="sticky top-0 z-30 flex border-b border-[var(--color-border)] bg-[var(--color-surface)]"
+          style={{ height: HEADER_HEIGHT }}
         >
-          <span className="text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Channels</span>
-        </div>
+          {/* Corner cell — sticks to both edges */}
+          <div
+            className="sticky left-0 z-10 shrink-0 flex items-center px-3 border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+            style={{ width: colWidth }}
+          >
+            <span className="text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Channels</span>
+          </div>
 
-        {/* Scrollable time slots — synced with body scroll */}
-        <div
-          ref={headerScrollRef}
-          className="flex-1 overflow-hidden relative"
-          style={{ overflowX: 'hidden' }}
-        >
-          <div className="relative" style={{ width: gridWidthPx }}>
-            {/* Slot labels */}
-            <div className="flex">
-              {timeSlots.map(slotMs => (
-                <div
-                  key={slotMs}
-                  className="shrink-0 flex items-center border-r border-[var(--color-border)] px-2 py-1.5"
-                  style={{ width: SLOT_MINS * (HOUR_WIDTH / 60) }}
-                >
-                  <span className="text-[11px] text-[var(--color-muted)]">{formatTime(slotMs)}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Current time indicator on header */}
+          <div className="relative flex shrink-0" style={{ width: gridWidthPx }}>
+            {timeSlots.map(slotMs => (
+              <div
+                key={slotMs}
+                className="shrink-0 flex items-center border-r border-[var(--color-border)] px-2"
+                style={{ width: SLOT_MINS * (HOUR_WIDTH / 60) }}
+              >
+                <span className="text-xs font-medium text-[var(--color-muted)] whitespace-nowrap">{formatTime(slotMs)}</span>
+              </div>
+            ))}
             {nowPx >= 0 && nowPx <= gridWidthPx && (
               <div
-                className="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none z-10"
+                className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none"
                 style={{ left: nowPx }}
               />
             )}
           </div>
         </div>
-      </div>
 
-      {/* ── Channel rows ───────────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Fixed left channel column */}
-        <div
-          className="shrink-0 overflow-y-auto overflow-x-hidden border-r border-[var(--color-border)] bg-[var(--color-surface)] z-10"
-          style={{ width: CHANNEL_COL_WIDTH }}
-          id="channel-col"
-        >
-          {channels.map(ch => {
-            const logoUrl = logoMap[String(ch.uniqueId)] || getProxiedLogoUrl(ch.iconPath)
-            return (
+        {/* Current time line across all rows, under the sticky channel column */}
+        {nowPx >= 0 && nowPx <= gridWidthPx && (
+          <div
+            className="absolute w-px bg-red-500/80 z-10 pointer-events-none"
+            style={{ left: colWidth + nowPx, top: HEADER_HEIGHT, height: channels.length * ROW_HEIGHT }}
+          />
+        )}
+
+        {/* ── Channel rows ─────────────────────────────────────────────────── */}
+        {channels.map((ch, idx) => {
+          const epgData = epgMap[ch.uniqueId]
+          const loading = loadingEpg[ch.uniqueId] === true
+          const events  = epgData?.events || []
+          const logoUrl = logoMap[String(ch.uniqueId)] || getProxiedLogoUrl(ch.iconPath)
+
+          return (
+            <div key={ch.uniqueId} className="flex border-b border-[var(--color-border)]" style={{ height: ROW_HEIGHT }}>
+              {/* Channel cell — sticks to the left edge */}
               <div
-                key={ch.uniqueId}
-                className="flex items-center gap-2 px-3 border-b border-[var(--color-border)] overflow-hidden"
-                style={{ height: ROW_HEIGHT }}
+                className="sticky left-0 z-20 shrink-0 flex items-center gap-2.5 px-3 border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+                style={{ width: colWidth }}
+                title={ch.name}
               >
-                <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
+                <div className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
                   {logoUrl
-                    ? <img src={logoUrl} alt={ch.name} loading="lazy" className="h-full w-full object-contain p-0.5" onError={e => { e.target.style.display = 'none' }} />
+                    ? <img src={logoUrl} alt="" loading="lazy" className="h-full w-full object-contain p-0.5" onError={e => { e.target.style.display = 'none' }} />
                     : <Tv2 size={15} className="text-[var(--color-muted)]" />
                   }
                 </div>
-                <span className="text-xs font-medium text-[var(--color-text)] truncate leading-tight">{ch.name}</span>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Scrollable programme grid */}
-        <div
-          ref={bodyScrollRef}
-          className="flex-1 overflow-auto"
-          onScroll={handleBodyScroll}
-        >
-          <div className="relative" style={{ width: gridWidthPx }}>
-            {/* Current time vertical line across all rows */}
-            {nowPx >= 0 && nowPx <= gridWidthPx && (
-              <div
-                className="absolute top-0 bottom-0 w-px bg-red-500/80 z-10 pointer-events-none"
-                style={{ left: nowPx, height: channels.length * ROW_HEIGHT }}
-              />
-            )}
-
-            {/* Programme rows */}
-            {channels.map((ch, idx) => {
-              const epgData = epgMap[ch.uniqueId]
-              const loading = loadingEpg[ch.uniqueId] === true
-              const events  = epgData?.events || []
-
-              return (
-                <div
-                  key={ch.uniqueId}
-                  data-channel-id={ch.uniqueId}
-                  ref={el => registerRow(el, idx)}
-                  className="relative border-b border-[var(--color-border)] bg-[var(--color-bg)]"
-                  style={{ height: ROW_HEIGHT, width: gridWidthPx }}
-                >
-                  {/* Slot grid lines */}
-                  {timeSlots.map(slotMs => (
-                    <div
-                      key={slotMs}
-                      className="absolute top-0 bottom-0 border-r border-[var(--color-border)] opacity-30"
-                      style={{ left: (slotMs - gridStartMs) / (60 * 60 * 1000) * HOUR_WIDTH }}
-                    />
-                  ))}
-
-                  {loading ? (
-                    <div className="flex items-center h-full px-4 gap-2">
-                      <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse flex-1 max-w-xs" />
-                      <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse w-24" />
-                    </div>
-                  ) : events.length === 0 && epgData ? (
-                    <div className="flex items-center h-full px-4">
-                      <span className="text-xs text-[var(--color-muted)] opacity-30">No EPG data</span>
-                    </div>
-                  ) : (
-                    events.map((prog, i) => (
-                      <ProgrammeBlock
-                        key={i}
-                        prog={prog}
-                        gridStartMs={gridStartMs}
-                        gridWidthPx={gridWidthPx}
-                        onSelect={p => handleSelectProg(p, ch)}
-                      />
-                    ))
-                  )}
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-[var(--color-text)] leading-snug line-clamp-2 break-words">{ch.name}</p>
+                  {ch.number > 0 && <p className="text-[11px] text-[var(--color-muted)] leading-tight">{ch.number}</p>}
                 </div>
-              )
-            })}
-          </div>
-        </div>
+              </div>
+
+              {/* Programme track */}
+              <div
+                data-channel-id={ch.uniqueId}
+                ref={el => registerRow(el, idx)}
+                className="relative shrink-0 bg-[var(--color-bg)]"
+                style={{ width: gridWidthPx }}
+              >
+                {/* Slot grid lines */}
+                {timeSlots.map(slotMs => (
+                  <div
+                    key={slotMs}
+                    className="absolute top-0 bottom-0 border-r border-[var(--color-border)] opacity-30"
+                    style={{ left: (slotMs - gridStartMs) / (60 * 60 * 1000) * HOUR_WIDTH }}
+                  />
+                ))}
+
+                {loading ? (
+                  <div className="sticky flex items-center h-full gap-2 w-[min(28rem,60vw)]" style={{ left: colWidth + 16 }}>
+                    <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse flex-1 max-w-xs" />
+                    <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse w-24" />
+                  </div>
+                ) : events.length === 0 && epgData ? (
+                  <div className="sticky flex items-center h-full w-fit" style={{ left: colWidth + 16 }}>
+                    <span className="text-xs text-[var(--color-muted)] opacity-50">No guide data</span>
+                  </div>
+                ) : (
+                  events.map((prog, i) => (
+                    <ProgrammeBlock
+                      key={i}
+                      prog={prog}
+                      gridStartMs={gridStartMs}
+                      gridWidthPx={gridWidthPx}
+                      stickyLeft={colWidth + 8}
+                      onSelect={p => handleSelectProg(p, ch)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* ── Programme popup ─────────────────────────────────────────────────── */}
