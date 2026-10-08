@@ -155,7 +155,7 @@ describe('ChannelManager stream link refresh after expiry', () => {
     const ch = cm.getChannel('1896')
 
     const first = await cm.resolveStream(ch)
-    // Within the 15s bridge window the same link is reused…
+    // Within the reuse window the same link is reused…
     expect((await cm.resolveStream(ch)).url).toBe(first.url)
 
     // …but a 403 from the CDN (recorded by the proxy) must force a fresh token.
