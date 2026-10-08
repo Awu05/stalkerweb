@@ -62,9 +62,12 @@ function firstTimestamps(buf) {
 }
 
 class StreamDiagnostics {
-  constructor({ logger = log, now = () => Date.now() } = {}) {
+  // onTimestamps(url, { video, audio }) receives each segment's start timestamps
+  // (the restart smoother uses them instead of probing).
+  constructor({ logger = log, now = () => Date.now(), onTimestamps = () => {} } = {}) {
     this.log = logger;
     this.now = now;
+    this.onTimestamps = onTimestamps;
     this.channels = new Map();
   }
 
@@ -74,6 +77,8 @@ class StreamDiagnostics {
     if (!c) {
       c = {
         key, segs: new Map(),      // segment path → { seq, dur, fetches }
+        left: new Set(),           // sequence numbers the restart smoother left out
+        seqAt: null,               // { seq, at } — the playlist's sequence and when it was seen
         lastSeq: null, seqSince: 0, target: 6,
         lastSegSeq: null, lastPts: null,
         stats: { segments: 0, slow: 0, worstRatio: 0, ttfbSum: 0, ratioSum: 0, playlists: 0, playlistMax: 0, back: 0, repeats: 0, skips: 0, jumps: 0, drift: 0, discontinuities: 0 },
@@ -92,6 +97,9 @@ class StreamDiagnostics {
   }
 
   _warn(c, msg) { this.log.warn(TAG, `ch ${c.key}: ${msg}`); }
+
+  /** The restart smoother left segment `seq` out — players skip it on purpose. */
+  leftOut(id, seq) { this._ch(id).left.add(seq); }
 
   _summary(c) {
     const st = c.stats;
@@ -128,6 +136,20 @@ class StreamDiagnostics {
       }
     }
     if (c.lastSeq === null || seq !== c.lastSeq) c.seqSince = now;
+
+    // The source producing segments much faster than real time (it does after
+    // a restart on some servers): the live window races ahead and players
+    // that can't keep their place jump forward.
+    if (c.seqAt && seq > c.seqAt.seq) {
+      const produced = seq - c.seqAt.seq;
+      const elapsed = (now - c.seqAt.at) / 1000;
+      if (produced >= 3 && produced * target > 2 * Math.max(elapsed, 1)) {
+        const durs = [...body.matchAll(/#EXTINF:([\d.]+)/g)].map((m) => parseFloat(m[1]));
+        const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : target;
+        this._warn(c, `source moved ${produced} segments ahead in ${elapsed.toFixed(1)}s (segments about ${avg.toFixed(1)}s long) — faster than real time; players fall out of the window and jump`);
+      }
+    }
+    c.seqAt = { seq, at: now };
     c.lastSeq = seq;
 
     // Map each segment to its sequence number and duration.
@@ -168,9 +190,11 @@ class StreamDiagnostics {
       c.stats.repeats++;
       this._warn(c, `segment ${info.seq ?? '?'} fetched again (${info.fetches}x) — the player re-requested it`);
     } else if (info.seq !== null && c.lastSegSeq !== null) {
-      if (info.seq > c.lastSegSeq + 1) {
+      let missed = 0;
+      for (let n = c.lastSegSeq + 1; n < info.seq; n++) if (!c.left.has(n)) missed++;
+      if (missed > 0) {
         c.stats.skips++;
-        this._warn(c, `player skipped from segment ${c.lastSegSeq} to ${info.seq} (${info.seq - c.lastSegSeq - 1} missed) — it fell behind and jumped ahead`);
+        this._warn(c, `player skipped from segment ${c.lastSegSeq} to ${info.seq} (${missed} missed) — it fell behind and jumped ahead`);
       } else if (info.seq < c.lastSegSeq) {
         c.stats.back++;
         this._warn(c, `player went back from segment ${c.lastSegSeq} to ${info.seq}`);
@@ -207,7 +231,11 @@ class StreamDiagnostics {
           this._warn(c, `segment ${info.seq ?? '?'}: ${(bytes / 1e6).toFixed(2)} MB took ${s(ms)}s for ${(info.dur || c.target).toFixed(1)}s of video — ` +
             `${ratio > 1 ? 'slower than real time, the player will run dry' : 'close to real time'}`);
         }
-        if (info.fetches === 1 && scannedBytes) this._timestamps(c, info, firstTimestamps(Buffer.concat(scanned)));
+        if (info.fetches === 1 && scannedBytes) {
+          const ts = firstTimestamps(Buffer.concat(scanned));
+          this.onTimestamps(url, ts);
+          this._timestamps(c, info, ts);
+        }
         scanned = null;
       },
     };

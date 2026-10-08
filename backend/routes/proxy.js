@@ -21,7 +21,8 @@ const log = require('../logger');
 const { baseUrl } = require('../lib/publicUrl');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
-const { StreamDiagnostics } = require('../lib/streamDiagnostics');
+const { StreamDiagnostics, firstTimestamps } = require('../lib/streamDiagnostics');
+const { RestartSmoother } = require('../lib/restartSmoother');
 const TAG = 'proxy';
 
 // Dedicated HTTP clients for CDN stream/segment fetches with a PERSISTENT
@@ -207,7 +208,44 @@ module.exports = function proxyModule(appState) {
   const proxySecret = crypto.randomBytes(32);
 
   // Logs stutter / replay / drift causes per live channel (lib/streamDiagnostics).
-  const diag = new StreamDiagnostics();
+  // Hides the replay a source restart causes (lib/restartSmoother); it reuses
+  // the timestamps diagnostics read from served segments, and probes the first
+  // bytes of a segment only when it has none.
+  const smoother = new RestartSmoother({
+    probe: probeSegmentStart,
+    onDrop: (ch, seq) => diag.leftOut(ch, seq),
+  });
+  const diag = new StreamDiagnostics({ onTimestamps: (url, ts) => smoother.recordPts(url, ts) });
+
+  // Start timestamps of a segment from its first 64 KB, over the stream's own
+  // connection. Asks for just that range; a server that ignores Range sends
+  // the whole (small) segment, which is read to the end so the connection
+  // stays reusable.
+  async function probeSegmentStart(url) {
+    const headers = { ...getHeadersForUrl(url), 'Accept-Encoding': 'identity', Range: 'bytes=0-65535' };
+    const response = await fetchStreamFromPortal(headers, url, 5_000);
+    if (response.status >= 400) { response.data?.destroy(); return null; }
+    const chunks = [];
+    let size = 0;
+    await new Promise((resolve, reject) => {
+      response.data.on('data', (c) => { if (size < 65_536) { chunks.push(c); size += c.length; } });
+      response.data.once('end', resolve);
+      response.data.once('error', reject);
+    });
+    return firstTimestamps(Buffer.concat(chunks));
+  }
+
+  // A live media playlist as players should see it (restart replays removed).
+  // Keyed per channel and playlist path; untouched for anything else.
+  const smoothPlaylist = (channelId, url, body) => {
+    if (!channelId || !body.includes('#EXT-X-MEDIA-SEQUENCE')) return body;
+    let key = url;
+    try { const u = new URL(url); key = `${channelId}|${u.host}${u.pathname}`; } catch { /* keep url */ }
+    return smoother.rewrite(key, url, body, String(channelId)).catch((e) => {
+      log.warn(TAG, `restart smoothing skipped: ${e.message}`);
+      return body;
+    });
+  };
 
   // Verify a client-supplied (realUrl, sig) pair was emitted by us. Constant-time.
   function verifyProxySig(realUrl, sig) {
@@ -329,7 +367,7 @@ module.exports = function proxyModule(appState) {
       }
       const proxyOrigin = baseUrl(req);
       if (channelId) diag.playlist(channelId, realUrl, body.toString('utf8'), 0);
-      const rewritten = rewriteM3u8(body.toString('utf8'), realUrl, proxyOrigin, proxySecret, channelId);
+      const rewritten = rewriteM3u8(await smoothPlaylist(channelId, realUrl, body.toString('utf8')), realUrl, proxyOrigin, proxySecret, channelId);
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
       setCors();
@@ -439,7 +477,7 @@ module.exports = function proxyModule(appState) {
     const body = Buffer.from(response.data).toString('utf8');
     if (channelId) diag.playlist(channelId, realUrl, body, Date.now() - fetchStart);
     const proxyOrigin = baseUrl(req);
-    const rewritten = rewriteM3u8(body, realUrl, proxyOrigin, proxySecret, channelId);
+    const rewritten = rewriteM3u8(await smoothPlaylist(channelId, realUrl, body), realUrl, proxyOrigin, proxySecret, channelId);
 
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Cache-Control', 'no-cache, no-store');
