@@ -1,11 +1,22 @@
 name: CI
 
+# Runs on pull requests only. Re-running the same checks on the merge push
+# to main doubled every run, and nothing is published from here — release.yml
+# runs lint + tests again before anything ships. Run it on main by hand from
+# the Actions tab (workflow_dispatch) when needed.
 on:
-  push:
-    branches: [main, master]
   pull_request:
     branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
+
+# A new push to a PR cancels the run for its previous commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
