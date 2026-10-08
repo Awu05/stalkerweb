@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
@@ -61,6 +62,47 @@ class PlayerViewModel(
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var sleepTimerJob: Job? = null
 
+    // ── Auto-reconnect ───────────────────────────────────────────────────────
+    // Live stream tokens expire mid-playback: the CDN starts answering 403 and
+    // the backend proxy reports that as 410. ExoPlayer gives up after its own
+    // short retries and raises onPlayerError — without this, playback just
+    // stopped. Reloading the channel goes back through /api/stream, which calls
+    // create_link for a fresh token. Mirrors the web player's recoverStream():
+    // exponential backoff, capped, reset once media plays again.
+    private var reconnectAttempts = 0
+    private var reconnectJob: Job? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            android.util.Log.w("PlayerViewModel", "playback error (${error.errorCodeName}) — reconnecting", error)
+            scheduleReconnect()
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) reconnectAttempts = 0
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true) return
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            android.util.Log.e("PlayerViewModel", "giving up after $reconnectAttempts reconnect attempts")
+            return
+        }
+        reconnectAttempts++
+        val backoffMs = minOf(1_500L shl (reconnectAttempts - 1), 15_000L)
+        reconnectJob = viewModelScope.launch {
+            delay(backoffMs)
+            loadStream(_state.value.activeChannelId)
+        }
+    }
+
+    private fun resetReconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectAttempts = 0
+    }
+
     val castManager: CastManager? = runCatching { CastManager(application) }.getOrNull()
 
     init {
@@ -109,6 +151,7 @@ class PlayerViewModel(
                 .onFailure { android.util.Log.e("PlayerViewModel", "MediaController connect failed", it) }
                 .getOrNull()
             if (controller != null) {
+                controller.addListener(playerListener)
                 _player.value = controller
                 loadStream(channelId)
             }
@@ -168,7 +211,13 @@ class PlayerViewModel(
                 android.util.Log.e("PlayerViewModel", "loadStream failed: ${e.message}")
                 // If the controller we used became disconnected, clear it so the next
                 // init() call (e.g. from back-stack restore) will reconnect cleanly.
-                if (_player.value == p) _player.value = null
+                // Only then: a plain network/portal failure leaves the controller
+                // usable, and clearing it would make every later loadStream() —
+                // including the reconnect below — return without doing anything.
+                if (_player.value == p && (p as? MediaController)?.isConnected == false) _player.value = null
+                // A reconnect whose re-resolve failed (portal briefly down or
+                // rate-limiting) raises no player error, so keep backing off here.
+                if (reconnectAttempts > 0) scheduleReconnect()
             }
         }
     }
@@ -178,6 +227,7 @@ class PlayerViewModel(
             activeChannelId = channelId,
             showChannelList = false,
         )
+        resetReconnect()   // a deliberate zap starts a fresh backoff sequence
         loadStream(channelId)
     }
 
@@ -265,8 +315,14 @@ class PlayerViewModel(
 
     fun getDefaultStreamUrl(channelId: String): String = repository.defaultStreamUrl(channelId)
 
+    private companion object {
+        const val MAX_RECONNECT_ATTEMPTS = 8
+    }
+
     override fun onCleared() {
         sleepTimerJob?.cancel()
+        reconnectJob?.cancel()
+        (_player.value as? MediaController)?.removeListener(playerListener)
         castManager?.release()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()

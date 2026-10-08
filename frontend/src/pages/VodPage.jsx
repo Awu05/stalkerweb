@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -161,10 +162,13 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
       .catch(e => { setError(e.message); setEpLoading(false) })
   }
 
-  return (
+  // Portalled to <body> so no page ancestor (transforms, filters, overflow)
+  // can trap the fixed overlay. Solid surface rather than .glass-strong: its 7%
+  // fill over a busy poster grid left the episode titles unreadable.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full sm:max-w-lg max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden modal-panel">
 
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
@@ -193,8 +197,9 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Content — min-h-0 lets this flex child shrink below its content so
+            it scrolls instead of growing the sheet past max-h. */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {loading && (
             <div className="flex items-center justify-center py-12">
               <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
@@ -248,7 +253,8 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -345,6 +351,10 @@ export default function VodPage() {
   // synchronously — two clicks fired before a re-render lands could otherwise
   // both read the same stale `itemsLoading` value and double-fetch the page.
   const itemsLoadingRef = useRef(false)
+  // Infinite scroll: a sentinel under the grid, observed within the grid's own
+  // scroll container (not the window — the grid scrolls inside the layout).
+  const gridScrollRef = useRef(null)
+  const sentinelRef   = useRef(null)
 
   // Load Continue Watching on mount (this page remounts when returning from the player).
   useEffect(() => { setContinueList(getVodProgressList()) }, [])
@@ -435,6 +445,24 @@ export default function VodPage() {
     if (!selectedCategory || !hasMore || itemsLoadingRef.current) return
     loadItems(selectedCategory.id, search, currentPage + 1, itemsTokenRef.current)
   }
+  const loadMoreRef = useRef(loadMore)
+  useEffect(() => { loadMoreRef.current = loadMore })
+
+  // Load the next batch as the sentinel nears the viewport. The observer is
+  // rebuilt whenever a load finishes: an IntersectionObserver only reports
+  // changes, so if the new batch didn't push the sentinel off-screen (tall
+  // window, short batch) the fresh observer's initial callback keeps going.
+  useEffect(() => {
+    const root = gridScrollRef.current
+    const sentinel = sentinelRef.current
+    if (!root || !sentinel || !hasMore || itemsLoading || itemsError) return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some(e => e.isIntersecting)) loadMoreRef.current() },
+      { root, rootMargin: '0px 0px 1200px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, itemsLoading, itemsError, items.length])
 
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
@@ -577,7 +605,7 @@ export default function VodPage() {
         </div>
 
         {/* Items grid */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
           {!selectedCategory && (
             <>
               <ContinueWatching entries={continueList} onResume={resumeEntry} onRemove={removeEntry} />
@@ -600,8 +628,9 @@ export default function VodPage() {
                 ))}
               </div>
 
-              {/* Load more / pagination */}
-              <div className="flex items-center justify-center gap-3 mt-6 pb-2">
+              {/* Infinite-scroll sentinel + status. The button stays as a
+                  fallback (keyboard / TV remote, or after a failed load). */}
+              <div ref={sentinelRef} className="flex items-center justify-center gap-3 mt-6 pb-2">
                 {itemsLoading && <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />}
                 {hasMore && !itemsLoading && (
                   <button

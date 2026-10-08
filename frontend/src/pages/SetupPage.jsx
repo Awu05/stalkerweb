@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
   Trash2, RefreshCw, Image, Download, Upload, Plus, Pencil, Plug, PlugZap,
-  X, Wifi, WifiOff, Copy, Check, ExternalLink, ListVideo, CalendarDays,
+  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
 import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { copyText } from '@/lib/clipboard'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
@@ -147,15 +148,21 @@ function Notice({ notice }) {
 
 // ── Copyable link row (M3U / XMLTV export URLs) ───────────────────────────────
 
-function LinkRow({ label, url, hint, icon: Icon }) {
-  const [copied, setCopied] = useState(false)
+function LinkRow({ label, url, hint, icon: Icon, filename }) {
+  const [copied, setCopied] = useState(null) // null | 'ok' | 'manual'
+  const inputRef = useRef(null)
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch { /* clipboard blocked — user can still select the field manually */ }
+    if (await copyText(url)) {
+      setCopied('ok')
+    } else {
+      // Clipboard fully blocked: select the URL so Ctrl/Cmd+C finishes the job,
+      // and say so instead of failing silently.
+      inputRef.current?.focus()
+      inputRef.current?.select()
+      setCopied('manual')
+    }
+    setTimeout(() => setCopied(null), 2500)
   }
 
   return (
@@ -166,25 +173,29 @@ function LinkRow({ label, url, hint, icon: Icon }) {
       </div>
       <div className="flex gap-2">
         <Input
+          ref={inputRef}
           readOnly
           value={url}
           onFocus={e => e.target.select()}
           className="font-mono text-xs flex-1"
         />
         <Button type="button" variant="outline" onClick={copy} className="shrink-0 h-9 px-3 text-xs gap-1.5">
-          {copied ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
-          {copied ? 'Copied' : 'Copy'}
+          {copied === 'ok' ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
+          {copied === 'ok' ? 'Copied' : 'Copy'}
         </Button>
         <a
           href={url}
-          target="_blank"
-          rel="noreferrer"
-          title="Open in new tab"
+          download={filename}
+          title={`Download ${filename}`}
+          aria-label={`Download ${filename}`}
           className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
         >
-          <ExternalLink size={13} />
+          <Download size={13} />
         </a>
       </div>
+      {copied === 'manual' && (
+        <p className="text-xs text-[var(--color-live)]">Your browser blocked copying — the link is selected, press Ctrl+C (⌘C on Mac).</p>
+      )}
       {hint && <p className="text-xs text-[var(--color-muted)]">{hint}</p>}
     </div>
   )
@@ -208,10 +219,10 @@ function ProfileSheet({ initial, onSave, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       {/* backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* panel */}
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
 
         {/* header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
@@ -348,8 +359,8 @@ function StbImportPicker({ candidates, onImport, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
           <h3 className="font-semibold text-[var(--color-text)]">Select Profiles to Import</h3>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
@@ -479,6 +490,14 @@ export default function SetupPage() {
   const [downloadDir, setDownloadDir]           = useState('')
   const [downloadDirSaving, setDownloadDirSaving] = useState(false)
   const [downloadDirNotice, setDownloadDirNotice] = useState(null)
+  // Idle auto-disconnect. idleMinutes is the text field; idleNever mirrors a
+  // saved 0. idleSaved is what the server has, to enable Save only on change.
+  const [idleMinutes, setIdleMinutes]   = useState('')
+  const [idleNever, setIdleNever]       = useState(false)
+  const [idleSaved, setIdleSaved]       = useState(null)
+  const [idleDefault, setIdleDefault]   = useState(30)
+  const [idleSaving, setIdleSaving]     = useState(false)
+  const [idleNotice, setIdleNotice]     = useState(null)
   const [logoStats, setLogoStats]   = useState(null)
   const [logoOverrides, setLogoOverrides] = useState({})
   const [logoRefreshing, setLogoRefreshing] = useState(false)
@@ -553,6 +572,12 @@ export default function SetupPage() {
       if (s) {
         setEpg(s.epg_enabled !== false)
         setDownloadDir(s.download_dir || '')
+        if (s.idle_timeout_default != null) setIdleDefault(s.idle_timeout_default)
+        if (s.idle_timeout_minutes != null) {
+          setIdleSaved(s.idle_timeout_minutes)
+          setIdleNever(s.idle_timeout_minutes === 0)
+          setIdleMinutes(s.idle_timeout_minutes === 0 ? String(s.idle_timeout_default ?? 30) : String(s.idle_timeout_minutes))
+        }
       }
       if (logos) { setLogoOverrides(logos.overrides || {}); setLogoStats(logos.stats || null) }
       if (status?.device) setDeviceProfile(status.device)
@@ -779,6 +804,34 @@ export default function SetupPage() {
       setTimeout(() => setDownloadDirNotice(null), 2500)
     }
   }
+  // Saving applies on the server immediately (no restart); then refresh the
+  // sidebar's idle countdown, which otherwise waits for the next status poll.
+  async function saveIdleTimeout(minutes) {
+    setIdleSaving(true)
+    setIdleNotice(null)
+    try {
+      await saveSettings({ idle_timeout_minutes: minutes })
+      setIdleSaved(minutes)
+      setIdleNotice({ type: 'success', msg: minutes === 0 ? 'Auto-disconnect turned off.' : 'Saved.' })
+      const st = await getStatus().catch(() => null)
+      setIdleInfo(st?.lastActivityAt && st?.idleTimeoutMs
+        ? { lastActivityAt: st.lastActivityAt, idleTimeoutMs: st.idleTimeoutMs }
+        : null)
+    } catch (err) {
+      setIdleNotice({ type: 'error', msg: err.message })
+    } finally {
+      setIdleSaving(false)
+      setTimeout(() => setIdleNotice(null), 2500)
+    }
+  }
+  function handleIdleNeverToggle(never) {
+    setIdleNever(never)
+    const minutes = never ? 0 : parseInt(idleMinutes, 10)
+    if (never || (Number.isInteger(minutes) && minutes > 0)) saveIdleTimeout(minutes)
+  }
+  const idleParsed = parseInt(idleMinutes, 10)
+  const idleValid  = /^\d+$/.test(idleMinutes.trim()) && idleParsed >= 1 && idleParsed <= 10080
+
   // Genre filters are stored per-profile on the backend. Update the app
   // context and local profile list immediately (optimistic), persist to the
   // server in the background, and invalidate the channel cache so the
@@ -964,12 +1017,14 @@ export default function SetupPage() {
                 label="M3U Playlist"
                 icon={ListVideo}
                 url={`${origin}/api/m3u`}
+                filename="stalkerweb.m3u"
                 hint="Channel list — add as an M3U / playlist URL in your IPTV client or tuner."
               />
               <LinkRow
                 label="XMLTV EPG Guide"
                 icon={CalendarDays}
                 url={`${origin}/api/xmltv`}
+                filename="stalkerweb-epg.xml"
                 hint={epg
                   ? 'Program guide in XMLTV format — add as the EPG / guide URL alongside the M3U.'
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
@@ -1024,6 +1079,56 @@ export default function SetupPage() {
                 </p>
               )}
             </Field>
+          </div>
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">Idle Auto-Disconnect</p>
+                <p className="text-xs text-[var(--color-muted)] mt-0.5">
+                  Disconnect from the portal after this long with nothing playing. Playback always keeps the session open.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 pl-4">
+                <span className="text-xs text-[var(--color-muted)]">Never</span>
+                <Switch checked={idleNever} onCheckedChange={handleIdleNeverToggle} disabled={idleSaving} />
+              </div>
+            </div>
+            {!idleNever && (
+              <div className="flex items-center gap-2 mt-3">
+                <Input
+                  id="idle-timeout"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={10080}
+                  value={idleMinutes}
+                  onChange={e => setIdleMinutes(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && idleValid && idleParsed !== idleSaved) saveIdleTimeout(idleParsed) }}
+                  aria-label="Idle timeout in minutes"
+                  className="w-28"
+                />
+                <span className="text-sm text-[var(--color-muted)]">minutes</span>
+                <Button
+                  type="button"
+                  onClick={() => saveIdleTimeout(idleParsed)}
+                  disabled={idleSaving || !idleValid || idleParsed === idleSaved}
+                  className="shrink-0 h-9 px-3 text-xs ml-auto"
+                >
+                  {idleSaving ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            )}
+            {!idleNever && idleMinutes.trim() !== '' && !idleValid && (
+              <p className="text-xs mt-1 text-[var(--color-live)]">Enter a whole number from 1 to 10080 (one week).</p>
+            )}
+            {!idleNotice && !idleNever && (
+              <p className="text-xs mt-1 text-[var(--color-muted)]">Default: {idleDefault} minutes (IDLE_TIMEOUT_MINUTES).</p>
+            )}
+            {idleNotice && (
+              <p className={cn('text-xs mt-1', idleNotice.type === 'error' ? 'text-[var(--color-live)]' : 'text-[var(--color-success)]')}>
+                {idleNotice.msg}
+              </p>
+            )}
           </div>
         </Card>
 
@@ -1322,7 +1427,7 @@ export default function SetupPage() {
                   ).slice(0, 20)
                   if (!matches.length) return null
                   return (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div className="modal-panel absolute z-50 top-full left-0 right-0 mt-1 rounded-lg max-h-48 overflow-y-auto">
                       {matches.map(ch => (
                         <button key={ch.name} type="button"
                           onClick={() => { setNewLogoName(ch.name); setLogoSearchOpen(false) }}

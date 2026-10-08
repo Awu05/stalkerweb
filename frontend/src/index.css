@@ -94,6 +94,17 @@ body::before {
   box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
 }
 
+/* ── Modal / popover panels ──
+   Always opaque. Glass (.glass-strong is a 7% fill) reads fine over the plain
+   page background but turns unreadable over busy content like poster grids,
+   which is exactly what modals open on top of. Use this for every dialog,
+   sheet, dropdown and popover. */
+.modal-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lg);
+}
+
 /* ── Elevated glass-look cards (translucent frost + top highlight + hover glow) ──
    Deliberately NO backdrop-filter here: these are used by every list tile, and
    per-tile blur layers (hundreds at once) wreck compositing perf. The
@@ -146,7 +157,11 @@ body::before {
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 
 /* ── Route / mount fade-in ── */
-.fade-in { animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* `backwards`, not `both`: a transform animation still in effect after it ends
+   makes the element the containing block for every `position: fixed` child,
+   so page modals got trapped inside the page (offset, clipped, unscrollable).
+   The final keyframe is the natural state anyway, so nothing visible changes. */
+.fade-in { animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }

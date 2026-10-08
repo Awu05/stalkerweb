@@ -30,4 +30,21 @@ export default [
       'no-empty': ['warn', { allowEmptyCatch: true }],
     },
   },
+  // Tests are ES modules that run on Node and use its web-platform globals
+  // (route tests talk to an in-process server with fetch). The `ignores` above
+  // only scopes that block, so tests still get the recommended rules.
+  {
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        fetch: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+      },
+    },
+  },
 ]
