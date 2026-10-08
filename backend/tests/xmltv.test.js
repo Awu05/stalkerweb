@@ -21,6 +21,44 @@ const epgData = {
   ],
 }
 
+describe('guide categories', () => {
+  const categoriesOf = (xml, title) => {
+    const prog = xml.split('<programme ').find((p) => p.includes(`<title lang="en">${title}</title>`))
+    return [...prog.matchAll(/<category lang="en">([^<]*)<\/category>/g)].map((m) => m[1])
+  }
+
+  it('adds the standard word Jellyfin sorts by next to the portal genre', () => {
+    const xml = buildGuideXml({
+      channels: [
+        { uniqueId: '1', channelId: 1, name: 'Cartoon Network', genreId: '7', iconPath: '' },
+        { uniqueId: '2', channelId: 2, name: 'Fox Sports 1',   genreId: '8', iconPath: '' },
+        { uniqueId: '3', channelId: 3, name: 'Cooking',        genreId: '9', iconPath: '' },
+      ],
+      groups: [{ id: '7', name: 'ENGLISH | KIDS' }, { id: '8', name: 'USA' }, { id: '9', name: 'Lifestyle' }],
+      epgData: {
+        1: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Gumball' }],
+        2: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Game Day' }],
+        3: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Bake Off', category: 'Movies' }],
+      },
+      now,
+    }).xml
+
+    expect(categoriesOf(xml, 'Gumball')).toEqual(['ENGLISH | KIDS', 'Kids'])
+    expect(categoriesOf(xml, 'Game Day')).toEqual(['USA', 'Sports'])        // from the channel name
+    expect(categoriesOf(xml, 'Bake Off')).toEqual(['Lifestyle', 'Movies', 'Movie']) // portal's own category
+  })
+
+  it('adds nothing when no rule applies, and never repeats a category', () => {
+    const xml = buildGuideXml({
+      channels: [{ uniqueId: '1', channelId: 1, name: 'Daily', genreId: '1', iconPath: '' }],
+      groups: [{ id: '1', name: 'News' }],
+      epgData: { 1: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Morning', category: 'news' }] },
+      now,
+    }).xml
+    expect(categoriesOf(xml, 'Morning')).toEqual(['News'])
+  })
+})
+
 describe('buildGuideXml', () => {
   it('keeps every real EPG programme', () => {
     const { xml, realEpgCount } = buildGuideXml({ channels, groups, epgData, now })

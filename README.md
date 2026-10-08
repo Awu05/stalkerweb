@@ -176,6 +176,11 @@ still show in the guide. Add `?filler=none` to leave them out for a smaller,
 faster import. The feed is gzip-compressed for clients that accept it and cached
 between refreshes.
 
+Each programme in the guide is tagged Movie, Sports, Kids or News when its
+channel's genre or name points that way ("ENGLISH | KIDS", "USA SPORTS", ESPN,
+CNN…), so Jellyfin's Live TV → Programs page fills its Movies, Sports, Kids and
+News rows. After updating, run Refresh Guide in Jellyfin once.
+
 Jellyfin's Live TV shows every channel in one list. Add `?prefix=1` to the M3U
 URL to put the category in each channel's name ("Sports | ESPN"), so a channel's
 category is visible and sorting by name keeps each category together.

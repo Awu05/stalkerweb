@@ -22,6 +22,7 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const log = require('../logger');
 const { exportFilterFor } = require('../lib/exportFilter');
+const { standardCategories } = require('../lib/guideCategories');
 const TAG = 'xmltv';
 const gzip = promisify(zlib.gzip);
 
@@ -91,10 +92,26 @@ function buildGuideXml({ channels, groups, epgData, filler = true, now = new Dat
   let realEpgCount = 0;
   let syntheticCount = 0;
 
+  // <category> lines for a programme: the portal's genre name (and its own
+  // programme category, if it sends one), then the standard words Jellyfin
+  // sorts its Movies / Sports / Kids / News rows by.
+  const categoryLines = (genre, progCategory, channelName) => {
+    const seen = new Set();
+    const out = [];
+    for (const c of [genre, progCategory, ...standardCategories(genre, progCategory, channelName)]) {
+      const key = String(c || '').trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(`    <category lang="en">${xmlEscape(c)}</category>`);
+    }
+    return out;
+  };
+
   for (const ch of channels) {
     const id       = String(ch.uniqueId);
     const name     = xmlEscape(ch.name);
-    const category = xmlEscape(groupName.get(String(ch.genreId)) || '');
+    const genre    = groupName.get(String(ch.genreId)) || ch.genre || '';
+    const channelCategories = categoryLines(genre, null, ch.name);
 
     // Try real EPG first: keyed by channelId (portal numeric ID)
     const epgEvents = epgData
@@ -113,7 +130,7 @@ function buildGuideXml({ channels, groups, epgData, filler = true, now = new Dat
         );
         lines.push(`    <title lang="en">${title}</title>`);
         if (descr) lines.push(`    <desc lang="en">${descr}</desc>`);
-        if (category) lines.push(`    <category lang="en">${category}</category>`);
+        lines.push(...(ev.category ? categoryLines(genre, String(ev.category), ch.name) : channelCategories));
         lines.push('  </programme>');
       }
     } else {
@@ -126,7 +143,7 @@ function buildGuideXml({ channels, groups, epgData, filler = true, now = new Dat
           `  <programme start="${xmltvDate(blockStart)}" stop="${xmltvDate(blockStop)}" channel="${id}">`
         );
         lines.push(`    <title lang="en">${name}</title>`);
-        if (category) lines.push(`    <category lang="en">${category}</category>`);
+        lines.push(...channelCategories);
         lines.push('  </programme>');
       }
     }
