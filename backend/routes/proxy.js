@@ -36,11 +36,17 @@ const TAG = 'proxy';
 // No cookie jar: stream CDNs are IP hosts and authenticate via the URL token, so
 // the jar never sent cookies to them anyway.
 //
-// One agent PER STREAM (keyed by CDN origin + playlist directory) rather than a
-// single global agent: the "one socket per token" rule is per-stream, so a global
-// maxSockets:1 would force every concurrent viewer/stream to contend for the same
-// socket and stall. Keying by the directory groups a stream's master/media
-// playlists and all its segments onto one socket while isolating distinct streams.
+// One agent PER STREAM rather than a single global agent: the "one socket per
+// token" rule is per-stream, so a global maxSockets:1 would force every
+// concurrent viewer/stream to contend for the same socket and stall.
+// A live channel's fetches are keyed by the channel: some servers keep each
+// minute's segments in their own directory (Flussonic: …/2026/10/08/21/57/),
+// and a directory key opened a new connection every minute. Behind a load
+// balancer that new connection can reach another server, which doesn't have
+// the files the playlist (from the first server) lists — 404 on every retry,
+// since the socket is then reused. Anything without a channel (VOD) is keyed
+// by CDN origin + playlist directory, which groups its master/media playlists
+// and segments.
 const streamAgentOpts = { keepAlive: true, maxSockets: 1, maxFreeSockets: 1 };
 // 5 minutes: long enough to survive a VOD pause without triggering CDN
 // "one connection per token" rejections, while still evicting idle entries.
@@ -49,8 +55,9 @@ const streamClients = new Map(); // key → { client, httpAgent, httpsAgent, tim
 
 // Groups all parts of a single stream (playlist + its segments live under the
 // same directory) under one key, while different streams get different keys.
-function streamClientKey(url) {
+function streamClientKey(url, channel = null) {
   try {
+    if (channel) return `ch:${channel}@${new URL(url).host}`;
     const u = new URL(url);
     const dir = u.pathname.replace(/[^/]*$/, ''); // strip the filename
     return `${u.protocol}//${u.host}${dir}`;
@@ -59,8 +66,8 @@ function streamClientKey(url) {
   }
 }
 
-function getStreamClient(url) {
-  const key = streamClientKey(url);
+function getStreamClient(url, channel = null) {
+  const key = streamClientKey(url, channel);
   let entry = streamClients.get(key);
   if (!entry) {
     const httpAgent  = new http.Agent(streamAgentOpts);
@@ -70,6 +77,7 @@ function getStreamClient(url) {
       httpAgent,
       httpsAgent,
       timer: null,
+      connections: 0,
     };
     streamClients.set(key, entry);
   }
@@ -81,7 +89,19 @@ function getStreamClient(url) {
     entry.httpsAgent.destroy();
   }, STREAM_CLIENT_TTL_MS);
   if (entry.timer.unref) entry.timer.unref();
-  return entry.client;
+  return entry;
+}
+
+// Counts the connections a channel's stream needed. After the first, each new
+// one is logged: a server that drops the connection every so often, behind a
+// load balancer, can land the stream on another server — which shows up as a
+// "restart" in the playlist.
+function noteConnection(entry, response, channel) {
+  if (!channel || response?.request?.reusedSocket) return;
+  entry.connections++;
+  if (entry.connections > 1) {
+    log.info('stream-diag', `ch ${channel}: new connection to the stream server (#${entry.connections}) — the previous one was closed`);
+  }
 }
 
 // ── URL helpers ───────────────────────────────────────────────────────────────
@@ -175,24 +195,30 @@ function signProxyUrl(realUrl, secret) {
 // Note: the first arg is kept for signature/test compatibility but ignored —
 // stream fetches always go through a persistent keep-alive client keyed to the
 // stream, never the portal's per-request cookie-jar client.
-async function fetchFromPortal(_httpClient, headers, url, timeoutMs = 15_000) {
-  return getStreamClient(url).get(url, {
+async function fetchFromPortal(_httpClient, headers, url, timeoutMs = 15_000, channel = null) {
+  const entry = getStreamClient(url, channel);
+  const response = await entry.client.get(url, {
     headers,
     responseType: 'arraybuffer',
     timeout: timeoutMs,
     validateStatus: () => true,
   });
+  noteConnection(entry, response, channel);
+  return response;
 }
 
 // Like fetchFromPortal but returns a readable stream instead of buffering the
 // whole body — used for segments so .ts data never lands in the Node heap.
-async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000) {
-  return getStreamClient(url).get(url, {
+async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel = null) {
+  const entry = getStreamClient(url, channel);
+  const response = await entry.client.get(url, {
     headers,
     responseType: 'stream',
     timeout: timeoutMs,
     validateStatus: () => true,
   });
+  noteConnection(entry, response, channel);
+  return response;
 }
 
 // ── Route factory ─────────────────────────────────────────────────────────────
@@ -218,9 +244,9 @@ module.exports = function proxyModule(appState) {
   // connection. Asks for just that range; a server that ignores Range sends
   // the whole (small) segment, which is read to the end so the connection
   // stays reusable.
-  async function probeSegmentStart(url) {
+  async function probeSegmentStart(url, channel) {
     const headers = { ...getHeadersForUrl(url), 'Accept-Encoding': 'identity', Range: 'bytes=0-65535' };
-    const response = await fetchStreamFromPortal(headers, url, 5_000);
+    const response = await fetchStreamFromPortal(headers, url, 5_000, channel);
     if (response.status >= 400) { response.data?.destroy(); return null; }
     const chunks = [];
     let size = 0;
@@ -288,7 +314,7 @@ module.exports = function proxyModule(appState) {
 
     let response;
     try {
-      response = await fetchStreamFromPortal(headers, realUrl, 30_000);
+      response = await fetchStreamFromPortal(headers, realUrl, 30_000, channelId);
     } catch (e) {
       if (fallbackUrl && fallbackUrl !== realUrl) {
         log.warn(TAG, `stream fetch failed on create_link URL (${e.message}) — retrying with raw channel cmd`);
@@ -449,7 +475,7 @@ module.exports = function proxyModule(appState) {
     let response;
     const fetchStart = Date.now();
     try {
-      response = await fetchFromPortal(http, headers, realUrl);
+      response = await fetchFromPortal(http, headers, realUrl, undefined, channelId);
     } catch (e) {
       log.error(TAG, `playlist fetch failed: ${e.message}`);
       if (channelId) appState.channelManager?.recordStreamError(channelId);
@@ -786,7 +812,7 @@ module.exports = function proxyModule(appState) {
     const d = ch ? diag.segment(ch, realUrl) : null;
     let response;
     try {
-      response = await fetchStreamFromPortal(headers, realUrl);
+      response = await fetchStreamFromPortal(headers, realUrl, undefined, ch);
     } catch (e) {
       log.error(TAG, `segment fetch failed: ${e.message}`);
       return res.status(502).send(`Fetch failed: ${e.message}`);
