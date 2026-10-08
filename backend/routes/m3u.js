@@ -13,6 +13,7 @@
 
 const express = require('express');
 const log = require('../logger');
+const { exportFilterFor } = require('../lib/exportFilter');
 const TAG = 'm3u';
 
 const OTHER_GROUP = 'Other';
@@ -65,10 +66,13 @@ module.exports = function m3uModule(appState, logoManager) {
       return res.status(503).send('No channels loaded yet — try again in a moment');
     }
 
+    // Hidden genres/languages and adult channels are left out (?all=1 keeps them).
+    const shown = channels.filter(exportFilterFor(req, appState).keep);
+
     const base  = `${req.protocol}://${req.get('host')}`;
     const lines = ['#EXTM3U x-tvg-url=""'];
 
-    for (const { ch, group } of groupChannels(channels, groups)) {
+    for (const { ch, group } of groupChannels(shown, groups)) {
       // Precedence: manual override → Stalker portal logo → iptv-org (manual fetch).
       const logo   = (logoManager ? logoManager.resolveOverride(ch.name) : '')
                   || ch.iconPath
@@ -86,7 +90,7 @@ module.exports = function m3uModule(appState, logoManager) {
       );
     }
 
-    log.info(TAG, `serving playlist: ${channels.length} channels`);
+    log.info(TAG, `serving playlist: ${shown.length} of ${channels.length} channels`);
 
     res.set('Content-Type', 'application/x-mpegurl; charset=utf-8');
     res.set('Content-Disposition', 'attachment; filename="stalkerweb.m3u"');

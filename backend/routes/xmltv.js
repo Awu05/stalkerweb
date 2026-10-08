@@ -21,6 +21,7 @@ const express = require('express');
 const zlib = require('zlib');
 const { promisify } = require('util');
 const log = require('../logger');
+const { exportFilterFor } = require('../lib/exportFilter');
 const TAG = 'xmltv';
 const gzip = promisify(zlib.gzip);
 
@@ -137,7 +138,7 @@ function buildGuideXml({ channels, groups, epgData, filler = true, now = new Dat
 
 module.exports = function xmltvModule(appState) {
   const router = express.Router();
-  let cache = null; // { channels, channelCount, groups, epgData, period, filler, builtAt, raw, gzipped }
+  let cache = null; // { channels, channelCount, filterKey, groups, epgData, period, filler, builtAt, raw, gzipped }
 
   router.get('/', async (req, res) => {
     const { channelManager, guideManager } = appState;
@@ -168,17 +169,22 @@ module.exports = function xmltvModule(appState) {
     }
 
     const filler = req.query.filler !== 'none';
+    // Same channels as the M3U: hidden genres/languages and adult channels are
+    // left out (?all=1 keeps them). The cache keys on the source list plus the
+    // filter's key, since the filtered array is new on every request.
+    const filter = exportFilterFor(req, appState);
     // channels.length too: the array is filled in place while a load runs.
     const fresh  = cache && cache.channels === channels && cache.channelCount === channels.length &&
-                   cache.groups === groups &&
+                   cache.filterKey === filter.key && cache.groups === groups &&
                    cache.epgData === epgData && cache.period === period && cache.filler === filler &&
                    Date.now() - cache.builtAt < CACHE_TTL_MS;
     if (!fresh) {
       const t0 = Date.now();
-      const { xml, realEpgCount, syntheticCount } = buildGuideXml({ channels, groups, epgData, filler });
+      const shown = channels.filter(filter.keep);
+      const { xml, realEpgCount, syntheticCount } = buildGuideXml({ channels: shown, groups, epgData, filler });
       const raw = Buffer.from(xml, 'utf8');
-      cache = { channels, channelCount: channels.length, groups, epgData, period, filler, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
-      log.info(TAG, `built guide: ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} filler) — ` +
+      cache = { channels, channelCount: channels.length, filterKey: filter.key, groups, epgData, period, filler, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
+      log.info(TAG, `built guide: ${shown.length} of ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} filler) — ` +
         `${(raw.length / 1e6).toFixed(1)}MB, ${(cache.gzipped.length / 1e6).toFixed(1)}MB gzipped, ${Date.now() - t0}ms`);
     } else {
       log.debug(TAG, 'serving cached guide');

@@ -1036,6 +1036,9 @@ export default function SetupPage() {
                   ? 'Program guide in XMLTV format — add as the EPG / guide URL alongside the M3U.'
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
               />
+              <p className="text-xs text-[var(--color-muted)]">
+                These links leave out the genres and languages hidden under Genre Filters, and adult channels unless Show Adult Content is on. Add <code className="font-mono">?all=1</code> to a link to include every channel.
+              </p>
               {!connected && (
                 <p className="text-xs text-[var(--color-muted)]">
                   Connect to a portal above so clients can pull live channel and guide data from these links.
