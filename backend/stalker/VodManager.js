@@ -15,11 +15,44 @@ const VOD_LINK_TTL_MS = 5 * 60 * 1000;
 const CATEGORY_TTL_MS = 30 * 60 * 1000;
 const EMPTY_CATEGORY_TTL_MS = 60 * 1000;
 
+// Whole-category listings (getAllItems) for clients that ask for a category's
+// full contents at once, like the Xtream API. A category is one portal page
+// per ~14 titles, read one at a time with a pause between pages so a big
+// catalog never bursts into the portal's rate limit, then kept for an hour.
+const LISTING_TTL_MS      = 60 * 60 * 1000;
+const LISTING_MAX_PAGES   = 150;   // ~2,100 titles per category
+const LISTING_PAGE_GAP_MS = 150;
+const PARTIAL_LISTING_TTL_MS = 2 * 60 * 1000;
+
 class VodManager {
-  constructor(client) {
+  constructor(client, { pageGapMs = LISTING_PAGE_GAP_MS } = {}) {
     this.client = client;
+    this._pageGapMs = pageGapMs;
     this._linkCache = new Map(); // `${videoId}:${series}` → { url, ts }
     this._categoryCache = new Map(); // type → { value, ts } | { pending }
+    this._listingCache = new Map();  // `${type}:${categoryId}` → { value, ts } | { pending }
+  }
+
+  // Returns the cached value for `key`, or runs `fetch` once for every caller
+  // waiting on it. `ttlFor(value)` says how long a result is kept, so a doubtful
+  // one (empty, partial) can expire sooner. A failed fetch is not cached.
+  _cached(cache, key, ttlFor, fetch) {
+    const hit = cache.get(key);
+    if (hit && (hit.pending || Date.now() - hit.ts < hit.ttl)) {
+      return hit.pending || Promise.resolve(hit.value);
+    }
+    const pending = fetch().then(
+      (value) => { cache.set(key, { value, ts: Date.now(), ttl: ttlFor(value) }); return value; },
+      (e)     => { cache.delete(key); throw e; },
+    );
+    cache.set(key, { pending });
+    return pending;
+  }
+
+  // The cached value for `key` if it is fresh, else undefined. Never fetches.
+  _peek(cache, key) {
+    const hit = cache.get(key);
+    return hit && !hit.pending && Date.now() - hit.ts < hit.ttl ? hit.value : undefined;
   }
 
   // ── Categories ─────────────────────────────────────────────────────────────
@@ -28,22 +61,11 @@ class VodManager {
   // /api/channels/languages both ask for it on every request. Concurrent
   // callers share one in-flight portal request.
   getCategories(type = 'vod') {
-    const hit = this._categoryCache.get(type);
-    if (hit && (hit.pending || Date.now() - hit.ts < CATEGORY_TTL_MS)) {
-      return hit.pending || Promise.resolve(hit.value);
-    }
     // An empty list is usually a bad portal response (an error object instead
     // of the list), so it is kept only briefly rather than the full TTL.
-    const pending = this._fetchCategories(type).then(
-      (value) => {
-        const ts = value.length ? Date.now() : Date.now() - CATEGORY_TTL_MS + EMPTY_CATEGORY_TTL_MS;
-        this._categoryCache.set(type, { value, ts });
-        return value;
-      },
-      (e)     => { this._categoryCache.delete(type); throw e; },
-    );
-    this._categoryCache.set(type, { pending });
-    return pending;
+    return this._cached(this._categoryCache, type,
+      (cats) => (cats.length ? CATEGORY_TTL_MS : EMPTY_CATEGORY_TTL_MS),
+      () => this._fetchCategories(type));
   }
 
   async _fetchCategories(type) {
@@ -101,6 +123,61 @@ class VodManager {
       totalPages,
       page,
     };
+  }
+
+  // Every title in a category, cached (see LISTING_TTL_MS). Pages are read in
+  // order with a pause between them; a page that fails after the first ends
+  // the walk with what was read so far, and that partial list is kept only
+  // briefly so the next request tries again.
+  getAllItems(type, categoryId) {
+    const key = `${type}:${categoryId}`;
+    return this._cached(this._listingCache, key,
+      (r) => (r.complete ? LISTING_TTL_MS : PARTIAL_LISTING_TTL_MS),
+      () => this._fetchAllItems(type, String(categoryId)),
+    ).then((r) => r.items);
+  }
+
+  /** A category's titles if a fresh listing is cached, else undefined. */
+  peekAllItems(type, categoryId) {
+    return this._peek(this._listingCache, `${type}:${categoryId}`)?.items;
+  }
+
+  async _fetchAllItems(type, categoryId) {
+    const items = [];
+    let complete = true;
+    let pages = 1;
+    for (let p = 1; p <= Math.min(pages, LISTING_MAX_PAGES); p++) {
+      if (p > 1 && this._pageGapMs) await new Promise((r) => setTimeout(r, this._pageGapMs));
+      let js;
+      try {
+        const r = await this.client._stalkerCall({
+          type, action: 'get_ordered_list', category: categoryId, sortby: 'added', fav: '0', p: String(p),
+        });
+        js = r?.js || {};
+      } catch (e) {
+        if (p === 1) throw e;
+        log.warn(TAG, `listing ${type}/${categoryId}: page ${p} failed (${e.message}) — keeping ${items.length} titles for now`);
+        complete = false;
+        break;
+      }
+      const data = Array.isArray(js.data) ? js.data : [];
+      if (p === 1) {
+        const total   = parseInt(js.total_items || '0', 10) || data.length;
+        const perPage = parseInt(js.max_page_items || '14', 10) || 14;
+        pages = Math.max(1, Math.ceil(total / perPage));
+        if (pages > LISTING_MAX_PAGES) {
+          log.warn(TAG, `listing ${type}/${categoryId}: ${total} titles — reading the newest ${LISTING_MAX_PAGES * perPage}`);
+        }
+      }
+      if (!data.length) break;
+      for (const raw of data) {
+        const item = this._normalizeItem(raw);
+        if (!item.categoryId) item.categoryId = categoryId;
+        items.push(item);
+      }
+    }
+    log.info(TAG, `listing ${type}/${categoryId}: ${items.length} titles`);
+    return { items, complete };
   }
 
   // ── Seasons / Episodes (TV-show drill-down) ─────────────────────────────────
