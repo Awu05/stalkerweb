@@ -75,7 +75,7 @@ appState.profilesManager = profilesManager;
 const { authRoutes, connectPortal } = require('./routes/auth')(appState, config);
 
 // ── Idle auto-disconnect ───────────────────────────────────────────────────
-// Tear down the session after IDLE_TIMEOUT_MS of no stream/proxy activity.
+// Tear down the session after the idle timeout of no stream/proxy activity.
 const log = require('./logger');
 
 // ── HTTP request logger ────────────────────────────────────────────────────
@@ -115,18 +115,24 @@ app.use((req, res, next) => {
   next();
 });
 
-const IDLE_TIMEOUT_MS = parseInt(process.env.IDLE_TIMEOUT_MINUTES || '30', 10) * 60 * 1000;
+// Timeout comes from IDLE_TIMEOUT_MINUTES, overridden by a value saved on the
+// Settings page (see routes/settings.js). 0 = never auto-disconnect.
+const { parseIdleMinutes, DEFAULT_IDLE_MINUTES } = require('./lib/idleTimeout');
+const envIdleMinutes   = parseIdleMinutes(process.env.IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_MINUTES);
+const savedIdleMinutes = parseIdleMinutes(
+  new (require('./cache/CacheManager'))(config.dataDir).load()?.idle_timeout_minutes, null);
 
 function destroySession() {
-  if (!appState.sessionManager) return;
+  appState._idleTimer = null;
+  if (!appState.sessionManager || !appState.idleTimeoutMs) return;
   // Never tear down while a stream connection is still open — playback is live.
   // Defer the check by one idle interval so the timer resumes once it closes.
   if (appState.activeStreams > 0) {
     log.debug('server', `idle timeout reached but ${appState.activeStreams} stream(s) active — deferring disconnect`);
-    appState._idleTimer = setTimeout(destroySession, IDLE_TIMEOUT_MS);
+    appState._idleTimer = setTimeout(destroySession, appState.idleTimeoutMs);
     return;
   }
-  log.info('server', `idle timeout (${IDLE_TIMEOUT_MS / 60000}m) — auto-disconnecting session`);
+  log.info('server', `idle timeout (${appState.idleTimeoutMs / 60000}m) — auto-disconnecting session`);
   appState.sessionManager.destroy();
   appState.sessionManager = null;
   appState.client = null;
@@ -136,17 +142,35 @@ function destroySession() {
   appState.identity = null;
 }
 
-appState.idleTimeoutMs   = IDLE_TIMEOUT_MS;
+// (Re)arm the disconnect timer so it fires idleTimeoutMs after the last
+// activity — counting from lastActivityAt, so changing the timeout mid-session
+// keeps the elapsed idle time instead of restarting the countdown.
+function armIdleTimer() {
+  clearTimeout(appState._idleTimer);
+  appState._idleTimer = null;
+  if (!appState.idleTimeoutMs) return;   // 0 = never
+  const idleFor = appState.lastActivityAt ? Date.now() - Date.parse(appState.lastActivityAt) : 0;
+  appState._idleTimer = setTimeout(destroySession, Math.max(0, appState.idleTimeoutMs - idleFor));
+}
+
+appState.idleTimeoutMs   = (savedIdleMinutes ?? envIdleMinutes) * 60 * 1000;
 appState.lastActivityAt  = null;
 appState._idleTimer      = null;
 appState.activeStreams   = 0;      // open proxy stream connections (playback in progress)
 appState._reconnecting   = null;   // serialise concurrent auto-reconnects
 appState.connectPortal   = connectPortal;
+appState.idleTimeoutDefaultMinutes = envIdleMinutes;
+
+// Applies a timeout saved from the Settings page immediately — no restart.
+appState.setIdleTimeoutMinutes = function setIdleTimeoutMinutes(minutes) {
+  appState.idleTimeoutMs = minutes * 60 * 1000;
+  log.info('server', minutes ? `idle timeout set to ${minutes}m` : 'idle auto-disconnect disabled');
+  if (appState.sessionManager) armIdleTimer();
+};
 
 appState.touchActivity = function touchActivity() {
   appState.lastActivityAt = new Date().toISOString();
-  clearTimeout(appState._idleTimer);
-  appState._idleTimer = setTimeout(destroySession, IDLE_TIMEOUT_MS);
+  armIdleTimer();
 };
 
 // Attach a heartbeat to a long-lived proxy response so the idle-disconnect timer
@@ -205,7 +229,7 @@ const downloadsRoutes = require('./routes/downloads')(downloadManager, appState)
 const channelRoutes = require('./routes/channels')(appState);
 const epgRoutes = require('./routes/epg')(appState);
 const streamRoutes = require('./routes/stream')(appState, config);
-const settingsRoutes = require('./routes/settings')(config);
+const settingsRoutes = require('./routes/settings')(config, appState);
 const proxyRoutes = require('./routes/proxy')(appState);
 const m3uRoutes = require('./routes/m3u')(appState, logoManager);
 const xmltvRoutes = require('./routes/xmltv')(appState);

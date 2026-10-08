@@ -479,6 +479,14 @@ export default function SetupPage() {
   const [downloadDir, setDownloadDir]           = useState('')
   const [downloadDirSaving, setDownloadDirSaving] = useState(false)
   const [downloadDirNotice, setDownloadDirNotice] = useState(null)
+  // Idle auto-disconnect. idleMinutes is the text field; idleNever mirrors a
+  // saved 0. idleSaved is what the server has, to enable Save only on change.
+  const [idleMinutes, setIdleMinutes]   = useState('')
+  const [idleNever, setIdleNever]       = useState(false)
+  const [idleSaved, setIdleSaved]       = useState(null)
+  const [idleDefault, setIdleDefault]   = useState(30)
+  const [idleSaving, setIdleSaving]     = useState(false)
+  const [idleNotice, setIdleNotice]     = useState(null)
   const [logoStats, setLogoStats]   = useState(null)
   const [logoOverrides, setLogoOverrides] = useState({})
   const [logoRefreshing, setLogoRefreshing] = useState(false)
@@ -553,6 +561,12 @@ export default function SetupPage() {
       if (s) {
         setEpg(s.epg_enabled !== false)
         setDownloadDir(s.download_dir || '')
+        if (s.idle_timeout_default != null) setIdleDefault(s.idle_timeout_default)
+        if (s.idle_timeout_minutes != null) {
+          setIdleSaved(s.idle_timeout_minutes)
+          setIdleNever(s.idle_timeout_minutes === 0)
+          setIdleMinutes(s.idle_timeout_minutes === 0 ? String(s.idle_timeout_default ?? 30) : String(s.idle_timeout_minutes))
+        }
       }
       if (logos) { setLogoOverrides(logos.overrides || {}); setLogoStats(logos.stats || null) }
       if (status?.device) setDeviceProfile(status.device)
@@ -779,6 +793,34 @@ export default function SetupPage() {
       setTimeout(() => setDownloadDirNotice(null), 2500)
     }
   }
+  // Saving applies on the server immediately (no restart); then refresh the
+  // sidebar's idle countdown, which otherwise waits for the next status poll.
+  async function saveIdleTimeout(minutes) {
+    setIdleSaving(true)
+    setIdleNotice(null)
+    try {
+      await saveSettings({ idle_timeout_minutes: minutes })
+      setIdleSaved(minutes)
+      setIdleNotice({ type: 'success', msg: minutes === 0 ? 'Auto-disconnect turned off.' : 'Saved.' })
+      const st = await getStatus().catch(() => null)
+      setIdleInfo(st?.lastActivityAt && st?.idleTimeoutMs
+        ? { lastActivityAt: st.lastActivityAt, idleTimeoutMs: st.idleTimeoutMs }
+        : null)
+    } catch (err) {
+      setIdleNotice({ type: 'error', msg: err.message })
+    } finally {
+      setIdleSaving(false)
+      setTimeout(() => setIdleNotice(null), 2500)
+    }
+  }
+  function handleIdleNeverToggle(never) {
+    setIdleNever(never)
+    const minutes = never ? 0 : parseInt(idleMinutes, 10)
+    if (never || (Number.isInteger(minutes) && minutes > 0)) saveIdleTimeout(minutes)
+  }
+  const idleParsed = parseInt(idleMinutes, 10)
+  const idleValid  = /^\d+$/.test(idleMinutes.trim()) && idleParsed >= 1 && idleParsed <= 10080
+
   // Genre filters are stored per-profile on the backend. Update the app
   // context and local profile list immediately (optimistic), persist to the
   // server in the background, and invalidate the channel cache so the
@@ -1024,6 +1066,56 @@ export default function SetupPage() {
                 </p>
               )}
             </Field>
+          </div>
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">Idle Auto-Disconnect</p>
+                <p className="text-xs text-[var(--color-muted)] mt-0.5">
+                  Disconnect from the portal after this long with nothing playing. Playback always keeps the session open.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 pl-4">
+                <span className="text-xs text-[var(--color-muted)]">Never</span>
+                <Switch checked={idleNever} onCheckedChange={handleIdleNeverToggle} disabled={idleSaving} />
+              </div>
+            </div>
+            {!idleNever && (
+              <div className="flex items-center gap-2 mt-3">
+                <Input
+                  id="idle-timeout"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={10080}
+                  value={idleMinutes}
+                  onChange={e => setIdleMinutes(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && idleValid && idleParsed !== idleSaved) saveIdleTimeout(idleParsed) }}
+                  aria-label="Idle timeout in minutes"
+                  className="w-28"
+                />
+                <span className="text-sm text-[var(--color-muted)]">minutes</span>
+                <Button
+                  type="button"
+                  onClick={() => saveIdleTimeout(idleParsed)}
+                  disabled={idleSaving || !idleValid || idleParsed === idleSaved}
+                  className="shrink-0 h-9 px-3 text-xs ml-auto"
+                >
+                  {idleSaving ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            )}
+            {!idleNever && idleMinutes.trim() !== '' && !idleValid && (
+              <p className="text-xs mt-1 text-[var(--color-live)]">Enter a whole number from 1 to 10080 (one week).</p>
+            )}
+            {!idleNotice && !idleNever && (
+              <p className="text-xs mt-1 text-[var(--color-muted)]">Default: {idleDefault} minutes (IDLE_TIMEOUT_MINUTES).</p>
+            )}
+            {idleNotice && (
+              <p className={cn('text-xs mt-1', idleNotice.type === 'error' ? 'text-[var(--color-live)]' : 'text-[var(--color-success)]')}>
+                {idleNotice.msg}
+              </p>
+            )}
           </div>
         </Card>
 

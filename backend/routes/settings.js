@@ -6,6 +6,7 @@
 
 const express = require('express');
 const CacheManager = require('../cache/CacheManager');
+const { parseIdleMinutes, MAX_IDLE_MINUTES } = require('../lib/idleTimeout');
 
 const STB_MODELS    = ['MAG200', 'MAG250', 'MAG254', 'MAG256', 'MAG270', 'MAG322', 'MAG352', 'CUSTOM'];
 const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic'];
@@ -21,7 +22,7 @@ const DEFAULTS = {
   stbemu_firmware: '0.2.18-r14-pub-250',
 };
 
-module.exports = function settingsModule(config) {
+module.exports = function settingsModule(config, appState = null) {
   const router = express.Router();
   const cache = new CacheManager(config.dataDir);
 
@@ -37,12 +38,15 @@ module.exports = function settingsModule(config) {
       stbemu_custom_firmware:  saved.stbemu_custom_firmware  ?? DEFAULTS.stbemu_custom_firmware,
       stbemu_firmware:         saved.stbemu_firmware         ?? DEFAULTS.stbemu_firmware,
       download_dir:            saved.download_dir            || config.downloadDir,
+      // Effective value (saved, else IDLE_TIMEOUT_MINUTES). 0 = never.
+      idle_timeout_minutes:    appState ? Math.round(appState.idleTimeoutMs / 60000) : null,
+      idle_timeout_default:    appState?.idleTimeoutDefaultMinutes ?? null,
     });
   });
 
   router.post('/', (req, res) => {
     const existing = cache.load() || {};
-    const { epg_enabled, vod_enabled, show_adult, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir } = req.body;
+    const { epg_enabled, vod_enabled, show_adult, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir, idle_timeout_minutes } = req.body;
     if (epg_enabled !== undefined)            existing.epg_enabled            = !!epg_enabled;
     if (vod_enabled !== undefined)            existing.vod_enabled            = !!vod_enabled;
     if (show_adult !== undefined)             existing.show_adult             = !!show_adult;
@@ -60,7 +64,16 @@ module.exports = function settingsModule(config) {
       if (!dir) return res.status(400).json({ error: 'download_dir cannot be empty' });
       existing.download_dir = dir;
     }
+    let idleMinutes = null;
+    if (idle_timeout_minutes !== undefined) {
+      idleMinutes = parseIdleMinutes(idle_timeout_minutes, null);
+      if (idleMinutes === null) {
+        return res.status(400).json({ error: `idle_timeout_minutes must be a whole number from 0 (never) to ${MAX_IDLE_MINUTES}` });
+      }
+      existing.idle_timeout_minutes = idleMinutes;
+    }
     cache.save(existing);
+    if (idleMinutes !== null) appState?.setIdleTimeoutMinutes(idleMinutes);
     res.json({ success: true, epg_enabled: existing.epg_enabled });
   });
 

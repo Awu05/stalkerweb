@@ -757,7 +757,8 @@ export default function PlayerPage() {
   }, [])
 
   // Keepalive — ping backend every 10 minutes while playing to prevent idle disconnect.
-  // The idle timer is 30 minutes; 10-minute pings keep it from ever firing mid-stream.
+  // Belt-and-braces: the proxy stream heartbeat already holds the session open
+  // during playback, whatever idle timeout is configured in Settings.
   useEffect(() => {
     if (status !== 'playing') return
     const id = setInterval(() => { streamKeepalive().catch(() => {}) }, 10 * 60 * 1000)

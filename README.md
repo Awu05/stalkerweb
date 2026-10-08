@@ -44,6 +44,8 @@ services:
       # Optional: minutes of inactivity before the portal session is torn
       # down (default 30). The timer is held off while a stream is playing,
       # so this is only the grace window after the last viewer disconnects.
+      # This is the default; Settings → App Preferences can change it (or
+      # turn it off) at runtime, and a value saved there takes precedence.
       # - IDLE_TIMEOUT_MINUTES=30
 ```
 
@@ -113,8 +115,9 @@ StalkerWeb includes a built-in HLS proxy that forwards stream requests to the po
 While any of these connections is open, the backend renews the idle-disconnect
 timer on a 60-second heartbeat, so playback through **any** client (web,
 Jellyfin, Kodi, VLC) keeps the portal session alive — including single,
-long-lived stream pipes — and the session only tears down `IDLE_TIMEOUT_MINUTES`
-after the last viewer disconnects.
+long-lived stream pipes — and the session only tears down after the idle timeout
+(Settings → App Preferences, default `IDLE_TIMEOUT_MINUTES`) once the last viewer
+disconnects. Setting it to **Never** disables auto-disconnect.
 
 ---
 
