@@ -21,6 +21,7 @@ const log = require('../logger');
 const { baseUrl } = require('../lib/publicUrl');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
+const { StreamDiagnostics } = require('../lib/streamDiagnostics');
 const TAG = 'proxy';
 
 // Dedicated HTTP clients for CDN stream/segment fetches with a PERSISTENT
@@ -205,6 +206,9 @@ module.exports = function proxyModule(appState) {
   // configuring; URLs are short-lived (live HLS) so expiry-on-restart is fine.
   const proxySecret = crypto.randomBytes(32);
 
+  // Logs stutter / replay / drift causes per live channel (lib/streamDiagnostics).
+  const diag = new StreamDiagnostics();
+
   // Verify a client-supplied (realUrl, sig) pair was emitted by us. Constant-time.
   function verifyProxySig(realUrl, sig) {
     if (!sig) return false;
@@ -324,6 +328,7 @@ module.exports = function proxyModule(appState) {
         body = Buffer.concat(rest);
       }
       const proxyOrigin = baseUrl(req);
+      if (channelId) diag.playlist(channelId, realUrl, body.toString('utf8'), 0);
       const rewritten = rewriteM3u8(body.toString('utf8'), realUrl, proxyOrigin, proxySecret, channelId);
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
@@ -405,6 +410,7 @@ module.exports = function proxyModule(appState) {
     }
 
     let response;
+    const fetchStart = Date.now();
     try {
       response = await fetchFromPortal(http, headers, realUrl);
     } catch (e) {
@@ -431,6 +437,7 @@ module.exports = function proxyModule(appState) {
     }
 
     const body = Buffer.from(response.data).toString('utf8');
+    if (channelId) diag.playlist(channelId, realUrl, body, Date.now() - fetchStart);
     const proxyOrigin = baseUrl(req);
     const rewritten = rewriteM3u8(body, realUrl, proxyOrigin, proxySecret, channelId);
 
@@ -736,6 +743,8 @@ module.exports = function proxyModule(appState) {
     // uses gzip for the playlists). Match that exactly for .ts/.aac/.m4s fetches.
     headers['Accept-Encoding'] = 'identity';
 
+    const ch = req.query.ch || null;
+    const d = ch ? diag.segment(ch, realUrl) : null;
     let response;
     try {
       response = await fetchStreamFromPortal(headers, realUrl);
@@ -747,8 +756,8 @@ module.exports = function proxyModule(appState) {
     // If the viewer aborts (seek/switch/close), tear down the upstream fetch so
     // it doesn't keep occupying the per-stream (maxSockets:1) socket.
     req.on('close', () => { if (!res.writableEnded) response.data?.destroy(); });
+    d?.firstByte();   // the CDN's response has started
 
-    const ch = req.query.ch || null;
     if (response.status === 403) {
       response.data.destroy();
       log.warn(TAG, 'portal returned 403 on segment — stream token expired');
@@ -819,6 +828,12 @@ module.exports = function proxyModule(appState) {
     res.set('Content-Type', ct);
     res.set('Access-Control-Allow-Origin', '*');
     if (response.headers['content-length']) res.set('Content-Length', response.headers['content-length']);
+    if (d) {
+      d.data(firstChunk);
+      let bytes = firstChunk.length;
+      response.data.on('data', (c) => { bytes += c.length; d.data(c); });
+      response.data.once('end', () => d.done(bytes));
+    }
     res.write(firstChunk);
     response.data.resume();
     response.data.on('error', err => { log.error(TAG, `segment pipe error: ${err.message}`); res.destroy(); });
