@@ -226,7 +226,10 @@ async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel =
 // Exported for unit tests
 module.exports.helpers = { encodeProxyUrl, decodeProxyUrl, rewriteM3u8, isPlaylistUrl, resolveUrl, isM3u8Body, fetchFromPortal, signProxyUrl }
 
-module.exports = function proxyModule(appState) {
+// Waits before asking again for a segment the server says it doesn't have.
+const SEGMENT_RETRY_MS = [1000, 2000];
+
+module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY_MS } = {}) {
   const router = express.Router();
 
   // Per-process key for signing rewritten proxy URLs. Random so it never needs
@@ -811,16 +814,37 @@ module.exports = function proxyModule(appState) {
     const ch = req.query.ch || null;
     const d = ch ? diag.segment(ch, realUrl) : null;
     let response;
-    try {
-      response = await fetchStreamFromPortal(headers, realUrl, undefined, ch);
-    } catch (e) {
-      log.error(TAG, `segment fetch failed: ${e.message}`);
-      return res.status(502).send(`Fetch failed: ${e.message}`);
-    }
-
+    let gone = false;
     // If the viewer aborts (seek/switch/close), tear down the upstream fetch so
     // it doesn't keep occupying the per-stream (maxSockets:1) socket.
-    req.on('close', () => { if (!res.writableEnded) response.data?.destroy(); });
+    req.on('close', () => {
+      gone = true;
+      if (!res.writableEnded) response?.data?.destroy();
+    });
+    // Around a source restart the server can list a segment it can't serve
+    // yet (measured on a Flussonic server: the newest segment, a second after
+    // it renumbered). Players take a failed segment badly — VLC stops the
+    // stream, Stremio retried one for a minute — so ask again shortly first.
+    const name = realUrl.split('?')[0].split('/').slice(-2).join('/');
+    const startedAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await fetchStreamFromPortal(headers, realUrl, undefined, ch);
+      } catch (e) {
+        log.error(TAG, `segment fetch failed: ${e.message}`);
+        return res.status(502).send(`Fetch failed: ${e.message}`);
+      }
+      if (response.status !== 404 || attempt >= segmentRetryMs.length || gone) {
+        if (attempt > 0 && ch) {
+          const waited = ((Date.now() - startedAt) / 1000).toFixed(1);
+          if (response.status === 404) log.warn('stream-diag', `ch ${ch}: segment ${name} still missing after ${attempt + 1} tries over ${waited}s — the server listed it but doesn't have it`);
+          else log.info('stream-diag', `ch ${ch}: segment ${name} was missing, served on try ${attempt + 1} after ${waited}s`);
+        }
+        break;
+      }
+      response.data.resume();   // read the (tiny) 404 off the connection so it stays usable
+      await new Promise((r) => setTimeout(r, segmentRetryMs[attempt]));
+    }
     d?.firstByte();   // the CDN's response has started
 
     if (response.status === 403) {
@@ -832,10 +856,10 @@ module.exports = function proxyModule(appState) {
       return res.status(410).send('Portal returned HTTP 403 — stream token expired');
     }
     if (response.status === 404) {
-      // A segment that has dropped out of the live window (the player fell a
-      // little behind). The token is fine: answer with a 5xx so the player
-      // retries or moves on, and keep the cached link.
-      response.data.destroy();
+      // Still missing after the retries: dropped out of the live window, or
+      // never there. The token is fine: answer with a 5xx so the player
+      // retries or moves on, and keep the cached link (and the connection).
+      response.data.resume();
       log.debug(TAG, 'portal returned 404 on segment — segment no longer available');
       return res.status(502).send('Portal returned HTTP 404 — segment no longer available');
     }

@@ -48,7 +48,7 @@ beforeAll(async () => {
     },
   }
   const e = express()
-  e.use('/proxy', proxyModule(appState))
+  e.use('/proxy', proxyModule(appState, { segmentRetryMs: [10, 10] }))
   app = await listen(e)
 })
 
