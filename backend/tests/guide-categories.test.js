@@ -10,20 +10,32 @@ describe('standardCategories', () => {
     expect(standardCategories('Cinema')).toEqual(['Movie'])
   })
 
-  it('falls back to well-known channel names', () => {
-    expect(standardCategories('USA', null, 'ESPN 2')).toEqual(['Sports'])
-    expect(standardCategories('USA', null, 'Disney Junior')).toEqual(['Kids'])
-    expect(standardCategories('USA', null, 'CNN International')).toEqual(['News'])
+  it('splits letters from digits and ignores accents', () => {
+    expect(standardCategories('NEWS24')).toEqual(['News'])
+    expect(standardCategories('News18 India')).toEqual(['News'])
+    expect(standardCategories('Film4')).toEqual(['Movie'])
+    expect(standardCategories('FR | Cinéma')).toEqual(['Movie'])
+    expect(standardCategories('ES | Películas')).toEqual(['Movie'])
+    expect(standardCategories('DE | Nachrichten')).toEqual(['News'])
+  })
+
+  it('matches whole words only', () => {
+    expect(standardCategories('Transport TV')).toEqual([])
+    expect(standardCategories('Passport Travel')).toEqual([])
+    expect(standardCategories('Embracing Life')).toEqual([])
+    expect(standardCategories('Childish Gambino Live')).toEqual([])
+    expect(standardCategories('Newsome Lifestyle')).toEqual([])
+    expect(standardCategories('Nickel Classics')).toEqual([])
   })
 
   it('returns nothing for genres it cannot place', () => {
     expect(standardCategories('ENGLISH | USA')).toEqual([])
     expect(standardCategories('Documentary')).toEqual([])
-    expect(standardCategories()).toEqual([])
+    expect(standardCategories('')).toEqual([])
+    expect(standardCategories(null)).toEqual([])
   })
 
-  it('does not match inside unrelated words', () => {
-    expect(standardCategories('Newsome Lifestyle')).toEqual([])  // "news" only as a word
-    expect(standardCategories('Nickel Classics')).toEqual([])
+  it('can return more than one, in a fixed order', () => {
+    expect(standardCategories('Kids Movies')).toEqual(['Kids', 'Movie'])
   })
 })

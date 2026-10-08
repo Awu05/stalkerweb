@@ -3,28 +3,54 @@
 // Standard programme categories for the XMLTV guide.
 //
 // Jellyfin's Live TV "Programs" page has Movies, Sports, Kids and News rows,
-// filled from each programme's <category>. It only recognises exact words —
-// by default "movie", "sports", "kids"/"children"/"family", "news" — so a
-// portal genre like "ENGLISH | KIDS" or "USA SPORTS" matches nothing. This
-// maps a channel's genre, the portal's own programme category and the channel
-// name onto those words.
+// filled from each programme's <category>. It compares categories exactly
+// (ignoring case) against its lists — by default "movie", "sports",
+// "kids"/"children"/"family", "news" and a few more — so a portal genre like
+// "ENGLISH | KIDS" or "USA SPORTS" matches nothing. This turns a genre, or the
+// portal's own category for a programme, into those words.
+//
+// Only genre and category text are used, never channel names: a name says
+// little about what a programme is (HBO mostly airs series, "Transport TV"
+// is not sport), and guessing from it put programmes in the wrong rows.
+//
+// Matching is by whole words. Text is lower-cased, accents are dropped
+// ("Cinéma" → cinema), and a word is split where letters meet digits, so
+// "News18" and "NEWS24" read as "news", "Film4" as "film".
 
-const RULES = [
-  ['News',   /\bnews\b|\bcnn\b|\bmsnbc\b|\bcnbc\b|\bbbc world\b|\bsky news\b|\bal jazeera\b/i],
-  ['Sports', /sport|football|soccer|\bnba\b|\bnfl\b|\bnhl\b|\bmlb\b|\bufc\b|\bwwe\b|boxing|tennis|\bgolf\b|cricket|rugby|racing|\bf1\b|\bespn\b|\bdazn\b|\bbein\b/i],
-  ['Kids',   /\bkids?\b|child|cartoon|junior|\bjr\b|\bdisney\b|nickelodeon|\bnick\b|\bnick jr\b|boomerang|cbeebies|\bbaby\b|toon/i],
-  ['Movie',  /movie|cinema|\bfilms?\b|\bkino\b|\bcine\b|\bhbo\b|cinemax|showtime|starz|\bamc\b|\btcm\b/i],
-];
+const WORDS = {
+  News:   ['news', 'noticias', 'nachrichten', 'actualites', 'notizie', 'nieuws'],
+  Sports: ['sport', 'sports', 'deportes', 'football', 'soccer', 'futbol', 'basketball', 'baseball',
+           'hockey', 'tennis', 'golf', 'cricket', 'rugby', 'racing', 'motorsport', 'motorsports',
+           'boxing', 'ufc', 'wwe', 'nba', 'nfl', 'nhl', 'mlb', 'f1'],
+  Kids:   ['kids', 'kid', 'children', 'childrens', 'child', 'cartoon', 'cartoons', 'junior',
+           'infantil', 'enfants', 'kinder', 'bambini'],
+  Movie:  ['movie', 'movies', 'cinema', 'cine', 'film', 'films', 'filme', 'peliculas', 'pelicula', 'kino'],
+};
+const ORDER = ['News', 'Sports', 'Kids', 'Movie'];
+const LOOKUP = new Map(ORDER.flatMap((name) => WORDS[name].map((w) => [w, name])));
+
+function words(text) {
+  return String(text ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // drop accents
+    .toLowerCase()
+    .replace(/([a-z])(\d)|(\d)([a-z])/g, '$1$3 $2$4')    // News18 → news 18
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
 /**
- * The standard categories that apply, in a fixed order.
- * @param {...(string|null|undefined)} texts  genre name, programme category, channel name…
- * @returns {string[]} e.g. ['Kids'] — empty when nothing matches
+ * The standard categories a genre or programme category points to, in a fixed
+ * order. Empty when nothing matches.
+ * @param {string|null|undefined} text
+ * @returns {string[]} e.g. ['Kids']
  */
-function standardCategories(...texts) {
-  const text = texts.filter(Boolean).join(' ');
-  if (!text) return [];
-  return RULES.filter(([, re]) => re.test(text)).map(([name]) => name);
+function standardCategories(text) {
+  const found = new Set();
+  for (const w of words(text)) {
+    const name = LOOKUP.get(w);
+    if (name) found.add(name);
+  }
+  return ORDER.filter((name) => found.has(name));
 }
 
 module.exports = { standardCategories };

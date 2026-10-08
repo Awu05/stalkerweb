@@ -30,6 +30,13 @@ const attr = (v) => String(v ?? '').replace(/"/g, "'");
 // name the channel was given at parse time and finally to "Other", so a
 // channel is never left with an empty group-title (which most clients lump
 // into one unnamed bucket).
+// A channel's genre name: the genre id → group lookup, falling back to the
+// name the channel was given at parse time. Empty when neither is known.
+// Shared with the XMLTV feed, so a channel's M3U group and guide category agree.
+function channelGenre(ch, nameById) {
+  return nameById.get(String(ch.genreId)) || ch.genre || '';
+}
+
 function groupChannels(channels, groups) {
   const nameById = new Map(groups.map((g) => [String(g.id), g.name]));
   const order    = new Map(groups.map((g, i) => [g.name, i]));
@@ -39,7 +46,7 @@ function groupChannels(channels, groups) {
     .map((ch, i) => ({
       ch,
       i,
-      group: nameById.get(String(ch.genreId)) || ch.genre || OTHER_GROUP,
+      group: channelGenre(ch, nameById) || OTHER_GROUP,
     }))
     .sort((a, b) =>
       rank(a.group) - rank(b.group) ||
@@ -107,3 +114,4 @@ module.exports = function m3uModule(appState, logoManager) {
 };
 
 module.exports.groupChannels = groupChannels;
+module.exports.channelGenre = channelGenre;

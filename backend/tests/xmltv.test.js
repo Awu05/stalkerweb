@@ -17,7 +17,7 @@ const t = Math.floor(now.getTime() / 1000)
 const epgData = {
   10: [
     { start_timestamp: t, stop_timestamp: t + 1800, name: 'Headlines & More', descr: 'x' },
-    { start_timestamp: t + 1800, stop_timestamp: t + 3600, name: 'Weather' },
+    { start_timestamp: t + 1800, stop_timestamp: t + 3600, name: 'Weather', category: 'Local Sports Desk' },
   ],
 }
 
@@ -27,32 +27,69 @@ describe('guide categories', () => {
     return [...prog.matchAll(/<category lang="en">([^<]*)<\/category>/g)].map((m) => m[1])
   }
 
-  it('adds the standard word Jellyfin sorts by next to the portal genre', () => {
-    const xml = buildGuideXml({
-      channels: [
-        { uniqueId: '1', channelId: 1, name: 'Cartoon Network', genreId: '7', iconPath: '' },
-        { uniqueId: '2', channelId: 2, name: 'Fox Sports 1',   genreId: '8', iconPath: '' },
-        { uniqueId: '3', channelId: 3, name: 'Cooking',        genreId: '9', iconPath: '' },
-      ],
-      groups: [{ id: '7', name: 'ENGLISH | KIDS' }, { id: '8', name: 'USA' }, { id: '9', name: 'Lifestyle' }],
-      epgData: {
-        1: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Gumball' }],
-        2: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Game Day' }],
-        3: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Bake Off', category: 'Movies' }],
-      },
-      now,
-    }).xml
+  const prog = (name, extra = {}) => [{ start_timestamp: t, stop_timestamp: t + 1800, name, ...extra }]
+  const build = (opts = {}) => buildGuideXml({
+    channels: [
+      { uniqueId: '1', channelId: 1, name: 'Cartoon Network', genreId: '7', iconPath: '' },
+      { uniqueId: '2', channelId: 2, name: 'ESPN',            genreId: '8', iconPath: '' },
+      { uniqueId: '3', channelId: 3, name: 'HBO',             genreId: '8', iconPath: '' },
+      { uniqueId: '4', channelId: 4, name: 'Hentai Toons',    genreId: '9', iconPath: '' },
+      { uniqueId: '5', channelId: 5, name: 'Kids Placeholder', genreId: '7', iconPath: '' },
+      { uniqueId: '6', channelId: 6, name: 'Loose',           genreId: '404', genre: 'UK | NEWS', iconPath: '' },
+    ],
+    groups: [{ id: '7', name: 'ENGLISH | KIDS' }, { id: '8', name: 'USA' }, { id: '9', name: 'XXX | KIDS' }],
+    epgData: {
+      1: prog('Gumball'),
+      2: prog('Game Day'),
+      3: prog('The Last of Us', { category: 'Drama' }),
+      4: prog('Late Show'),
+      6: prog('Headlines'),
+    },
+    now,
+    ...opts,
+  }).xml
 
-    expect(categoriesOf(xml, 'Gumball')).toEqual(['ENGLISH | KIDS', 'Kids'])
-    expect(categoriesOf(xml, 'Game Day')).toEqual(['USA', 'Sports'])        // from the channel name
-    expect(categoriesOf(xml, 'Bake Off')).toEqual(['Lifestyle', 'Movies', 'Movie']) // portal's own category
+  it('adds the standard word Jellyfin sorts by next to the portal genre', () => {
+    expect(categoriesOf(build(), 'Gumball')).toEqual(['ENGLISH | KIDS', 'Kids'])
   })
 
-  it('adds nothing when no rule applies, and never repeats a category', () => {
+  it('adds nothing when the genre says nothing — channel names are not used', () => {
+    expect(categoriesOf(build(), 'Game Day')).toEqual(['USA'])
+  })
+
+  it("lets the portal's own programme category decide", () => {
+    // HBO in genre USA, programme marked Drama: no guess of Movie.
+    expect(categoriesOf(build(), 'The Last of Us')).toEqual(['USA', 'Drama'])
+    const xml = buildGuideXml({
+      channels: [{ uniqueId: '1', channelId: 1, name: 'Mixed', genreId: '1', iconPath: '' }],
+      groups: [{ id: '1', name: 'ENGLISH | KIDS' }],
+      epgData: { 1: prog('Feature', { category: 'Movie' }) },
+      now,
+    }).xml
+    expect(categoriesOf(xml, 'Feature')).toEqual(['ENGLISH | KIDS', 'Movie'])  // not also Kids
+  })
+
+  it('never tags adult channels', () => {
+    expect(categoriesOf(build(), 'Late Show')).toEqual(['XXX | KIDS'])
+  })
+
+  it('leaves filler blocks with only the genre name', () => {
+    expect(categoriesOf(build(), 'Kids Placeholder')).toEqual(['ENGLISH | KIDS'])
+  })
+
+  it("uses the channel's parsed genre when its genre id is unknown", () => {
+    expect(categoriesOf(build(), 'Headlines')).toEqual(['UK | NEWS', 'News'])
+  })
+
+  it('adds no standard words with categories: false (?categories=none)', () => {
+    expect(categoriesOf(build({ categories: false }), 'Gumball')).toEqual(['ENGLISH | KIDS'])
+  })
+
+  it('never repeats a category', () => {
     const xml = buildGuideXml({
       channels: [{ uniqueId: '1', channelId: 1, name: 'Daily', genreId: '1', iconPath: '' }],
       groups: [{ id: '1', name: 'News' }],
-      epgData: { 1: [{ start_timestamp: t, stop_timestamp: t + 1800, name: 'Morning', category: 'news' }] },
+      epgData: { 1: prog('Morning', { category: 'news' }) },
       now,
     }).xml
     expect(categoriesOf(xml, 'Morning')).toEqual(['News'])
@@ -124,6 +161,14 @@ describe('GET /api/xmltv', () => {
     const a = (await get(base)).body.toString()
     const b = (await get(base)).body.toString()
     expect(b).toBe(a)
+  })
+
+  it('honours ?categories=none, cached separately from the tagged feed', async () => {
+    // "Weather" carries the portal category "Local Sports Desk" → Sports.
+    const sports = '<category lang="en">Sports</category>'
+    expect((await get(base)).body.toString()).toContain(sports)
+    expect((await get(`${base}?categories=none`)).body.toString()).not.toContain(sports)
+    expect((await get(base)).body.toString()).toContain(sports)
   })
 
   it('honours ?filler=none', async () => {
