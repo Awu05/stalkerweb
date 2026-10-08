@@ -218,6 +218,48 @@ their next refresh.
 
 ---
 
+## Stremio
+
+StalkerWeb is also a Stremio addon. Live TV, movies and series appear in
+Stremio's Discover tab, each with the portal's categories in the genre
+dropdown, and movies and series show up in Stremio's search.
+
+1. In Stremio, open **Addons** and paste the addon link into the search box:
+   `https://your-host:8443/stremio/manifest.json`
+2. Click **Install**.
+
+Stremio only installs addons over **HTTPS**, with one exception:
+`http://127.0.0.1:8983/stremio/manifest.json` works when Stremio runs on the
+same computer as StalkerWeb. For a TV, phone or another computer, serve
+StalkerWeb over HTTPS in one of these ways:
+
+- **A reverse proxy you already run** (Caddy, nginx, Traefik) with a
+  certificate for its domain. Install from that `https://` address.
+- **Tailscale.** On the StalkerWeb host, `tailscale serve --bg 8983` gives it a
+  trusted `https://<machine>.<tailnet>.ts.net` address, reachable from your
+  other Tailscale devices. Install from
+  `https://<machine>.<tailnet>.ts.net/stremio/manifest.json`.
+- **StalkerWeb's built-in HTTPS.** Set `HTTPS_PORT` (e.g. `8443`), plus
+  `HTTPS_CERT` and `HTTPS_KEY` pointing at a PEM certificate and key mounted
+  into the container. HTTP keeps running on `PORT` as before. The certificate
+  must be trusted by the device running Stremio; a self-signed one usually
+  isn't.
+
+```yaml
+    environment:
+      - HTTPS_PORT=8443
+      - HTTPS_CERT=/app/data/tls/cert.pem
+      - HTTPS_KEY=/app/data/tls/key.pem
+    ports:
+      - "8443:8443"
+```
+
+The streams are the same `/proxy` links as every other export, so the device
+playing them must be able to reach StalkerWeb's address. The same filters
+apply as for the M3U and Xtream.
+
+---
+
 ## Building from Source
 
 ```bash

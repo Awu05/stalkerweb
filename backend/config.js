@@ -6,6 +6,10 @@ const config = {
   port: parseInt(process.env.PORT || '8983', 10),
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   nodeEnv: process.env.NODE_ENV || 'development',
+  // Optional HTTPS listener (see server.js): port plus PEM certificate and key.
+  httpsPort: parseInt(process.env.HTTPS_PORT || '0', 10) || 0,
+  httpsCert: process.env.HTTPS_CERT || '',
+  httpsKey: process.env.HTTPS_KEY || '',
 };
 
 config.cacheDir = path.join(config.dataDir, 'cache');

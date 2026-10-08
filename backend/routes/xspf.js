@@ -11,7 +11,9 @@
 const express = require('express');
 const { groupChannels } = require('./m3u');
 const log = require('../logger');
+const { baseUrl } = require('../lib/publicUrl');
 const { exportFilterFor } = require('../lib/exportFilter');
+const { readyForClient } = require('../lib/clientSession');
 const TAG = 'xspf';
 
 const VLC_EXT = 'http://www.videolan.org/vlc/playlist/0';      // extension application id
@@ -71,7 +73,8 @@ function buildXspf(channels, groups, base, logoFor = () => '') {
 module.exports = function xspfModule(appState, logoManager) {
   const router = express.Router();
 
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
+    await readyForClient(appState, { waitForChannels: true });  // after an idle disconnect
     const { channelManager } = appState;
     if (!channelManager) {
       return res.status(503).send('Not connected to portal — connect first via the web UI');
@@ -88,7 +91,7 @@ module.exports = function xspfModule(appState, logoManager) {
       || (logoManager ? logoManager.resolveDbLogo(ch.name) : '')
       || '';
 
-    const base = `${req.protocol}://${req.get('host')}`;
+    const base = baseUrl(req);
     // Hidden genres/languages and adult channels are left out (?all=1 keeps them).
     const shown = channels.filter(exportFilterFor(req, appState).keep);
     const xml   = buildXspf(shown, channelManager.getGroups(), base, logoFor);

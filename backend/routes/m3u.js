@@ -13,7 +13,9 @@
 
 const express = require('express');
 const log = require('../logger');
+const { baseUrl } = require('../lib/publicUrl');
 const { exportFilterFor } = require('../lib/exportFilter');
+const { readyForClient } = require('../lib/clientSession');
 const TAG = 'm3u';
 
 const OTHER_GROUP = 'Other';
@@ -59,7 +61,8 @@ function groupChannels(channels, groups) {
 module.exports = function m3uModule(appState, logoManager) {
   const router = express.Router();
 
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
+    await readyForClient(appState, { waitForChannels: true });  // after an idle disconnect
     const { channelManager } = appState;
 
     if (!channelManager) {
@@ -81,7 +84,7 @@ module.exports = function m3uModule(appState, logoManager) {
     // category's channels then sit together and the category stays visible.
     const prefix = req.query.prefix === '1';
 
-    const base  = `${req.protocol}://${req.get('host')}`;
+    const base  = baseUrl(req);
     const lines = ['#EXTM3U x-tvg-url=""'];
 
     for (const { ch, group } of groupChannels(shown, groups)) {
