@@ -83,7 +83,10 @@ jobs:
           path: android/app/build/outputs/apk/tv/debug/app-tv-debug.apk
           retention-days: 7
 
-  # ── Build & push Docker image (CI branch tag) ────────────────────────────
+  # ── Build & push Docker image (branch build) ─────────────────────────────
+  # Pushes :main and :sha-<short> for every push to main; PRs build only.
+  # `latest` is reserved for tagged releases (see release.yml), so it always
+  # means "newest release", never "whatever was merged last".
   build-docker:
     runs-on: ubuntu-latest
     permissions:
@@ -111,15 +114,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Short commit id for the version label
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,enable=${{ github.event_name != 'pull_request' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -129,110 +137,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ github.ref_name }}-${{ env.SHORT_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # ── Release: build signed APKs + versioned Docker + GitHub Release ────────
-  release:
-    needs: [backend-check, frontend-check, build-apk, build-docker]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Downcase IMAGE_NAME
-        run: |
-          echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
-        env:
-          IMAGE_NAME: ${{ github.repository }}
-
-      - name: Compute next version
-        id: version
-        run: |
-          git fetch --tags
-          LATEST=$(git tag -l 'v[0-9]*' | sort -V | tail -1)
-          if [ -z "$LATEST" ]; then
-            NEW_TAG="v0.1.0"
-          else
-            VERSION="${LATEST#v}"
-            MAJOR=$(echo "$VERSION" | cut -d. -f1)
-            MINOR=$(echo "$VERSION" | cut -d. -f2)
-            PATCH=$(echo "$VERSION" | cut -d. -f3)
-            NEW_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
-          fi
-          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
-          echo "tag_clean=${NEW_TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-java@v5
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - uses: gradle/actions/setup-gradle@v6
-
-      - name: Restore signing keystore
-        run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/debug.keystore
-
-      - name: Build release APKs
-        working-directory: android
-        run: gradle :app:assembleMobileRelease :app:assembleTvRelease -PversionName="${{ steps.version.outputs.tag_clean }}"
-
-      - name: Rename APKs
-        run: |
-          mv android/app/build/outputs/apk/mobile/release/app-mobile-release.apk \
-             stalkerweb-mobile-${{ steps.version.outputs.tag }}.apk
-          mv android/app/build/outputs/apk/tv/release/app-tv-release.apk \
-             stalkerweb-tv-${{ steps.version.outputs.tag }}.apk
-
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push versioned Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
-          make_latest: true
-          files: |
-            stalkerweb-mobile-${{ steps.version.outputs.tag }}.apk
-            stalkerweb-tv-${{ steps.version.outputs.tag }}.apk
-          body: |
-            ## Docker image
-
-            ```
-            docker pull ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
-            ```
-
-            ## Android APKs
-
-            | APK | Target |
-            |-----|--------|
-            | `stalkerweb-mobile-${{ steps.version.outputs.tag }}.apk` | Phone / tablet (Android 8.0+) |
-            | `stalkerweb-tv-${{ steps.version.outputs.tag }}.apk` | FireTV / Android TV / Google TV |
-
-            Enable **Install from unknown sources** before sideloading.
