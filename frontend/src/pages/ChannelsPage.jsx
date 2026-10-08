@@ -58,6 +58,29 @@ function EditButton({ channel, onEdit, className, size }) {
   )
 }
 
+// Favourite toggle for a tile — shown on hover, and always once favourited.
+// A span with button semantics for the same reason as EditButton.
+function FavoriteButton({ channel, isFavorite, onToggle, className, size }) {
+  const toggle = (e) => { e.stopPropagation(); e.preventDefault(); onToggle(channel) }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={toggle}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggle(e) }}
+      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      aria-label={isFavorite ? `Remove ${channel.name} from favorites` : `Add ${channel.name} to favorites`}
+      aria-pressed={isFavorite}
+      className={cn('absolute z-10 p-1 rounded transition-colors', className,
+        isFavorite
+          ? 'text-rose-500'
+          : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-rose-400')}
+    >
+      <Heart size={size} fill={isFavorite ? 'currentColor' : 'none'} />
+    </span>
+  )
+}
+
 const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, onToggleFavorite, onClick, onSetLogo, compact, nowNext, health }) {
   const [imgError, setImgError] = useState(false)
   const logo = logoUrl || getProxiedLogoUrl(channel.iconPath) || ''
@@ -79,13 +102,15 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
             <AlertTriangle size={11} fill="currentColor" className="drop-shadow" />
           </span>
         )}
+        {onToggleFavorite && <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-1 right-6" size={11} />}
         {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-1 right-1" size={11} />}
         <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
           {logo && !imgError
             ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-0.5" />
             : <Tv2 size={18} className="text-[var(--color-muted)]" />}
         </div>
-        <p className="text-[10px] font-medium text-[var(--color-text)] leading-tight text-center break-words line-clamp-2 w-full">{channel.name}</p>
+        {/* Always two lines tall (h-[2lh]), so one-line names don't make a shorter tile. */}
+        <p className="h-[2lh] text-[10px] font-medium text-[var(--color-text)] leading-tight text-center break-words line-clamp-2 w-full">{channel.name}</p>
       </button>
     )
   }
@@ -95,14 +120,7 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
       onClick={() => onClick(channel)}
       className="surface-card group relative flex flex-col items-center gap-2.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] p-4 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer"
     >
-      <button
-        onClick={e => { e.stopPropagation(); onToggleFavorite(channel) }}
-        className={cn('absolute top-2 right-9 p-1 rounded transition-colors',
-          isFavorite ? 'text-rose-500' : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 hover:text-rose-400')}
-        aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-      >
-        <Heart size={14} fill={isFavorite ? 'currentColor' : 'none'} />
-      </button>
+      <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-2 right-9" size={14} />
       {errors > 0 && (
         <span
           className={cn('absolute top-2 left-2 flex items-center gap-1 text-[10px] font-medium',
