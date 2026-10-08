@@ -16,4 +16,23 @@ function parseIdleMinutes(value, fallback = null) {
   return n;
 }
 
-module.exports = { parseIdleMinutes, DEFAULT_IDLE_MINUTES, MAX_IDLE_MINUTES };
+// IDLE_TIMEOUT_MINUTES, read leniently the way it always was: a leading whole
+// number counts ("45m" → 45, "1.5" → 1), and anything over a week means never.
+// Returns { minutes, warning } — warning is set when the value was adjusted or
+// unreadable, so the caller can log it instead of changing it silently.
+function parseIdleEnv(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { minutes: DEFAULT_IDLE_MINUTES, warning: null };
+  }
+  const n = parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(n) || n < 0) {
+    return { minutes: DEFAULT_IDLE_MINUTES, warning: `IDLE_TIMEOUT_MINUTES="${value}" is not a number of minutes — using ${DEFAULT_IDLE_MINUTES}` };
+  }
+  if (n > MAX_IDLE_MINUTES) {
+    return { minutes: 0, warning: `IDLE_TIMEOUT_MINUTES=${n} is over a week — treating it as never (0)` };
+  }
+  const exact = String(n) === String(value).trim();
+  return { minutes: n, warning: exact ? null : `IDLE_TIMEOUT_MINUTES="${value}" read as ${n} minutes` };
+}
+
+module.exports = { parseIdleMinutes, parseIdleEnv, DEFAULT_IDLE_MINUTES, MAX_IDLE_MINUTES };

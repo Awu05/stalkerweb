@@ -64,7 +64,9 @@ class ChannelManager {
 
   // ── Stream health tracking ────────────────────────────────────────────────────
   recordStreamError(uniqueId) {
-    const key = String(uniqueId);
+    // Health is keyed by the current id, so an error reported under a legacy id
+    // still shows against the channel.
+    const key = this.getChannel(uniqueId)?.uniqueId ?? String(uniqueId);
     const entry = this._health.get(key) || { errors: 0, lastError: null };
     entry.errors++;
     entry.lastError = new Date().toISOString();
@@ -77,7 +79,7 @@ class ChannelManager {
   }
 
   recordStreamSuccess(uniqueId) {
-    this._health.delete(String(uniqueId)); // clear errors on success
+    this._health.delete(this.getChannel(uniqueId)?.uniqueId ?? String(uniqueId)); // clear errors on success
     this._scheduleHealthSave();
   }
 
@@ -93,7 +95,8 @@ class ChannelManager {
   // (static-cmd) key, any catch-up keys (cmd + " archive=…"), and the uniqueId
   // fallback key — so a token the stream server rejected is never reused.
   invalidateResolvedForChannel(uniqueId) {
-    const ch = this._channelIndex.get(String(uniqueId));
+    // getChannel also accepts legacy ids, which old M3Us still play by.
+    const ch = this.getChannel(uniqueId);
     if (ch?.cmd) {
       for (const key of this._resolvedCache.keys()) {
         if (key === ch.cmd || key.startsWith(`${ch.cmd} `)) this._resolvedCache.delete(key);

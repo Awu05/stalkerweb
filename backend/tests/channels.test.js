@@ -165,4 +165,21 @@ describe('ChannelManager stream link refresh after expiry', () => {
     expect(first.url).toContain('token=t1')
     expect(second.url).toContain('token=t2')
   })
+
+  it('does the same when the error is reported under a legacy id', async () => {
+    let n = 0
+    const client = {
+      getBasePath: () => 'http://portal.example.com/c/',
+      itvCreateLink: async () => ({ js: { cmd: `ffmpeg http://cdn.example.com/s/index.m3u8?token=t${++n}` } }),
+    }
+    const cm = new ChannelManager(client)
+    cm._parseChannels(page([{ ...channel('News', 1), id: '1896', cmd: 'ffrt http://localhost/ch/1896' }]))
+    const ch = cm.getChannel('1896')
+
+    await cm.resolveStream(ch)
+    cm.recordStreamError(ch.legacyId)   // an old M3U plays /proxy/stream/<legacy id>
+
+    expect((await cm.resolveStream(ch)).url).toContain('token=t2')
+    expect(Object.keys(cm.getHealth())).toEqual(['1896'])
+  })
 })

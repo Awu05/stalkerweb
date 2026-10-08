@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import express from 'express'
 import settingsModule from '../routes/settings.js'
-import { parseIdleMinutes } from '../lib/idleTimeout.js'
+import { parseIdleMinutes, parseIdleEnv } from '../lib/idleTimeout.js'
 
 describe('parseIdleMinutes', () => {
   it('accepts whole minutes including 0 (never)', () => {
@@ -19,6 +19,23 @@ describe('parseIdleMinutes', () => {
     expect(parseIdleMinutes(-5, 30)).toBe(30)
     expect(parseIdleMinutes(1.5, 30)).toBe(30)
     expect(parseIdleMinutes(999999, 30)).toBe(30)
+  })
+})
+
+describe('parseIdleEnv', () => {
+  it('reads plain minutes without a warning', () => {
+    expect(parseIdleEnv('45')).toEqual({ minutes: 45, warning: null })
+    expect(parseIdleEnv(undefined)).toEqual({ minutes: 30, warning: null })
+  })
+
+  it('reads a leading number, and says so', () => {
+    expect(parseIdleEnv('45m')).toMatchObject({ minutes: 45, warning: expect.stringContaining('45') })
+    expect(parseIdleEnv('1.5').minutes).toBe(1)
+  })
+
+  it('treats more than a week as never, and anything unreadable as the default — with a warning', () => {
+    expect(parseIdleEnv('100000')).toMatchObject({ minutes: 0, warning: expect.stringContaining('never') })
+    expect(parseIdleEnv('abc')).toMatchObject({ minutes: 30, warning: expect.any(String) })
   })
 })
 

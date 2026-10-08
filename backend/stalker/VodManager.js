@@ -13,6 +13,7 @@ const TAG = 'VodManager';
 // don't re-resolve — which previously fell into the nothing_to_play fallback.
 const VOD_LINK_TTL_MS = 5 * 60 * 1000;
 const CATEGORY_TTL_MS = 30 * 60 * 1000;
+const EMPTY_CATEGORY_TTL_MS = 60 * 1000;
 
 class VodManager {
   constructor(client) {
@@ -31,8 +32,14 @@ class VodManager {
     if (hit && (hit.pending || Date.now() - hit.ts < CATEGORY_TTL_MS)) {
       return hit.pending || Promise.resolve(hit.value);
     }
+    // An empty list is usually a bad portal response (an error object instead
+    // of the list), so it is kept only briefly rather than the full TTL.
     const pending = this._fetchCategories(type).then(
-      (value) => { this._categoryCache.set(type, { value, ts: Date.now() }); return value; },
+      (value) => {
+        const ts = value.length ? Date.now() : Date.now() - CATEGORY_TTL_MS + EMPTY_CATEGORY_TTL_MS;
+        this._categoryCache.set(type, { value, ts });
+        return value;
+      },
       (e)     => { this._categoryCache.delete(type); throw e; },
     );
     this._categoryCache.set(type, { pending });

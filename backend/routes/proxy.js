@@ -577,6 +577,14 @@ module.exports = function proxyModule(appState) {
     }
   });
 
+  // FFmpeg pulls the link itself and never reports a rejected token back, so
+  // the cached link is dropped when its FFmpeg stream ends — the next play
+  // (a reconnect after a failure, or a new viewer) gets a fresh create_link.
+  // Not before: while it runs, a second fetch must not replace its token.
+  function evictWhenDone(res, target) {
+    res.once('close', () => appState.channelManager?.invalidateResolved(target));
+  }
+
   // ── GET /proxy/stream/:channelId ──────────────────────────────────────────
   router.get('/stream/:channelId', channelIdRules, async (req, res) => {
     if (!requireSession(res)) return;
@@ -621,7 +629,7 @@ module.exports = function proxyModule(appState) {
       // probeCodecs runs first inside transcode() to pick copy vs re-encode.
       log.info(TAG, `ch ${channel.number}: remuxing via FFmpeg → ${streamUrl}`);
       channelManager.recordStreamSuccess(uniqueId);
-      channelManager.invalidateResolved(target);
+      evictWhenDone(res, target);
       return ffmpegSvc.transcode(streamUrl, req, res);
     }
 
@@ -645,6 +653,7 @@ module.exports = function proxyModule(appState) {
         const probe = await ffmpegSvc.probeCodecs(streamUrl, headers);
         if (!ffmpegSvc.browserDirectPlayable(probe)) {
           log.info(TAG, `ch ${channel.number}: codecs not browser-playable (video=${probe?.video ?? '?'} audio=${probe?.audio ?? '?'}) — routing through FFmpeg`);
+          evictWhenDone(res, target);
           return ffmpegSvc.transcode(streamUrl, req, res, headers);
         }
       }
@@ -730,13 +739,21 @@ module.exports = function proxyModule(appState) {
     req.on('close', () => { if (!res.writableEnded) response.data?.destroy(); });
 
     const ch = req.query.ch || null;
-    if (response.status === 403 || response.status === 404) {
+    if (response.status === 403) {
       response.data.destroy();
-      log.warn(TAG, `portal returned ${response.status} on segment — stream may have expired`);
+      log.warn(TAG, 'portal returned 403 on segment — stream token expired');
       // Token expired mid-stream — record + evict so the next play re-tokenizes.
       if (ch) appState.channelManager?.recordStreamError(ch);
       // 410 so the player fails fast instead of retrying a dead token (see servePlaylist).
-      return res.status(410).send(`Portal returned HTTP ${response.status} — stream token expired`);
+      return res.status(410).send('Portal returned HTTP 403 — stream token expired');
+    }
+    if (response.status === 404) {
+      // A segment that has dropped out of the live window (the player fell a
+      // little behind). The token is fine: answer with a 5xx so the player
+      // retries or moves on, and keep the cached link.
+      response.data.destroy();
+      log.debug(TAG, 'portal returned 404 on segment — segment no longer available');
+      return res.status(502).send('Portal returned HTTP 404 — segment no longer available');
     }
     if (response.status >= 400) {
       response.data.destroy();

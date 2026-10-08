@@ -127,8 +127,10 @@ app.use((req, res, next) => {
 
 // Timeout comes from IDLE_TIMEOUT_MINUTES, overridden by a value saved on the
 // Settings page (see routes/settings.js). 0 = never auto-disconnect.
-const { parseIdleMinutes, DEFAULT_IDLE_MINUTES } = require('./lib/idleTimeout');
-const envIdleMinutes   = parseIdleMinutes(process.env.IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_MINUTES);
+const { parseIdleMinutes, parseIdleEnv } = require('./lib/idleTimeout');
+const envIdle          = parseIdleEnv(process.env.IDLE_TIMEOUT_MINUTES);
+if (envIdle.warning) log.warn('server', envIdle.warning);
+const envIdleMinutes   = envIdle.minutes;
 const savedIdleMinutes = parseIdleMinutes(
   new (require('./cache/CacheManager'))(config.dataDir).load()?.idle_timeout_minutes, null);
 

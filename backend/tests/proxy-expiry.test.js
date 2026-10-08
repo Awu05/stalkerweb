@@ -15,7 +15,7 @@ const listen = (handler) => new Promise((resolve) => {
 })
 const origin = (server) => `http://127.0.0.1:${server.address().port}`
 
-let cdn, app, cdnExpired, errors
+let cdn, app, cdnExpired, segGone, errors
 const MEDIA = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:4,\nseg1.ts?token=abc\n'
 const MASTER = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\ntracks-v1a1/mono.m3u8?token=abc\n'
 
@@ -24,7 +24,10 @@ beforeAll(async () => {
     if (cdnExpired) { res.statusCode = 403; return res.end('Forbidden') }
     if (req.url.startsWith('/index.m3u8')) return res.end(MASTER)
     if (req.url.startsWith('/tracks-v1a1/mono.m3u8')) return res.end(MEDIA)
-    if (req.url.startsWith('/tracks-v1a1/seg1.ts')) return res.end(Buffer.alloc(188 * 4, 0x47))
+    if (req.url.startsWith('/tracks-v1a1/seg1.ts')) {
+      if (segGone) { res.statusCode = 404; return res.end() }
+      return res.end(Buffer.alloc(188 * 4, 0x47))
+    }
     res.statusCode = 404; res.end()
   })
 
@@ -50,7 +53,7 @@ beforeAll(async () => {
 })
 
 afterAll(() => { cdn?.close(); app?.close() })
-beforeEach(() => { cdnExpired = false; errors = [] })
+beforeEach(() => { cdnExpired = false; segGone = false; errors = [] })
 
 // Walk master → media playlist through the proxy to obtain real signed URLs.
 async function signedUrls() {
@@ -85,5 +88,15 @@ describe('proxy: expired stream token', () => {
     const res = await fetch(segUrl)
     expect(res.status).toBe(410)
     expect(errors).toEqual(['1896'])
+  })
+
+  it('answers a retryable 5xx on a 404 segment and keeps the link', async () => {
+    // The segment has left the live window; the token is still good.
+    const { segUrl } = await signedUrls()
+    segGone = true
+
+    const res = await fetch(segUrl)
+    expect(res.status).toBe(502)
+    expect(errors).toEqual([])
   })
 })
