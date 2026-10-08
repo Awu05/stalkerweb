@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
   Trash2, RefreshCw, Image, Download, Upload, Plus, Pencil, Plug, PlugZap,
-  X, Wifi, WifiOff, Copy, Check, ExternalLink, ListVideo, CalendarDays,
+  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
 import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { copyText } from '@/lib/clipboard'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
@@ -147,15 +148,21 @@ function Notice({ notice }) {
 
 // ── Copyable link row (M3U / XMLTV export URLs) ───────────────────────────────
 
-function LinkRow({ label, url, hint, icon: Icon }) {
-  const [copied, setCopied] = useState(false)
+function LinkRow({ label, url, hint, icon: Icon, filename }) {
+  const [copied, setCopied] = useState(null) // null | 'ok' | 'manual'
+  const inputRef = useRef(null)
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch { /* clipboard blocked — user can still select the field manually */ }
+    if (await copyText(url)) {
+      setCopied('ok')
+    } else {
+      // Clipboard fully blocked: select the URL so Ctrl/Cmd+C finishes the job,
+      // and say so instead of failing silently.
+      inputRef.current?.focus()
+      inputRef.current?.select()
+      setCopied('manual')
+    }
+    setTimeout(() => setCopied(null), 2500)
   }
 
   return (
@@ -166,25 +173,29 @@ function LinkRow({ label, url, hint, icon: Icon }) {
       </div>
       <div className="flex gap-2">
         <Input
+          ref={inputRef}
           readOnly
           value={url}
           onFocus={e => e.target.select()}
           className="font-mono text-xs flex-1"
         />
         <Button type="button" variant="outline" onClick={copy} className="shrink-0 h-9 px-3 text-xs gap-1.5">
-          {copied ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
-          {copied ? 'Copied' : 'Copy'}
+          {copied === 'ok' ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
+          {copied === 'ok' ? 'Copied' : 'Copy'}
         </Button>
         <a
           href={url}
-          target="_blank"
-          rel="noreferrer"
-          title="Open in new tab"
+          download={filename}
+          title={`Download ${filename}`}
+          aria-label={`Download ${filename}`}
           className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
         >
-          <ExternalLink size={13} />
+          <Download size={13} />
         </a>
       </div>
+      {copied === 'manual' && (
+        <p className="text-xs text-[var(--color-live)]">Your browser blocked copying — the link is selected, press Ctrl+C (⌘C on Mac).</p>
+      )}
       {hint && <p className="text-xs text-[var(--color-muted)]">{hint}</p>}
     </div>
   )
@@ -1006,12 +1017,14 @@ export default function SetupPage() {
                 label="M3U Playlist"
                 icon={ListVideo}
                 url={`${origin}/api/m3u`}
+                filename="stalkerweb.m3u"
                 hint="Channel list — add as an M3U / playlist URL in your IPTV client or tuner."
               />
               <LinkRow
                 label="XMLTV EPG Guide"
                 icon={CalendarDays}
                 url={`${origin}/api/xmltv`}
+                filename="stalkerweb-epg.xml"
                 hint={epg
                   ? 'Program guide in XMLTV format — add as the EPG / guide URL alongside the M3U.'
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
