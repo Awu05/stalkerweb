@@ -229,7 +229,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
         {/* header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
           <h3 className="font-semibold text-[var(--color-text)]">
-            {initial?.id ? 'Edit Profile' : 'New Profile'}
+            {initial?.id ? 'Edit Profile' : initial?.portal ? 'Duplicate Profile' : 'New Profile'}
           </h3>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
             <X size={16} />
@@ -402,7 +402,7 @@ function StbImportPicker({ candidates, onImport, onClose }) {
 
 // ── Profile card ──────────────────────────────────────────────────────────────
 
-function ProfileCard({ profile, isConnected, onConnect, onEdit, onDelete, connecting }) {
+function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onDelete, connecting }) {
   const label = profile.name || new URL(profile.portal).hostname || profile.portal
   const busy  = connecting === profile.id
 
@@ -459,6 +459,14 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDelete, connec
           title="Edit"
         >
           <Pencil size={13} />
+        </button>
+        <button
+          onClick={() => onDuplicate(profile)}
+          className="h-8 w-8 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
+          title="Duplicate"
+          aria-label="Duplicate profile"
+        >
+          <Copy size={13} />
         </button>
         <button
           onClick={() => onDelete(profile.id)}
@@ -640,6 +648,14 @@ export default function SetupPage() {
     } catch (err) {
       setNotice({ type: 'error', msg: err.message })
     }
+  }
+
+  // Opens the form filled in from an existing profile — portal, MAC, advanced
+  // fields and its genre/language filters — saved as a new profile.
+  function handleDuplicateProfile(profile) {
+    const { id: _id, ...copy } = profile
+    const label = profile.name || (() => { try { return new URL(profile.portal).hostname } catch { return profile.portal } })()
+    setSheet({ ...copy, name: `${label} (copy)` })
   }
 
   async function handleDeleteProfile(id) {
@@ -1000,6 +1016,7 @@ export default function SetupPage() {
               isConnected={isConnectedProfile(p)}
               onConnect={handleConnect}
               onEdit={prof => setSheet(prof)}
+              onDuplicate={handleDuplicateProfile}
               onDelete={handleDeleteProfile}
               connecting={connecting}
             />
