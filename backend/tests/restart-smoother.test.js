@@ -25,15 +25,21 @@ describe('parsePlaylist', () => {
 
 describe('RestartSmoother', () => {
   let starts, probes, drops, smoother
+  let ptsShift = {}
   // Start timestamp of each segment number, as the source would encode it.
   const setStarts = (map) => { starts = map }
 
   beforeEach(() => {
     starts = {}
+    ptsShift = {}
     probes = []
     drops = []
     smoother = new RestartSmoother({
       probe: async (url) => {
+        // Time-named segments carry timestamps that match their names, unless
+        // ptsShift (by "MM/SS-dur.ts") moves them.
+        const t = timeFromName(url)
+        if (t) return { video: t.start + (ptsShift[url.split('?')[0].split('/').slice(-2).join('/')] ?? 0), audio: null }
         const n = Number(/seg(\d+)\.ts/.exec(url)[1])
         probes.push(n)
         return n in starts ? { video: starts[n], audio: starts[n] } : null
@@ -180,6 +186,17 @@ describe('RestartSmoother', () => {
     expect(parsePlaylist(out).header).toContain('#EXT-X-DISCONTINUITY-SEQUENCE:1')
   })
 
+  it("keeps segments the names call repeats when the timestamps say they're new", async () => {
+    await smoother.rewrite('k', BASE, timed(10, [[60], [66], [72]]))   // to 20:42:18
+    // Another server labels the same content 18 s earlier: its names look
+    // like a replay of 20:41:54–20:42:12, but its timestamps carry on from
+    // 20:42:15 (3 s repeated, then new).
+    ptsShift = { '41/57-06000.ts': 18, '42/03-06000.ts': 18, '42/09-06000.ts': 18 }
+    const out = await smoother.rewrite('k', BASE, timed(13, [[57, true], [63], [69]]))
+    expect(drops).toEqual([13])   // only the segment that repeats 3 s of 6
+    expect(uris(out).slice(-2)).toEqual(['42/03', '42/09'])
+  })
+
   it('passes a time-named stream without restarts through unchanged', async () => {
     const a = timed(10, [[60], [66], [72]])
     const b = timed(11, [[66], [72], [78]])
@@ -194,6 +211,8 @@ describe('RestartSmoother', () => {
 })
 
 describe('RestartSmoother — review cases', () => {
+  // Time-named segments carry timestamps that match their names.
+  const namePts = async (url) => { const t = timeFromName(url); return t ? { video: t.start, audio: null } : null }
   const quiet = { info: () => {}, warn: () => {} }
   const numbered = (seq, names, extra = {}) =>
     `#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:${seq}\n${extra.header ?? ''}` +
@@ -207,7 +226,7 @@ describe('RestartSmoother — review cases', () => {
   }
 
   it('keeps a long window whole and in order (more segments than it remembers)', async () => {
-    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const sm = new RestartSmoother({ probe: namePts, logger: quiet })
     const segs = (from) => Array.from({ length: 400 }, (_, i) => `seg${from + i}.ts`)
     const a = await sm.rewrite('k', BASE, numbered(1, segs(1)))
     expect(urisOf(a)).toHaveLength(400)
@@ -217,7 +236,7 @@ describe('RestartSmoother — review cases', () => {
   })
 
   it('keeps EXT-X-MAP when the segment carrying it is left out', async () => {
-    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const sm = new RestartSmoother({ probe: namePts, logger: quiet })
     const map = '#EXT-X-MAP:URI="init.mp4"\n'
     const m = (t) => name(t, 'm4s')
     await sm.rewrite('k', BASE, numbered(10, [m(60), m(66)], { header: map }))
@@ -232,7 +251,7 @@ describe('RestartSmoother — review cases', () => {
   })
 
   it('keeps numbering going forward when the source reuses file names', async () => {
-    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const sm = new RestartSmoother({ probe: namePts, logger: quiet })
     let last = -1
     for (let head = 3; head < 40; head++) {
       const names = [head - 3, head - 2, head - 1, head].map((n) => `seg${n % 10}.ts`)
@@ -262,7 +281,7 @@ describe('RestartSmoother — review cases', () => {
 
   it('stops holding back repeats before players give up on a still playlist', async () => {
     let t = 0
-    const sm = new RestartSmoother({ probe: async () => null, logger: quiet, now: () => t })
+    const sm = new RestartSmoother({ probe: namePts, logger: quiet, now: () => t })
     await sm.rewrite('k', BASE, numbered(10, [name(60), name(66), name(72)]))
     // The source goes back 29 s and replays in real time, one segment per
     // reload. After 2.5 target durations (15 s) with nothing new, the next
@@ -282,7 +301,7 @@ describe('RestartSmoother — review cases', () => {
 
   it('logs a renumbering once, not again when the old segments leave', async () => {
     const lines = []
-    const sm = new RestartSmoother({ probe: async () => null, logger: { info: (_t, m) => lines.push(m), warn: () => {} } })
+    const sm = new RestartSmoother({ probe: namePts, logger: { info: (_t, m) => lines.push(m), warn: () => {} } })
     await sm.rewrite('k', BASE, numbered(100, ['A.ts', 'B.ts', 'C.ts']))
     await sm.rewrite('k', BASE, numbered(110, ['A.ts', 'B.ts', 'C.ts', 'D.ts']))
     await sm.rewrite('k', BASE, numbered(111, ['B.ts', 'C.ts', 'D.ts', 'E.ts']))
@@ -291,7 +310,7 @@ describe('RestartSmoother — review cases', () => {
   })
 
   it('never moves the playlist back for an older playlist from an out-of-step server', async () => {
-    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const sm = new RestartSmoother({ probe: namePts, logger: quiet })
     await sm.rewrite('k', BASE, numbered(10, ['s10.ts', 's11.ts', 's12.ts']))
     const cur = await sm.rewrite('k', BASE, numbered(12, ['s12.ts', 's13.ts', 's14.ts']))
     const older = await sm.rewrite('k', BASE, numbered(9, ['s9.ts', 's10.ts', 's11.ts', 's12.ts']))

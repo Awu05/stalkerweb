@@ -16,11 +16,12 @@
 // players their own numbering: each new segment gets the next number the
 // first time it appears, whatever number the source gave it, and keeps it.
 // A new segment that mostly repeats content already listed is left out — a
-// skip of a second instead of a replay. Where a segment starts is read from
-// its name when the server names segments by time (Flussonic:
-// …/2026/10/08/20/42/14-06474.ts = 20:42:14, 6.474 s), otherwise, after a
-// discontinuity only, from the timestamps at its start (from segments
-// already served, or a small probe).
+// skip of a second instead of a replay. Whether it repeats is read from the
+// timestamps at its start (from segments already served, or a small probe),
+// checked after a discontinuity, or when the server names segments by time
+// (Flussonic: …/2026/10/08/20/42/14-06474.ts = 20:42:14, 6.474 s) and the
+// names overlap. Names alone are never trusted: servers behind one address
+// can label the same content differently.
 //
 // Anything uncertain (no timestamps, a probe that fails or is slow, a clock
 // that jumped somewhere unrelated) keeps the segment: the worst case is the
@@ -36,6 +37,7 @@ const TAG = 'restart-smoother';
 const OVERLAP_MIN_S = 1.0;       // a repeat shorter than this isn't worth a skip
 const OVERLAP_FRACTION = 0.5;    // …and it must be most of the segment
 const MAX_REPEAT_S = 60;         // further back than this is a clock change, not a repeat
+const NAME_AGREE_S = 2;          // names and timestamps agreeing on a long repeat, within this
 const MAX_HOLD_S = 45;           // never leave out more than this in a row — resync instead
 const STALL_TARGETS = 2.5;       // …nor keep players without a new segment for longer than this many target durations
 const PROBE_TIMEOUT_MS = 3000;
@@ -300,27 +302,26 @@ class RestartSmoother {
 
   // How much of `seg` repeats content up to the end of `prev` (seconds), when
   // that is enough to leave it out; null to keep it.
+  //
+  // The stream's own timestamps decide. Time-based names only say when to
+  // look: one provider's servers name the same content up to 20 s apart (one
+  // labels its files ahead of the clock), so a name-only judgement threw away
+  // new content as "already played".
   async _repeat(prev, seg, url, time, channel) {
-    let prevStart, prevDur, curStart, dur;
-    if (time && prev.time) {
-      // Times from the names are one clock across restarts: anything shortly
-      // before the end of what was listed is a repeat.
-      ({ start: prevStart, dur: prevDur } = prev.time);
-      ({ start: curStart, dur } = time);
-      if (prevStart + prevDur - curStart > MAX_REPEAT_S) return null;
-    } else if (seg.disc) {
-      // Stream timestamps reset at restarts, so only a start just after the
-      // previous one is clearly a repeat; a clock that jumped elsewhere isn't.
-      prevStart = await this._ptsOf(prev.url, channel);
-      curStart = await this._ptsOf(url, channel);
-      prevDur = prev.dur;
-      dur = seg.dur || prev.dur;
-      if (prevStart === null || curStart === null || curStart < prevStart - 1) return null;
-    } else {
-      return null;
-    }
+    const nameOverlap = time && prev.time ? prev.time.start + prev.time.dur - time.start : null;
+    if (!seg.disc && !(nameOverlap >= OVERLAP_MIN_S)) return null;   // nothing suggests a repeat
+    const prevDur = prev.dur ?? prev.time?.dur;
+    const dur = seg.dur || time?.dur || prevDur;
     if (!prevDur || !dur) return null;
+    const prevStart = await this._ptsOf(prev.url, channel);
+    const curStart = await this._ptsOf(url, channel);
+    if (prevStart === null || curStart === null) return null;        // can't confirm: keep
     const overlap = prevStart + prevDur - curStart;
+    // Timestamps reset at restarts, so a start far before the previous one is
+    // a repeat only when the names say the same thing; otherwise it is just a
+    // reset clock.
+    const farBack = curStart < prevStart - 1;
+    if (farBack && !(nameOverlap !== null && Math.abs(nameOverlap - overlap) <= NAME_AGREE_S && overlap <= MAX_REPEAT_S)) return null;
     return overlap >= OVERLAP_MIN_S && overlap >= dur * OVERLAP_FRACTION ? Math.min(overlap, dur) : null;
   }
 
