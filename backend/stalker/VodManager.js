@@ -50,16 +50,21 @@ class VodManager {
 
   // ── Item listings ──────────────────────────────────────────────────────────
 
-  // Fetches one or more pages of VOD/series items for a category.
-  // maxPages mirrors the Kodi plugin's max_page_limit setting (default 3 here).
+  // Fetches one batch of VOD/series items for a category. Each batch is
+  // maxPages consecutive portal pages (mirrors the Kodi plugin's
+  // max_page_limit, default 3), and `page` / `totalPages` count BATCHES: page 2
+  // is portal pages 4–6. Clients page with page+1 until page === totalPages;
+  // when `page` meant the first portal page instead, each "next page" re-read
+  // two pages it already had — duplicate titles and wasted portal requests.
   async getItems({ type = 'vod', categoryId, page = 1, search = '', fav = 0, maxPages = 3 } = {}) {
+    const firstPortalPage = (page - 1) * maxPages + 1;
     const params = {
       type,
       action: 'get_ordered_list',
       category: String(categoryId),
       sortby:   'added',
       fav:      String(fav),
-      p:        String(page),
+      p:        String(firstPortalPage),
     };
     if (search) params.search = search;
 
@@ -69,10 +74,11 @@ class VodManager {
 
     const totalItems   = parseInt(js.total_items   || '0', 10) || items.length;
     const maxPageItems = parseInt(js.max_page_items || '14', 10) || 14;
-    const totalPages   = Math.max(1, Math.ceil(totalItems / maxPageItems));
+    const portalPages  = Math.max(1, Math.ceil(totalItems / maxPageItems));
+    const totalPages   = Math.max(1, Math.ceil(portalPages / maxPages));
 
-    // Fetch additional pages (same pattern as the Kodi plugin)
-    for (let p2 = page + 1; p2 <= Math.min(page + maxPages - 1, totalPages); p2++) {
+    // Fetch the rest of this batch (same pattern as the Kodi plugin)
+    for (let p2 = firstPortalPage + 1; p2 <= Math.min(firstPortalPage + maxPages - 1, portalPages); p2++) {
       try {
         const r2 = await this.client._stalkerCall({ ...params, p: String(p2) });
         items = items.concat(Array.isArray(r2?.js?.data) ? r2.js.data : []);

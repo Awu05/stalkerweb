@@ -351,6 +351,10 @@ export default function VodPage() {
   // synchronously — two clicks fired before a re-render lands could otherwise
   // both read the same stale `itemsLoading` value and double-fetch the page.
   const itemsLoadingRef = useRef(false)
+  // Infinite scroll: a sentinel under the grid, observed within the grid's own
+  // scroll container (not the window — the grid scrolls inside the layout).
+  const gridScrollRef = useRef(null)
+  const sentinelRef   = useRef(null)
 
   // Load Continue Watching on mount (this page remounts when returning from the player).
   useEffect(() => { setContinueList(getVodProgressList()) }, [])
@@ -441,6 +445,24 @@ export default function VodPage() {
     if (!selectedCategory || !hasMore || itemsLoadingRef.current) return
     loadItems(selectedCategory.id, search, currentPage + 1, itemsTokenRef.current)
   }
+  const loadMoreRef = useRef(loadMore)
+  useEffect(() => { loadMoreRef.current = loadMore })
+
+  // Load the next batch as the sentinel nears the viewport. The observer is
+  // rebuilt whenever a load finishes: an IntersectionObserver only reports
+  // changes, so if the new batch didn't push the sentinel off-screen (tall
+  // window, short batch) the fresh observer's initial callback keeps going.
+  useEffect(() => {
+    const root = gridScrollRef.current
+    const sentinel = sentinelRef.current
+    if (!root || !sentinel || !hasMore || itemsLoading || itemsError) return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some(e => e.isIntersecting)) loadMoreRef.current() },
+      { root, rootMargin: '0px 0px 1200px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, itemsLoading, itemsError, items.length])
 
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
@@ -583,7 +605,7 @@ export default function VodPage() {
         </div>
 
         {/* Items grid */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
           {!selectedCategory && (
             <>
               <ContinueWatching entries={continueList} onResume={resumeEntry} onRemove={removeEntry} />
@@ -606,8 +628,9 @@ export default function VodPage() {
                 ))}
               </div>
 
-              {/* Load more / pagination */}
-              <div className="flex items-center justify-center gap-3 mt-6 pb-2">
+              {/* Infinite-scroll sentinel + status. The button stays as a
+                  fallback (keyboard / TV remote, or after a failed load). */}
+              <div ref={sentinelRef} className="flex items-center justify-center gap-3 mt-6 pb-2">
                 {itemsLoading && <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />}
                 {hasMore && !itemsLoading && (
                   <button
