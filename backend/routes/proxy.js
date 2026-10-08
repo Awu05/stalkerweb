@@ -626,12 +626,11 @@ module.exports = function proxyModule(appState) {
     }
 
     channelManager.recordStreamSuccess(uniqueId);
-    // One-shot: the resolved create_link URL has now been handed to the player.
-    // Evict it so a player retry / re-zap calls create_link again for a fresh
-    // token instead of replaying this (possibly short-lived) one — matching a
-    // STB, which create_links on every play. The 15s cache still bridges the
-    // /api/stream type-probe → this fetch as a single create_link.
-    channelManager.invalidateResolved(target);
+    // The resolved link is deliberately NOT evicted here. Clients often fetch
+    // this URL twice in a row (probe, then open); a fresh create_link for the
+    // second fetch would invalidate the token the first one is already
+    // playing. ChannelManager reuses the link for a short window and evicts
+    // it as soon as the stream server rejects it (403 → recordStreamError).
 
     // Codec-aware fallback for raw HTTP MPEG-TS. Our browser players use
     // mpegts.js, which only decodes H.264 + AAC/MP3 — so a channel encoded in

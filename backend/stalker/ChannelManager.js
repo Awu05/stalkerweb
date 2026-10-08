@@ -11,6 +11,11 @@ const path = require('path');
 const log = require('../logger');
 const TAG = 'ChannelManager';
 
+// How long a resolved create_link is reused (see resolveStream). Long enough
+// to cover a client's probe-then-open double fetch and a quick re-zap; short
+// enough that a channel left alone re-tokenizes on the next play.
+const RESOLVED_TTL_MS = 60_000;
+
 class ChannelManager {
   constructor(client, dataDir = null) {
     this.client = client;
@@ -25,7 +30,8 @@ class ChannelManager {
     this._loadChannelsPromise = null;  // deduplicates concurrent loadChannels calls
     this._progress = { loading: false, page: 0, totalPages: 0, channelCount: 0 };
     this._health = new Map(Object.entries(this._loadHealthFromDisk()));
-    this._resolvedCache = new Map();   // cmd → { value:{url,type}, expires } — bridges /api/stream → /proxy/stream
+    this._resolvedCache = new Map();   // cmd → { value:{url,type}, expires } — one create_link per zap
+    this._resolving     = new Map();   // cmd → in-flight resolve, shared by concurrent callers
   }
 
   _loadHealthFromDisk() {
@@ -77,18 +83,22 @@ class ChannelManager {
 
   // ── Resolved-stream cache eviction ─────────────────────────────────────────
   // Evict the cached resolved URL for an exact target (handles catch-up, whose
-  // cmd is mutated). Used to make a resolved create_link one-shot: once
-  // /proxy/stream has consumed it, the next zap forces a fresh create_link.
+  // cmd is mutated).
   invalidateResolved(channel) {
     if (!channel) return;
     this._resolvedCache.delete(channel.cmd || String(channel.uniqueId));
   }
 
   // Evict by uniqueId (the error/health path only has the id). Clears the live
-  // (static-cmd) key plus the uniqueId fallback key.
+  // (static-cmd) key, any catch-up keys (cmd + " archive=…"), and the uniqueId
+  // fallback key — so a token the stream server rejected is never reused.
   invalidateResolvedForChannel(uniqueId) {
     const ch = this._channelIndex.get(String(uniqueId));
-    if (ch?.cmd) this._resolvedCache.delete(ch.cmd);
+    if (ch?.cmd) {
+      for (const key of this._resolvedCache.keys()) {
+        if (key === ch.cmd || key.startsWith(`${ch.cmd} `)) this._resolvedCache.delete(key);
+      }
+    }
     this._resolvedCache.delete(String(uniqueId));
   }
 
@@ -373,15 +383,31 @@ class ChannelManager {
   }
 
   // ── Stream resolution (cached) ────────────────────────────────────────────
-  // Resolves a channel to a playable URL + a stream-type hint, caching the
-  // result briefly so /api/stream (type hint for the player) and the subsequent
-  // /proxy/stream fetch share ONE create_link call — exactly like a STB, which
-  // calls create_link once per zap. Keyed by cmd so catch-up/archive (which
-  // mutates cmd) and live get separate entries.
-  async resolveStream(channel) {
+  // Resolves a channel to a playable URL + a stream-type hint. One create_link
+  // per zap, like a STB: /api/stream (the player's type hint), /proxy/stream,
+  // and any repeat fetch of the channel URL within RESOLVED_TTL_MS reuse the
+  // same link. That reuse is load-bearing: stream servers typically allow one
+  // live token per account, so a second create_link invalidates the first
+  // token — and many clients fetch the channel URL twice in quick succession
+  // (probe, then open), which used to kill their own stream on the first
+  // sub-playlist request. A token the stream server rejects is evicted
+  // (recordStreamError → invalidateResolvedForChannel), so reuse never
+  // outlives a dead link. Keyed by cmd so catch-up/archive (which mutates cmd)
+  // and live get separate entries; concurrent callers share one in-flight
+  // resolve.
+  resolveStream(channel) {
     const key = channel.cmd || String(channel.uniqueId);
     const cached = this._resolvedCache.get(key);
-    if (cached && cached.expires > Date.now()) return cached.value;
+    if (cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
+
+    const pending = this._resolving.get(key);
+    if (pending) return pending;
+    const p = this._resolveStreamUncached(channel, key).finally(() => this._resolving.delete(key));
+    this._resolving.set(key, p);
+    return p;
+  }
+
+  async _resolveStreamUncached(channel, key) {
 
     let url;
     if ((channel.cmd || '').includes('matrix')) {
@@ -409,10 +435,7 @@ class ChannelManager {
     }
 
     const value = { url, type };
-    // Short TTL: long enough to bridge the type-hint → fetch handoff within one
-    // zap, short enough that a re-zap re-tokenizes (live temp links are themselves
-    // short-lived).
-    this._resolvedCache.set(key, { value, expires: Date.now() + 15_000 });
+    this._resolvedCache.set(key, { value, expires: Date.now() + RESOLVED_TTL_MS });
     return value;
   }
 
