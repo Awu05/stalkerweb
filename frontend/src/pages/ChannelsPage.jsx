@@ -628,8 +628,8 @@ export default function ChannelsPage() {
 
       {/* Logo assignment modal */}
       {logoChannel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setLogoChannel(null)}>
-          <div className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl shadow-xl w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setLogoChannel(null)}>
+          <div className="modal-panel rounded-xl w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Set Logo — {logoChannel.name}</h3>
               <button onClick={() => setLogoChannel(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">

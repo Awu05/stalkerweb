@@ -208,10 +208,10 @@ function ProfileSheet({ initial, onSave, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       {/* backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* panel */}
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
 
         {/* header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
@@ -348,8 +348,8 @@ function StbImportPicker({ candidates, onImport, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
           <h3 className="font-semibold text-[var(--color-text)]">Select Profiles to Import</h3>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
@@ -1322,7 +1322,7 @@ export default function SetupPage() {
                   ).slice(0, 20)
                   if (!matches.length) return null
                   return (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div className="modal-panel absolute z-50 top-full left-0 right-0 mt-1 rounded-lg max-h-48 overflow-y-auto">
                       {matches.map(ch => (
                         <button key={ch.name} type="button"
                           onClick={() => { setNewLogoName(ch.name); setLogoSearchOpen(false) }}

@@ -20,10 +20,10 @@ export function ToastHost() {
         <div
           key={t.id}
           className={cn(
-            'px-4 py-2.5 rounded-[var(--radius-md)] text-sm font-medium shadow-lg border backdrop-blur-sm',
+            'px-4 py-2.5 rounded-[var(--radius-md)] text-sm font-medium shadow-lg border',
             t.type === 'error'
-              ? 'bg-[var(--color-surface)]/95 border-[var(--color-live)]/40 text-[var(--color-live)]'
-              : 'bg-[var(--color-surface)]/95 border-[var(--color-border)] text-[var(--color-text)]'
+              ? 'bg-[var(--color-surface)] border-[var(--color-live)]/40 text-[var(--color-live)]'
+              : 'bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)]'
           )}
         >
           {t.message}

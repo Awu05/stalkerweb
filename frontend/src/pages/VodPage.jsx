@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -161,10 +162,13 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
       .catch(e => { setError(e.message); setEpLoading(false) })
   }
 
-  return (
+  // Portalled to <body> so no page ancestor (transforms, filters, overflow)
+  // can trap the fixed overlay. Solid surface rather than .glass-strong: its 7%
+  // fill over a busy poster grid left the episode titles unreadable.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="glass-strong relative z-10 w-full sm:max-w-lg max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full sm:max-w-lg max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden modal-panel">
 
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
@@ -193,8 +197,9 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Content — min-h-0 lets this flex child shrink below its content so
+            it scrolls instead of growing the sheet past max-h. */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {loading && (
             <div className="flex items-center justify-center py-12">
               <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
@@ -248,7 +253,8 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

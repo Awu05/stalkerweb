@@ -94,9 +94,9 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
   const future = prog.startTime * 1000 > Date.now()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-2xl w-full max-w-md mx-4 p-5"
+        className="modal-panel rounded-[var(--radius-lg)] w-full max-w-md mx-4 p-5"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
