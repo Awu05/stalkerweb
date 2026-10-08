@@ -91,7 +91,15 @@ describe('upstream connections', () => {
       '57/54-06000.ts', '57/54-06000.ts', '57/54-06000.ts',   // two 404s, then served
       '58/00-06000.ts', '58/00-06000.ts', '58/00-06000.ts',   // three 404s, given up
     ])
-    // The 404s were read off the connection, not dropped with it.
-    expect(new Set(ports.map((p) => p.port)).size).toBe(1)
+    // Each segment is first asked for on the channel's connection; the
+    // retries each go over a fresh one (which can reach another server
+    // behind the address).
+    const [first, ...retries] = ports.filter((p) => p.url.includes('57/54'))
+    expect(retries).toHaveLength(2)
+    expect(new Set(retries.map((r) => r.port)).size).toBe(2)
+    expect(retries.some((r) => r.port === first.port)).toBe(false)
+    // The 404 was read off the channel's connection, which carries on.
+    await (await fetch(mediaUrl)).text()
+    expect(ports.at(-1).port).toBe(first.port)
   })
 })

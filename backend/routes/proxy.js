@@ -209,7 +209,21 @@ async function fetchFromPortal(_httpClient, headers, url, timeoutMs = 15_000, ch
 
 // Like fetchFromPortal but returns a readable stream instead of buffering the
 // whole body — used for segments so .ts data never lands in the Node heap.
-async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel = null) {
+// `fresh`: over a new connection of its own instead of the stream's — to
+// reach whichever server behind the address has a file the stream's server
+// says it doesn't.
+async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel = null, { fresh = false } = {}) {
+  if (fresh) {
+    return axios.get(url, {
+      headers: { ...headers, Connection: 'close' },
+      httpAgent: new http.Agent({ keepAlive: false }),
+      httpsAgent: new https.Agent({ keepAlive: false }),
+      maxRedirects: 5,
+      responseType: 'stream',
+      timeout: timeoutMs,
+      validateStatus: () => true,
+    });
+  }
   const entry = getStreamClient(url, channel);
   const response = await entry.client.get(url, {
     headers,
@@ -227,7 +241,7 @@ async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel =
 module.exports.helpers = { encodeProxyUrl, decodeProxyUrl, rewriteM3u8, isPlaylistUrl, resolveUrl, isM3u8Body, fetchFromPortal, signProxyUrl }
 
 // Waits before asking again for a segment the server says it doesn't have.
-const SEGMENT_RETRY_MS = [1000, 2000];
+const SEGMENT_RETRY_MS = [500, 1000, 1500, 2000];
 
 module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY_MS } = {}) {
   const router = express.Router();
@@ -821,15 +835,18 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       gone = true;
       if (!res.writableEnded) response?.data?.destroy();
     });
-    // Around a source restart the server can list a segment it can't serve
-    // yet (measured on a Flussonic server: the newest segment, a second after
-    // it renumbered). Players take a failed segment badly — VLC stops the
-    // stream, Stremio retried one for a minute — so ask again shortly first.
+    // The server can list a segment it then says it doesn't have (measured
+    // on a Flussonic provider: files named seconds ahead of the clock, right
+    // after it restarted or renumbered — several servers behind one address,
+    // and the one asked isn't the one that listed it). Players take a failed
+    // segment badly — VLC stops the stream, Stremio retried one for a minute —
+    // so ask again first, each time over a fresh connection, which can reach
+    // another of those servers.
     const name = realUrl.split('?')[0].split('/').slice(-2).join('/');
     const startedAt = Date.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        response = await fetchStreamFromPortal(headers, realUrl, undefined, ch);
+        response = await fetchStreamFromPortal(headers, realUrl, undefined, ch, { fresh: attempt > 0 });
       } catch (e) {
         log.error(TAG, `segment fetch failed: ${e.message}`);
         return res.status(502).send(`Fetch failed: ${e.message}`);
