@@ -15,6 +15,39 @@ const express = require('express');
 const log = require('../logger');
 const TAG = 'm3u';
 
+const OTHER_GROUP = 'Other';
+
+// Quotes would end the attribute early and corrupt the rest of the line.
+const attr = (v) => String(v ?? '').replace(/"/g, "'");
+
+// Pairs each channel with its category name and orders the playlist by
+// category (in the portal's genre order), then channel number. Written in raw
+// channel-number order, categories interleave and players that show the file
+// top to bottom present it as one long mixed list.
+//
+// The category comes from the genre id → group lookup, falling back to the
+// name the channel was given at parse time and finally to "Other", so a
+// channel is never left with an empty group-title (which most clients lump
+// into one unnamed bucket).
+function groupChannels(channels, groups) {
+  const nameById = new Map(groups.map((g) => [String(g.id), g.name]));
+  const order    = new Map(groups.map((g, i) => [g.name, i]));
+  const rank     = (group) => (order.has(group) ? order.get(group) : group === OTHER_GROUP ? Infinity : groups.length);
+
+  return channels
+    .map((ch, i) => ({
+      ch,
+      i,
+      group: nameById.get(String(ch.genreId)) || ch.genre || OTHER_GROUP,
+    }))
+    .sort((a, b) =>
+      rank(a.group) - rank(b.group) ||
+      a.group.localeCompare(b.group) ||
+      (a.ch.number || Infinity) - (b.ch.number || Infinity) ||
+      a.i - b.i)
+    .map(({ ch, group }) => ({ ch, group }));
+}
+
 module.exports = function m3uModule(appState, logoManager) {
   const router = express.Router();
 
@@ -32,15 +65,10 @@ module.exports = function m3uModule(appState, logoManager) {
       return res.status(503).send('No channels loaded yet — try again in a moment');
     }
 
-    // Build a quick lookup: genre id → group name
-    const groupName = new Map(groups.map(g => [String(g.id), g.name]));
-
-    const base = `${req.protocol}://${req.get('host')}`;
-
+    const base  = `${req.protocol}://${req.get('host')}`;
     const lines = ['#EXTM3U x-tvg-url=""'];
 
-    for (const ch of channels) {
-      const group  = groupName.get(String(ch.genreId)) || '';
+    for (const { ch, group } of groupChannels(channels, groups)) {
       // Precedence: manual override → Stalker portal logo → iptv-org (manual fetch).
       const logo   = (logoManager ? logoManager.resolveOverride(ch.name) : '')
                   || ch.iconPath
@@ -50,7 +78,10 @@ module.exports = function m3uModule(appState, logoManager) {
       const chno   = ch.number > 0 ? ` tvg-chno="${ch.number}"` : '';
 
       lines.push(
-        `#EXTINF:-1 tvg-id="${ch.uniqueId}"${chno} tvg-name="${name}" tvg-logo="${logo}" group-title="${group}",${name}`,
+        `#EXTINF:-1 tvg-id="${ch.uniqueId}"${chno} tvg-name="${attr(name)}" tvg-logo="${attr(logo)}" group-title="${attr(group)}",${name}`,
+        // Some players (older VLC, several TV apps) group on #EXTGRP rather
+        // than the group-title attribute.
+        `#EXTGRP:${group}`,
         `${base}/proxy/stream/${ch.uniqueId}`
       );
     }
@@ -65,3 +96,5 @@ module.exports = function m3uModule(appState, logoManager) {
 
   return router;
 };
+
+module.exports.groupChannels = groupChannels;
