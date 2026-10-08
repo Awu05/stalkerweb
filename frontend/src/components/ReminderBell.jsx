@@ -6,15 +6,20 @@ import { cn } from '@/lib/utils'
 const PANEL_WIDTH = 288 // w-72
 const GAP = 8
 
-// Where to put the panel: beside the bell, opening upward from it. The bell
-// lives at the bottom of the sidebar, so a dropdown below it lands off-screen,
-// and right-aligning it to the bell pushed it off the left edge. Clamped to the
-// viewport so it also fits beside the overlay sidebar on a phone.
+// Where to put the panel: just outside the sidebar so it doesn't cover the
+// menu, and opening toward the roomier half of the screen — down from a bell
+// near the top, up from one near the bottom. Clamped to the viewport so it
+// also fits beside the overlay sidebar on a phone.
 function panelPosition(button) {
-  const r = button.getBoundingClientRect()
+  const r  = button.getBoundingClientRect()
   const vw = window.innerWidth
   const vh = window.innerHeight
-  const left = Math.max(GAP, Math.min(r.right + GAP, vw - PANEL_WIDTH - GAP))
+  const edge = button.closest('aside')?.getBoundingClientRect().right ?? r.right
+  const left = Math.max(GAP, Math.min(edge + GAP, vw - PANEL_WIDTH - GAP))
+  if (r.top < vh / 2) {
+    const top = Math.max(GAP, r.top)
+    return { left, top, maxHeight: vh - top - GAP }
+  }
   const bottom = Math.max(GAP, vh - r.bottom)
   return { left, bottom, maxHeight: vh - bottom - GAP }
 }
@@ -97,7 +102,7 @@ export function ReminderBell({ reminders = [], onRemove }) {
         // which clipped the panel and trapped its positioning.
         <div
           ref={panelRef}
-          style={{ left: pos.left, bottom: pos.bottom, maxHeight: pos.maxHeight, width: PANEL_WIDTH }}
+          style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, width: PANEL_WIDTH }}
           className="modal-panel fixed z-[60] flex flex-col rounded-[var(--radius-md)] overflow-hidden"
         >
           <div className="shrink-0 px-3 py-2 border-b border-[var(--color-border)] flex items-center justify-between">
