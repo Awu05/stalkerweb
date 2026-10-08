@@ -192,3 +192,112 @@ describe('RestartSmoother', () => {
     expect(await smoother.rewrite('k', BASE, body)).toBe(body)
   })
 })
+
+describe('RestartSmoother — review cases', () => {
+  const quiet = { info: () => {}, warn: () => {} }
+  const numbered = (seq, names, extra = {}) =>
+    `#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:${seq}\n${extra.header ?? ''}` +
+    names.map((n) => `${(extra.disc ?? []).includes(n) ? '#EXT-X-DISCONTINUITY\n' : ''}#EXTINF:6.0,\n${n}`).join('\n') + '\n'
+  const seqOf = (out) => parsePlaylist(out).header.find((l) => l.startsWith('#EXT-X-MEDIA-SEQUENCE:')).split(':')[1] * 1
+  const urisOf = (out) => parsePlaylist(out).segments.map((s) => s.uri)
+  // name(t): a Flussonic-style name for the segment starting t s after 20:41:00.
+  const name = (t, ext = 'ts') => {
+    const m = Math.floor(t / 60), sec = t % 60
+    return `tracks-v1a1/2026/10/08/20/${String(41 + m).padStart(2, '0')}/${String(sec).padStart(2, '0')}-06000.${ext}`
+  }
+
+  it('keeps a long window whole and in order (more segments than it remembers)', async () => {
+    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const segs = (from) => Array.from({ length: 400 }, (_, i) => `seg${from + i}.ts`)
+    const a = await sm.rewrite('k', BASE, numbered(1, segs(1)))
+    expect(urisOf(a)).toHaveLength(400)
+    const b = await sm.rewrite('k', BASE, numbered(2, segs(2)))
+    expect(seqOf(b)).toBe(2)
+    expect(urisOf(b)).toEqual(segs(2))
+  })
+
+  it('keeps EXT-X-MAP when the segment carrying it is left out', async () => {
+    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    const map = '#EXT-X-MAP:URI="init.mp4"\n'
+    const m = (t) => name(t, 'm4s')
+    await sm.rewrite('k', BASE, numbered(10, [m(60), m(66)], { header: map }))
+    // A restart: 20:42:05 repeats most of 20:42:06 and is left out.
+    await sm.rewrite('k', BASE, numbered(10, [m(60), m(66), m(65), m(72)], { header: map, disc: [m(65)] }))
+    // Later the left-out segment heads the window, and the server puts the map on it.
+    const out = await sm.rewrite('k', BASE, numbered(12, [m(65), m(72), m(78)], { header: map, disc: [m(65)] }))
+    const p = parsePlaylist(out)
+    expect(p.segments.map((s) => s.uri)).toEqual([m(72), m(78)])
+    expect(out.indexOf('#EXT-X-MAP')).toBeGreaterThan(-1)
+    expect(out.indexOf('#EXT-X-MAP')).toBeLessThan(out.indexOf(m(72)))
+  })
+
+  it('keeps numbering going forward when the source reuses file names', async () => {
+    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    let last = -1
+    for (let head = 3; head < 40; head++) {
+      const names = [head - 3, head - 2, head - 1, head].map((n) => `seg${n % 10}.ts`)
+      const out = await sm.rewrite('k', BASE, numbered(head - 3, names))
+      const seq = seqOf(out)
+      expect(seq, `reload ${head}`).toBeGreaterThanOrEqual(last)
+      expect(urisOf(out).at(-1)).toBe(`seg${head % 10}.ts`)   // the newest segment is always there
+      last = seq
+    }
+  })
+
+  it('numbers each segment once when two players reload at the same time', async () => {
+    const sm = new RestartSmoother({
+      // A slow probe; 102 continues 101 (a restart that repeats nothing), so it is kept.
+      probe: (url) => new Promise((r) => setTimeout(() => r({ video: url.includes('seg102') ? 1006 : 1000, audio: null }), 30)),
+      logger: quiet,
+    })
+    await sm.rewrite('k', BASE, numbered(100, ['seg100.ts', 'seg101.ts']))
+    const body = numbered(101, ['seg101.ts', 'seg102.ts', 'seg103.ts'], { disc: ['seg102.ts'] })
+    const [a, b] = await Promise.all([sm.rewrite('k', BASE, body), sm.rewrite('k', BASE, body)])
+    expect(a).toBe(body)   // nothing to change
+    expect(b).toBe(body)
+    const next = await sm.rewrite('k', BASE, numbered(102, ['seg102.ts', 'seg103.ts', 'seg104.ts']))
+    expect(urisOf(next)).toEqual(['seg102.ts', 'seg103.ts', 'seg104.ts'])
+    expect(seqOf(next)).toBe(102)
+  })
+
+  it('stops holding back repeats before players give up on a still playlist', async () => {
+    let t = 0
+    const sm = new RestartSmoother({ probe: async () => null, logger: quiet, now: () => t })
+    await sm.rewrite('k', BASE, numbered(10, [name(60), name(66), name(72)]))
+    // The source goes back 29 s and replays in real time, one segment per
+    // reload. After 2.5 target durations (15 s) with nothing new, the next
+    // segment is kept, with the break marked.
+    const w = []
+    let out
+    for (const at of [49, 55, 61]) {
+      t += 6000
+      w.push(name(at))
+      out = await sm.rewrite('k', BASE, numbered(20, w, { disc: [name(49)] }))
+    }
+    const p = parsePlaylist(out)
+    expect(p.segments.map((s) => s.uri)).toEqual([name(61)])
+    expect(p.header).toContain('#EXT-X-MEDIA-SEQUENCE:13')
+    expect(p.header).toContain('#EXT-X-DISCONTINUITY-SEQUENCE:1')
+  })
+
+  it('logs a renumbering once, not again when the old segments leave', async () => {
+    const lines = []
+    const sm = new RestartSmoother({ probe: async () => null, logger: { info: (_t, m) => lines.push(m), warn: () => {} } })
+    await sm.rewrite('k', BASE, numbered(100, ['A.ts', 'B.ts', 'C.ts']))
+    await sm.rewrite('k', BASE, numbered(110, ['A.ts', 'B.ts', 'C.ts', 'D.ts']))
+    await sm.rewrite('k', BASE, numbered(111, ['B.ts', 'C.ts', 'D.ts', 'E.ts']))
+    await sm.rewrite('k', BASE, numbered(113, ['D.ts', 'E.ts', 'F.ts']))
+    expect(lines.filter((l) => l.includes('renumbered'))).toEqual([expect.stringContaining('(+10)')])
+  })
+
+  it('never moves the playlist back for an older playlist from an out-of-step server', async () => {
+    const sm = new RestartSmoother({ probe: async () => null, logger: quiet })
+    await sm.rewrite('k', BASE, numbered(10, ['s10.ts', 's11.ts', 's12.ts']))
+    const cur = await sm.rewrite('k', BASE, numbered(12, ['s12.ts', 's13.ts', 's14.ts']))
+    const older = await sm.rewrite('k', BASE, numbered(9, ['s9.ts', 's10.ts', 's11.ts', 's12.ts']))
+    expect(seqOf(older)).toBeGreaterThanOrEqual(seqOf(cur))
+    const after = await sm.rewrite('k', BASE, numbered(13, ['s13.ts', 's14.ts', 's15.ts']))
+    expect(urisOf(after)).toEqual(['s13.ts', 's14.ts', 's15.ts'])
+    expect(seqOf(after)).toBe(13)
+  })
+})

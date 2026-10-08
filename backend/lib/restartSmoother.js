@@ -25,7 +25,10 @@
 // Anything uncertain (no timestamps, a probe that fails or is slow, a clock
 // that jumped somewhere unrelated) keeps the segment: the worst case is the
 // replay this was meant to hide. Playlists it can't follow segment by segment
-// (byte ranges, low-latency parts) pass through untouched.
+// (byte ranges, low-latency parts) pass through untouched. A playlist made
+// only of segments that already left the window (an out-of-step server) gets
+// the last playlist instead; a file name the source reuses for new content
+// gets a new number.
 
 const log = require('../logger');
 const TAG = 'restart-smoother';
@@ -34,8 +37,12 @@ const OVERLAP_MIN_S = 1.0;       // a repeat shorter than this isn't worth a ski
 const OVERLAP_FRACTION = 0.5;    // …and it must be most of the segment
 const MAX_REPEAT_S = 60;         // further back than this is a clock change, not a repeat
 const MAX_HOLD_S = 45;           // never leave out more than this in a row — resync instead
+const STALL_TARGETS = 2.5;       // …nor keep players without a new segment for longer than this many target durations
 const PROBE_TIMEOUT_MS = 3000;
-const KEEP_HISTORY = 300;        // segments of state kept per stream
+const KEEP_HISTORY = 300;        // segments remembered behind the window, per stream
+const IDLE_FORGET_MS = 30 * 60 * 1000;   // a stream nobody reloaded for this long is forgotten
+const STALE_RESYNC = 3;          // older playlists in a row before starting over
+const RECENT_PLAYLISTS = 3;      // a segment listed in one of the last this-many playlists is current
 
 const HEADER_TAGS = new Set([
   '#EXTM3U', '#EXT-X-VERSION', '#EXT-X-TARGETDURATION', '#EXT-X-MEDIA-SEQUENCE',
@@ -104,11 +111,12 @@ class RestartSmoother {
    * @param {(ch: string, seq: number) => void} [opts.onDrop]
    *   a segment the source numbered `seq` was left out
    */
-  constructor({ probe, onDrop = () => {}, logger = log, probeTimeoutMs = PROBE_TIMEOUT_MS } = {}) {
+  constructor({ probe, onDrop = () => {}, logger = log, probeTimeoutMs = PROBE_TIMEOUT_MS, now = Date.now } = {}) {
     this.probe = probe;
     this.onDrop = onDrop;
     this.log = logger;
     this.probeTimeoutMs = probeTimeoutMs;
+    this.now = now;
     this.pts = new Map();      // segment path → start timestamp (s)
     this.streams = new Map();  // stream key → state (see _stream)
   }
@@ -144,18 +152,23 @@ class RestartSmoother {
     let st = this.streams.get(key);
     if (!st) {
       st = {
-        kept: new Map(),      // segment path → { out, upSeq, url, dur, time, disc, dseq, carry }
-        dropped: new Map(),   // segment path → source number
+        kept: new Map(),      // segment path → { out, upSeq, url, dur, time, disc, dseq, seen }
+        dropped: new Map(),   // segment path → { seq, seen }
+        gen: 0,               // playlists handled; `seen` is the last one listing a segment
         nextOut: null,        // number the next kept segment gets
         last: null,           // newest kept segment
+        lastNewAt: 0,         // when a segment was last kept
         discs: 0,             // discontinuities handed out so far
-        pending: { disc: false, tags: [] },   // carried over from left-out segments
-        offset: 0,            // source number − ours, last seen (for the renumber log)
+        pendingDisc: false,   // a left-out segment's discontinuity, for the next kept one
         held: 0,              // seconds left out since the last kept segment
+        firstOut: null,       // our number of the first segment in the last playlist served
+        staleRun: 0,          // playlists in a row with nothing past what was served
         lastBody: null,
+        queue: Promise.resolve(),
       };
       this.streams.set(key, st);
     }
+    st.usedAt = this.now();
     return st;
   }
 
@@ -164,58 +177,122 @@ class RestartSmoother {
    * from `playlistUrl` (segment URIs stay as the server wrote them; the proxy
    * rewrites them afterwards). `channel` names the channel in logs.
    */
-  async rewrite(streamKey, playlistUrl, body, channel = streamKey) {
+  rewrite(streamKey, playlistUrl, body, channel = streamKey) {
+    this._forgetIdle();
+    const st = this._stream(streamKey);
+    // One reload at a time per stream (players of one channel share it): a
+    // decision still waiting on a probe must be seen by the next reload, or
+    // both would number the same segment.
+    const run = st.queue.then(() => this._rewrite(st, playlistUrl, body, channel));
+    st.queue = run.catch(() => {});
+    return run;
+  }
+
+  _forgetIdle() {
+    const cutoff = this.now() - IDLE_FORGET_MS;
+    for (const [key, st] of this.streams) if (st.usedAt < cutoff) this.streams.delete(key);
+  }
+
+  async _rewrite(st, playlistUrl, body, channel) {
     if (UNFOLLOWABLE.test(body)) return body;
     const parsed = parsePlaylist(body);
     if (!parsed || !parsed.segments.length) return body;
     const abs = (uri) => { try { return new URL(uri, playlistUrl).toString(); } catch { return uri; } };
     const ids = parsed.segments.map((seg) => pathOf(abs(seg.uri)));
     if (new Set(ids).size !== ids.length) return body;   // one file listed twice: not followable
+    const target = Number(parsed.header.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'))?.split(':')[1]) || 6;
 
-    const st = this._stream(streamKey);
     if (st.nextOut === null) {
       // Start from the source's numbers, so a stream without restarts passes through as is.
       st.nextOut = parsed.segments[0].seq;
       st.discs = discontinuitySequence(parsed);
+      st.lastNewAt = this.now();
+    }
+    if (st.staleRun >= STALE_RESYNC) {
+      // Only older playlists for a while: start over, numbering on from where
+      // players are, with the break marked.
+      this.log.info(TAG, `ch ${channel}: the source kept sending older playlists — starting over`);
+      Object.assign(st, { kept: new Map(), dropped: new Map(), last: null, firstOut: null, staleRun: 0, pendingDisc: true, held: 0 });
+    }
+    const gen = ++st.gen;
+    const recent = (e) => e.seen >= gen - RECENT_PLAYLISTS;
+
+    // Where this playlist meets what was served: the segments listed recently.
+    // Anything before them is older content (an out-of-step server's older
+    // playlist) and is never numbered; anything after them is new.
+    let firstCur = -1;
+    let lastCur = -1;
+    for (const [i, id] of ids.entries()) {
+      const e = st.kept.get(id);
+      if (e && recent(e)) { if (firstCur < 0) firstCur = i; lastCur = i; }
+    }
+    if (firstCur < 0 && st.lastBody && ids.every((id) => st.kept.has(id) || st.dropped.has(id))) {
+      // Only segments that had left the window: an older playlist.
+      st.gen--;
+      st.staleRun++;
+      return st.lastBody;
     }
 
     const leftOut = [];
+    let renumbered = null;
+    let prevOut = null;   // our number of the last kept segment so far in this playlist
     for (const [i, seg] of parsed.segments.entries()) {
+      if (i < firstCur) continue;
       const id = ids[i];
-      const known = st.kept.get(id);
-      if (known) { known.url = abs(seg.uri); continue; }
-      if (st.dropped.has(id)) continue;
       const url = abs(seg.uri);
+      let known = st.kept.get(id);
+      // A remembered name listed after the recent segments, or after newer
+      // ones, is the source reusing a file name (names that wrap, an encoder
+      // counting from 0 again) for new content.
+      if (known && ((i > lastCur && !recent(known)) || (prevOut !== null && known.out <= prevOut))) {
+        st.kept.delete(id);
+        known = null;
+      }
+      if (known) {
+        if (renumbered === null && seg.seq !== known.upSeq) renumbered = seg.seq - known.upSeq;
+        Object.assign(known, { upSeq: seg.seq, url, seen: gen });
+        prevOut = known.out;
+        continue;
+      }
+      const drop = st.dropped.get(id);
+      if (drop && recent(drop)) { drop.seen = gen; continue; }
+      st.dropped.delete(id);   // not listed for a while: judged afresh
+
       const time = timeFromName(url);
       const repeat = st.last ? await this._repeat(st.last, seg, url, time) : null;
-      if (repeat !== null && st.held + repeat <= MAX_HOLD_S) {
+      // Never hold the playlist still so long that players give up on it
+      // (ExoPlayer: 3.5 target durations) — resync instead.
+      const stalled = this.now() - st.lastNewAt > STALL_TARGETS * target * 1000;
+      if (repeat !== null && st.held + repeat <= MAX_HOLD_S && !stalled) {
         st.held += repeat;
-        st.dropped.set(id, seg.seq);
-        if (seg.disc) st.pending.disc = true;
-        st.pending.tags.push(...seg.tags.filter((t) => !OWN_TAGS.includes(tagName(t))));
+        st.dropped.set(id, { seq: seg.seq, seen: gen });
+        if (seg.disc) st.pendingDisc = true;
         leftOut.push({ seg, time, repeat });
         this.onDrop(channel, seg.seq);
         continue;
       }
-      st.held = 0;
-      // Kept after a long run of repeats: the source isn't catching up, so its
+      // Kept after a run of repeats: the source isn't catching up, so its
       // clock moved for good — players get the break marked and carry on.
-      const disc = seg.disc || st.pending.disc || repeat !== null;
+      const disc = seg.disc || st.pendingDisc || repeat !== null;
       if (disc) st.discs++;
-      const entry = {
-        out: st.nextOut++, upSeq: seg.seq, url, dur: seg.dur, time,
-        disc, dseq: st.discs, carry: st.pending.tags,
-      };
-      st.pending = { disc: false, tags: [] };
+      const entry = { out: st.nextOut++, upSeq: seg.seq, url, dur: seg.dur, time, disc, dseq: st.discs, seen: gen };
+      st.held = 0;
+      st.pendingDisc = false;
+      st.lastNewAt = this.now();
       st.kept.set(id, entry);
       st.last = entry;
+      prevOut = entry.out;
     }
     if (leftOut.length) this._logLeftOut(channel, leftOut);
-    this._noteRenumber(st, parsed, ids, channel);
-    this._prune(st);
+    if (renumbered) {
+      this.log.info(TAG, `ch ${channel}: the source renumbered its segments (${renumbered > 0 ? '+' : ''}${renumbered}) — players keep their numbering`);
+    }
 
     const out = this._render(parsed, ids, st, body);
-    if (out === null) return st.lastBody ?? body;   // nothing new to show yet: keep the last playlist
+    this._prune(st, ids);
+    if (out === 'stale') st.staleRun++;
+    else st.staleRun = 0;
+    if (out === null || out === 'stale') return st.lastBody ?? body;   // nothing new to show yet: keep the last playlist
     st.lastBody = out;
     return out;
   }
@@ -253,59 +330,67 @@ class RestartSmoother {
     this.log.info(TAG, `ch ${channel}: left out ${what}${when} after a source restart — ${total.toFixed(1)}s of content already played`);
   }
 
-  // The source changed its numbering for segments it had already listed.
-  _noteRenumber(st, parsed, ids, channel) {
-    for (const [i, seg] of parsed.segments.entries()) {
-      const e = st.kept.get(ids[i]);
-      if (!e) continue;
-      const offset = seg.seq - e.upSeq;
-      if (offset !== st.offset) {
-        this.log.info(TAG, `ch ${channel}: the source renumbered its segments (${offset > st.offset ? '+' : ''}${offset - st.offset}) — players keep their numbering`);
-        st.offset = offset;
-      }
-      return;
-    }
+  // Forget what is far behind the window; never what it still lists.
+  _prune(st, ids) {
+    const listed = new Set(ids);
+    const floor = (st.firstOut ?? st.last?.out ?? 0) - KEEP_HISTORY;
+    for (const [id, e] of st.kept) if (e.out < floor && !listed.has(id) && e !== st.last) st.kept.delete(id);
+    for (const [id, d] of st.dropped) if (d.seen < st.gen - RECENT_PLAYLISTS) st.dropped.delete(id);
   }
 
-  // Forget segments far behind the live window.
-  _prune(st) {
-    if (!st.last) return;
-    const floor = st.last.out - KEEP_HISTORY;
-    for (const [id, e] of st.kept) if (e.out < floor) st.kept.delete(id);
-    while (st.dropped.size > KEEP_HISTORY) st.dropped.delete(st.dropped.keys().next().value);
-  }
-
-  // The playlist in our numbering: kept segments of this window in order,
-  // from the newest back to the first gap (a kept segment the source no
-  // longer lists — HLS numbers must run without holes). Null if none.
+  // The playlist in our numbering: the kept segments of this window, in its
+  // order, from the newest back to the first gap in our numbers (a kept
+  // segment the source no longer lists — HLS numbers run without holes).
+  // Tags that apply to what follows (EXT-X-MAP, EXT-X-KEY) on segments left
+  // out or before the gap move to the next segment shown. It never starts
+  // before the last playlist served did: an out-of-step server's older
+  // playlist would make players go back. Null if nothing is kept; 'stale' if
+  // all of it is older than what was served.
   _render(parsed, ids, st, body) {
-    const rows = parsed.segments
-      .map((seg, i) => ({ seg, e: st.kept.get(ids[i]) }))
-      .filter((r) => r.e)
-      .sort((a, b) => a.e.out - b.e.out);
-    if (!rows.length) return null;
-    let from = rows.length - 1;
-    while (from > 0 && rows[from - 1].e.out === rows[from].e.out - 1) from--;
-    const win = rows.slice(from);
+    const rows = parsed.segments.map((seg, i) => ({ seg, e: st.kept.get(ids[i]) }));
+    let end = rows.length - 1;
+    while (end >= 0 && !rows[end].e) end--;
+    if (end < 0) return null;
+    let from = end;
+    for (let j = end - 1, want = rows[end].e.out - 1; j >= 0; j--) {
+      if (!rows[j].e) continue;
+      if (rows[j].e.out !== want) break;
+      from = j;
+      want--;
+    }
+    if (st.firstOut !== null) {
+      while (from <= end && (!rows[from].e || rows[from].e.out < st.firstOut)) from++;
+      if (from > end) return 'stale';
+    }
+    const shown = (j) => j >= from && j <= end && rows[j].e;
+    const first = rows[from].e;
+    st.firstOut = first.out;
 
     // Untouched when it would come out the same.
-    const first = win[0];
-    const dseq = first.e.dseq;
-    const same = win.length === parsed.segments.length && first.e.out === parsed.segments[0].seq &&
-      dseq === discontinuitySequence(parsed) + (parsed.segments[0].disc ? 1 : 0) &&
-      win.every((r, i) => r.seg === parsed.segments[i] && r.e.disc === r.seg.disc && !r.e.carry.length);
+    const same = from === 0 && end === rows.length - 1 && rows.every((r) => r.e) &&
+      first.out === parsed.segments[0].seq &&
+      first.dseq === discontinuitySequence(parsed) + (parsed.segments[0].disc ? 1 : 0) &&
+      rows.every((r) => r.e.disc === r.seg.disc);
     if (same) return body;
 
     const header = parsed.header.filter((l) => !l.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:'))
       .flatMap((l) => (l.startsWith('#EXT-X-MEDIA-SEQUENCE:')
-        ? [`#EXT-X-MEDIA-SEQUENCE:${first.e.out}`, ...(dseq ? [`#EXT-X-DISCONTINUITY-SEQUENCE:${dseq}`] : [])]
+        ? [`#EXT-X-MEDIA-SEQUENCE:${first.out}`, ...(first.dseq ? [`#EXT-X-DISCONTINUITY-SEQUENCE:${first.dseq}`] : [])]
         : [l]));
     const lines = [];
-    for (const [i, { seg, e }] of win.entries()) {
+    let carry = new Map();   // tag name → latest line, from segments not shown
+    for (let j = 0; j <= end; j++) {
+      const { seg, e } = rows[j];
+      const ownTags = seg.tags.filter((t) => t !== '#EXT-X-DISCONTINUITY');
+      if (!shown(j)) {
+        for (const t of ownTags) if (!OWN_TAGS.includes(tagName(t))) carry.set(tagName(t), t);
+        continue;
+      }
       // The first segment's discontinuity is counted in the header.
-      if (e.disc && i > 0) lines.push('#EXT-X-DISCONTINUITY');
-      const tags = [...new Set([...e.carry, ...seg.tags.filter((t) => t !== '#EXT-X-DISCONTINUITY')])];
-      lines.push(...tags, seg.uri);
+      if (e.disc && j > from) lines.push('#EXT-X-DISCONTINUITY');
+      const names = new Set(ownTags.map(tagName));
+      lines.push(...[...carry.values()].filter((t) => !names.has(tagName(t))), ...ownTags, seg.uri);
+      carry = new Map();
     }
     return [...header, ...lines, ...parsed.trailer].join('\n') + '\n';
   }

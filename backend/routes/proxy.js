@@ -211,10 +211,7 @@ module.exports = function proxyModule(appState) {
   // Hides the replay a source restart causes (lib/restartSmoother); it reuses
   // the timestamps diagnostics read from served segments, and probes the first
   // bytes of a segment only when it has none.
-  const smoother = new RestartSmoother({
-    probe: probeSegmentStart,
-    onDrop: (ch, seq) => diag.leftOut(ch, seq),
-  });
+  const smoother = new RestartSmoother({ probe: probeSegmentStart });
   const diag = new StreamDiagnostics({ onTimestamps: (url, ts) => smoother.recordPts(url, ts) });
 
   // Start timestamps of a segment from its first 64 KB, over the stream's own
@@ -367,7 +364,9 @@ module.exports = function proxyModule(appState) {
       }
       const proxyOrigin = baseUrl(req);
       if (channelId) diag.playlist(channelId, realUrl, body.toString('utf8'), 0);
-      const rewritten = rewriteM3u8(await smoothPlaylist(channelId, realUrl, body.toString('utf8')), realUrl, proxyOrigin, proxySecret, channelId);
+      const smoothed = await smoothPlaylist(channelId, realUrl, body.toString('utf8'));
+      if (channelId) diag.served(channelId, realUrl, smoothed);
+      const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId);
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
       setCors();
@@ -477,7 +476,9 @@ module.exports = function proxyModule(appState) {
     const body = Buffer.from(response.data).toString('utf8');
     if (channelId) diag.playlist(channelId, realUrl, body, Date.now() - fetchStart);
     const proxyOrigin = baseUrl(req);
-    const rewritten = rewriteM3u8(await smoothPlaylist(channelId, realUrl, body), realUrl, proxyOrigin, proxySecret, channelId);
+    const smoothed = await smoothPlaylist(channelId, realUrl, body);
+    if (channelId) diag.served(channelId, realUrl, smoothed);
+    const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId);
 
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Cache-Control', 'no-cache, no-store');
