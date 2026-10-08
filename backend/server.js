@@ -32,7 +32,14 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ── Middleware ─────────────────────────────────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: false }));
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false,
+  // With the built-in HTTPS listener, HTTP stays up on another port of the same
+  // host. HSTS is per host, not per port, so a browser that saw it over HTTPS
+  // would force HTTPS onto the HTTP port and break it.
+  strictTransportSecurity: config.httpsPort ? false : undefined,
+}));
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -254,12 +261,18 @@ const exportRoutes    = require('./routes/export')(config);
 const logsRoutes      = require('./routes/logs');
 const XtreamIdStore   = require('./lib/XtreamIdStore');
 const xtreamIdStore   = new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json'));
+// One catalog for the Xtream API and the Stremio addon, so they share filters
+// and caches (lib/catalog.js).
+const catalog         = require('./lib/catalog').createCatalog(appState, { logoManager, idStore: xtreamIdStore });
 const xtreamRoutes    = require('./routes/xtream')(appState, {
   proxyRouter: proxyRoutes,
   m3uRouter:   m3uRoutes,
   xmltvRouter: xmltvRoutes,
-  logoManager,
-  idStore:     xtreamIdStore,
+  catalog,
+});
+const stremioRoutes   = require('./routes/stremio')(appState, {
+  catalog,
+  version: require('./package.json').version,
 });
 
 app.use('/api/auth', authRoutes);
@@ -277,6 +290,7 @@ app.use('/api/m3u', m3uRoutes);
 app.use('/api/xspf', xspfRoutes);
 app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
 // Xtream Codes API (/player_api.php, /live/…, /movie/…, /series/…) — after
@@ -365,6 +379,21 @@ const httpServer = app.listen(config.port, () => {
   tryAutoConnect();
 });
 
+// Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS
+// (except from 127.0.0.1), so this lets a TV or phone use the Stremio addon
+// without a reverse proxy. Set HTTPS_PORT, HTTPS_CERT and HTTPS_KEY (PEM files).
+let httpsServer = null;
+if (config.httpsPort) {
+  try {
+    const tls = { cert: fs.readFileSync(config.httpsCert), key: fs.readFileSync(config.httpsKey) };
+    httpsServer = require('https').createServer(tls, app).listen(config.httpsPort, () => {
+      log.info('server', `stalkerweb also on https://0.0.0.0:${config.httpsPort}`);
+    });
+  } catch (e) {
+    log.error('server', `HTTPS not started — check HTTPS_CERT and HTTPS_KEY: ${e.message}`);
+  }
+}
+
 // ── Graceful shutdown ──────────────────────────────────────────────────────
 function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
@@ -373,6 +402,7 @@ function shutdown(signal) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();
   }
+  httpsServer?.close();
   httpServer.close(() => {
     log.info('server', 'HTTP server closed');
     process.exit(0);

@@ -1022,6 +1022,12 @@ export default function SetupPage() {
                 hint="Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with any username and password."
               />
               <LinkRow
+                label="Stremio Addon"
+                icon={Server}
+                url={`${origin}/stremio/manifest.json`}
+                hint={<>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install. Stremio needs an <strong>https://</strong> address here unless Stremio runs on this same computer and the link starts with http://127.0.0.1 — see the README for HTTPS.</>}
+              />
+              <LinkRow
                 label="M3U Playlist"
                 icon={ListVideo}
                 url={`${origin}/api/m3u`}
