@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
   Trash2, RefreshCw, Image, Download, Upload, Plus, Pencil, Plug, PlugZap,
-  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays,
+  X, Wifi, WifiOff, Copy, Check, ListVideo, CalendarDays, Server,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -183,15 +183,17 @@ function LinkRow({ label, url, hint, icon: Icon, filename }) {
           {copied === 'ok' ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
           {copied === 'ok' ? 'Copied' : 'Copy'}
         </Button>
-        <a
-          href={url}
-          download={filename}
-          title={`Download ${filename}`}
-          aria-label={`Download ${filename}`}
-          className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
-        >
-          <Download size={13} />
-        </a>
+        {filename && (
+          <a
+            href={url}
+            download={filename}
+            title={`Download ${filename}`}
+            aria-label={`Download ${filename}`}
+            className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
+          >
+            <Download size={13} />
+          </a>
+        )}
       </div>
       {copied === 'manual' && (
         <p className="text-xs text-[var(--color-live)]">Your browser blocked copying — the link is selected, press Ctrl+C (⌘C on Mac).</p>
@@ -1014,11 +1016,17 @@ export default function SetupPage() {
           return (
             <Card title="IPTV Links" description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs.">
               <LinkRow
+                label="Xtream Codes Server"
+                icon={Server}
+                url={origin}
+                hint="Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with any username and password."
+              />
+              <LinkRow
                 label="M3U Playlist"
                 icon={ListVideo}
                 url={`${origin}/api/m3u`}
                 filename="stalkerweb.m3u"
-                hint="Channel list — add as an M3U / playlist URL in your IPTV client or tuner."
+                hint={<>Channel list — add as an M3U / playlist URL in your IPTV client or tuner. For players that don&apos;t group channels (Jellyfin Live TV), add <code className="font-mono">?prefix=1</code> to put the category in each name, like “Sports | ESPN”.</>}
               />
               <LinkRow
                 label="VLC Playlist"

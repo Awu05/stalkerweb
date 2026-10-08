@@ -41,6 +41,31 @@ describe('VodManager.getItems paging', () => {
     expect(client.requested).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
+  it('getAllItems reads every page once and shares the cached result', async () => {
+    const client = fakeClient()
+    const vm = new VodManager(client, { pageGapMs: 0 })
+
+    const [a, b] = await Promise.all([vm.getAllItems('vod', '7'), vm.getAllItems('vod', '7')])
+    expect(a).toHaveLength(TOTAL)
+    expect(b).toBe(a)
+    expect(a[0].categoryId).toBe('7')
+    expect(client.requested).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+
+    await vm.getAllItems('vod', '7')
+    expect(client.requested).toHaveLength(8) // cached
+  })
+
+  it('getAllItems keeps the pages read before a later page fails', async () => {
+    const client = fakeClient()
+    const ok = client._stalkerCall
+    client._stalkerCall = async (params) => {
+      if (params.p === '3') throw new Error('HTTP 429')
+      return ok(params)
+    }
+    const items = await new VodManager(client, { pageGapMs: 0 }).getAllItems('vod', '1')
+    expect(items).toHaveLength(2 * PER_PAGE)
+  })
+
   it('reports a single page for a category that fits in one batch', async () => {
     const vm = new VodManager({
       _stalkerCall: async () => ({ js: { total_items: '5', max_page_items: '14', data: [{ id: '1' }] } }),

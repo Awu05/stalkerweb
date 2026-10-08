@@ -68,4 +68,11 @@ describe('GET /api/m3u', () => {
     // A quote in a name must not end the attribute early.
     expect(lines[4]).toContain(`tvg-name="Sports 'Live'"`)
   })
+
+  it('writes the category into each name with ?prefix=1', async () => {
+    const body = await (await fetch(`${base}/api/m3u?prefix=1`)).text()
+    const lines = body.trim().split('\n')
+    expect(lines[1]).toContain('tvg-name="News | News  Today"')
+    expect(lines[1].endsWith(',News | News  Today')).toBe(true)
+  })
 })
