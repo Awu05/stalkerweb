@@ -76,8 +76,8 @@ class StreamDiagnostics {
     let c = this.channels.get(key);
     if (!c) {
       c = {
-        key, segs: new Map(),      // segment path → { seq, dur, fetches }
-        left: new Set(),           // sequence numbers the restart smoother left out
+        key, segs: new Map(),      // segment path → { seq, dur, fetches }, as players see them
+        source: new Map(),         // segment path → number the source gave it first
         seqAt: null,               // { seq, at } — the playlist's sequence and when it was seen
         lastSeq: null, seqSince: 0, target: 6,
         lastSegSeq: null, lastPts: null,
@@ -98,8 +98,34 @@ class StreamDiagnostics {
 
   _warn(c, msg) { this.log.warn(TAG, `ch ${c.key}: ${msg}`); }
 
-  /** The restart smoother left segment `seq` out — players skip it on purpose. */
-  leftOut(id, seq) { this._ch(id).left.add(seq); }
+  /**
+   * The media playlist as served to players (after the restart smoother), for
+   * channel `id`: what player-side checks (skips, repeats, timestamp steps)
+   * count in. Segments the smoother left out aren't in it, so skipping them
+   * isn't a player skip; a source renumbering doesn't show up either.
+   */
+  served(id, url, body) {
+    const c = this._ch(id);
+    const seqMatch = /#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(body);
+    if (!seqMatch) return;
+    let n = Number(seqMatch[1]);
+    let dur = null;
+    for (const raw of body.split('\n')) {
+      const line = raw.trim();
+      if (line.startsWith('#EXTINF:')) dur = parseFloat(line.slice(8));
+      else if (line && !line.startsWith('#')) {
+        const key = pathOf(new URL(line, url).toString());
+        const known = c.segs.get(key);
+        if (known) Object.assign(known, { seq: n, dur: dur ?? known.dur });
+        else c.segs.set(key, { seq: n, dur: dur ?? c.target, fetches: 0 });
+        n++;
+        dur = null;
+      }
+    }
+    if (c.segs.size > 200) {
+      for (const [k, v] of c.segs) if (v.seq < n - 100) c.segs.delete(k);
+    }
+  }
 
   _summary(c) {
     const st = c.stats;
@@ -146,34 +172,32 @@ class StreamDiagnostics {
       if (produced >= 3 && produced * target > 2 * Math.max(elapsed, 1)) {
         const durs = [...body.matchAll(/#EXTINF:([\d.]+)/g)].map((m) => parseFloat(m[1]));
         const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : target;
-        this._warn(c, `source moved ${produced} segments ahead in ${elapsed.toFixed(1)}s (segments about ${avg.toFixed(1)}s long) — faster than real time; players fall out of the window and jump`);
+        const newest = body.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).at(-1)?.split('?')[0].split('/').slice(-3).join('/');
+        this._warn(c, `source moved ${produced} segments ahead in ${elapsed.toFixed(1)}s (segments about ${avg.toFixed(1)}s long, newest ${newest}) — renumbered at a restart, or racing ahead of real time`);
       }
     }
     c.seqAt = { seq, at: now };
     c.lastSeq = seq;
 
-    // Map each segment to its sequence number and duration.
+    // New segments, in the source's numbering: discontinuities.
     let n = seq;
-    let dur = null;
     let disc = false;
     for (const raw of body.split('\n')) {
       const line = raw.trim();
-      if (line.startsWith('#EXTINF:')) dur = parseFloat(line.slice(8));
-      else if (line.startsWith('#EXT-X-DISCONTINUITY')) disc = true;
+      if (line === '#EXT-X-DISCONTINUITY') disc = true;
       else if (line && !line.startsWith('#')) {
         const key = pathOf(new URL(line, url).toString());
-        if (!c.segs.has(key)) {
-          c.segs.set(key, { seq: n, dur: dur ?? target, fetches: 0 });
+        if (!c.source.has(key)) {
+          c.source.set(key, n);
           if (disc) { c.stats.discontinuities++; this._warn(c, `discontinuity before segment ${n} — the source restarted or switched; timestamps reset here`); }
         }
         n++;
-        dur = null;
         disc = false;
       }
     }
     // Forget segments long gone from the playlist.
-    if (c.segs.size > 200) {
-      for (const [k, v] of c.segs) if (v.seq < seq - 50) c.segs.delete(k);
+    if (c.source.size > 200) {
+      for (const [k, v] of c.source) if (v < seq - 100) c.source.delete(k);
     }
   }
 
@@ -190,8 +214,7 @@ class StreamDiagnostics {
       c.stats.repeats++;
       this._warn(c, `segment ${info.seq ?? '?'} fetched again (${info.fetches}x) — the player re-requested it`);
     } else if (info.seq !== null && c.lastSegSeq !== null) {
-      let missed = 0;
-      for (let n = c.lastSegSeq + 1; n < info.seq; n++) if (!c.left.has(n)) missed++;
+      const missed = info.seq - c.lastSegSeq - 1;
       if (missed > 0) {
         c.stats.skips++;
         this._warn(c, `player skipped from segment ${c.lastSegSeq} to ${info.seq} (${missed} missed) — it fell behind and jumped ahead`);

@@ -44,6 +44,9 @@ describe('StreamDiagnostics', () => {
     d.done(bytes)
   }
 
+  // The source playlist, then the same served to players (no smoothing here).
+  const pl = (body, ms) => { diag.playlist('7', URL0, body, ms); diag.served('7', URL0, body) }
+
   beforeEach(() => {
     warnings = []
     clock = 0
@@ -51,22 +54,22 @@ describe('StreamDiagnostics', () => {
   })
 
   it('stays quiet for a healthy stream', () => {
-    diag.playlist('7', URL0, playlist(100), 200)
+    pl(playlist(100), 200)
     fetchSeg(100, { data: segmentBytes(10, 10) })
     fetchSeg(101, { data: segmentBytes(16, 16) })
-    diag.playlist('7', URL0, playlist(101), 200)
+    pl(playlist(101), 200)
     fetchSeg(102, { data: segmentBytes(22, 22) })
     expect(warnings).toEqual([])
   })
 
   it('warns when the playlist goes back (players replay)', () => {
-    diag.playlist('7', URL0, playlist(100), 200)
-    diag.playlist('7', URL0, playlist(98), 200)
+    pl(playlist(100), 200)
+    pl(playlist(98), 200)
     expect(warnings.join('\n')).toMatch(/went BACK from sequence 100 to 98/)
   })
 
   it('warns when a segment is fetched twice, or the player skips ahead', () => {
-    diag.playlist('7', URL0, playlist(100, 6), 200)
+    pl(playlist(100, 6), 200)
     fetchSeg(100)
     fetchSeg(100)
     fetchSeg(103)
@@ -75,13 +78,13 @@ describe('StreamDiagnostics', () => {
   })
 
   it('warns when a segment downloads slower than it plays', () => {
-    diag.playlist('7', URL0, playlist(100), 200)
+    pl(playlist(100), 200)
     fetchSeg(100, { ms: 7000, bytes: 3e6 })
     expect(warnings.join('\n')).toMatch(/segment 100: 3\.00 MB took 7\.0s for 6\.0s of video — slower than real time/)
   })
 
   it("warns when the source's timestamps jump back, and when audio drifts", () => {
-    diag.playlist('7', URL0, playlist(100), 200)
+    pl(playlist(100), 200)
     fetchSeg(100, { data: segmentBytes(50, 50) })
     fetchSeg(101, { data: segmentBytes(48, 48) })      // expected +6s, got −2s
     fetchSeg(102, { data: segmentBytes(54, 55) })      // audio now 1s later than video
@@ -91,9 +94,20 @@ describe('StreamDiagnostics', () => {
   })
 
   it('warns about discontinuities and slow playlist reloads', () => {
-    diag.playlist('7', URL0, playlist(100, 3, '#EXT-X-DISCONTINUITY\n'), 3500)
+    pl(playlist(100, 3, '#EXT-X-DISCONTINUITY\n'), 3500)
     const all = warnings.join('\n')
     expect(all).toMatch(/playlist reload took 3\.5s/)
     expect(all).toMatch(/discontinuity before segment 100/)
+  })
+
+  it("counts player skips in the numbering players see, not the source's", () => {
+    pl(playlist(100), 200)
+    fetchSeg(100); fetchSeg(101); fetchSeg(102)
+    // The source renumbers 10 ahead at a restart (seg113 is its next new
+    // segment); players are served it as 103.
+    diag.playlist('7', URL0, playlist(113, 3), 200)
+    diag.served('7', URL0, '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:103\n#EXTINF:6.0,\nseg113.ts?token=t\n')
+    fetchSeg(113)
+    expect(warnings.join('\n')).not.toMatch(/skipped/)
   })
 })
