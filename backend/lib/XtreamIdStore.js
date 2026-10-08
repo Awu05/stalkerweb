@@ -42,22 +42,31 @@ class XtreamIdStore {
 
   _scheduleSave() {
     if (!this._file || this._timer) return;
-    this._timer = setTimeout(() => {
-      this._timer = null;
-      try {
-        const tmp = this._file + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify({ next: this._next, byKey: Object.fromEntries(this._byKey) }), 'utf8');
-        fs.renameSync(tmp, this._file);
-      } catch (e) {
-        log.error(TAG, `episode id save failed: ${e.message}`);
-      }
-    }, SAVE_DELAY_MS);
+    this._timer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
     this._timer.unref?.();
   }
 
-  /** The id for an episode, assigning one the first time it is seen. */
-  idFor({ showId, seasonId = '', episodeId = '', series = 0 }) {
-    const key = JSON.stringify([String(showId), String(seasonId), String(episodeId), Number(series) || 0]);
+  /** Writes any unsaved ids now. Called on shutdown so none are lost. */
+  flush() {
+    if (!this._timer) return;
+    clearTimeout(this._timer);
+    this._timer = null;
+    try {
+      const tmp = this._file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ next: this._next, byKey: Object.fromEntries(this._byKey) }), 'utf8');
+      fs.renameSync(tmp, this._file);
+    } catch (e) {
+      log.error(TAG, `episode id save failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * The id for an episode, assigning one the first time it is seen. `portal`
+   * is part of the key: the same show/season/episode ids on another portal
+   * are a different episode.
+   */
+  idFor({ portal = '', showId, seasonId = '', episodeId = '', series = 0 }) {
+    const key = JSON.stringify([String(portal), String(showId), String(seasonId), String(episodeId), Number(series) || 0]);
     let id = this._byKey.get(key);
     if (id === undefined) {
       id = this._next;
@@ -71,8 +80,8 @@ class XtreamIdStore {
   get(id) {
     const key = this._byId.get(Number(id));
     if (!key) return null;
-    const [showId, seasonId, episodeId, series] = JSON.parse(key);
-    return { showId, seasonId, episodeId, series };
+    const [portal, showId, seasonId, episodeId, series] = JSON.parse(key);
+    return { portal, showId, seasonId, episodeId, series };
   }
 }
 

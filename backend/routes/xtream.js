@@ -30,6 +30,7 @@ const TAG = 'xtream';
 const ALL_CATEGORIES_ID = '*';              // the portal's "everything" pseudo-category
 const SYNTHETIC_CATEGORY_BASE = 900000;     // live categories with no numeric portal id
 const SERIES_INFO_TTL_MS = 60 * 60 * 1000;
+const ALL_TITLES_WAIT_MS = 20 * 1000;       // see listTitles
 const CONTAINER = 'mp4';
 
 const asNumber = (id) => (/^-?\d+$/.test(String(id)) ? Number(id) : String(id));
@@ -59,13 +60,26 @@ function liveCatalog(channels, groups) {
   return { categories, streams };
 }
 
-module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltvRouter, logoManager = null, idStore }) {
+module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltvRouter, logoManager = null, idStore, allTitlesWaitMs = ALL_TITLES_WAIT_MS }) {
   const router = express.Router();
 
-  // Titles seen in a listing, by id — for get_vod_info, the movie's cmd at play
-  // time, and a show's episode list when the portal has no seasons.
-  const titles = new Map();
-  const seriesInfoCache = new Map(); // seriesId → { value, ts }
+  // Per-portal state, dropped when a different portal is connected so nothing
+  // from one catalog is served for another.
+  //   titles:  `${type}:${id}` → title seen in a listing — for get_vod_info, a
+  //            movie's cmd at play time, and a show's episodes when the portal
+  //            has no seasons. Keyed by type: a movie and a show can share an id.
+  //   seasons: seriesId → { value: portal seasons + episodes, ts }
+  let scope = { portal: null, titles: new Map(), seasons: new Map() };
+  const currentPortal = () => appState.client?.getBasePath?.() || '';
+  function state() {
+    const portal = currentPortal();
+    if (scope.portal !== portal) scope = { portal, titles: new Map(), seasons: new Map() };
+    return scope;
+  }
+
+  // "Every movie" listings walk all categories in the background; requests wait
+  // a while for that walk, then answer with what is cached so far.
+  const fills = new Map(); // `${portal}|${type}` → promise
 
   const baseOf = (req) => `${req.protocol}://${req.get('host')}`;
   const showAdult = () => appState.getShowAdult?.() === true;
@@ -86,7 +100,10 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   function accountInfo(req) {
     const now = Math.floor(Date.now() / 1000);
     // Players rebuild stream URLs from these, so report the address they used.
-    const port = String(req.get('host')?.split(':')[1] || (req.protocol === 'https' ? 443 : 80));
+    // Parsed as a URL so an IPv6 host ([::1]:8983) keeps its port.
+    let port = '';
+    try { port = new URL(baseOf(req)).port; } catch { /* malformed Host — use the default */ }
+    port = port || (req.protocol === 'https' ? '443' : '80');
     return {
       user_info: {
         username: String(req.query.username ?? ''),
@@ -158,28 +175,70 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
 
   // Series live in the portal's "series" section when it has one; otherwise
   // shows are mixed into the movie categories, flagged is_series.
+  // Portals without a series module reject type=series outright; that means
+  // "no series section", not an error.
   async function seriesSource() {
-    const own = await visibleCategories('series');
+    let own = [];
+    try {
+      own = await visibleCategories('series');
+    } catch (e) {
+      log.debug(TAG, `series categories unavailable (${e.message}) — using movie categories`);
+    }
     return own.length ? { type: 'series', categories: own, all: true } : { type: 'vod', categories: await visibleCategories('vod'), all: false };
   }
 
   const categoryRows = (cats) => cats.map((c) => ({ category_id: String(c.id), category_name: c.title, parent_id: 0 }));
 
+  // Reads every category's listing in the background, one after another. One
+  // walk per portal and type, however many requests ask.
+  function fillAll(type, categories) {
+    const key = `${currentPortal()}|${type}`;
+    if (!fills.has(key)) {
+      const walk = (async () => {
+        for (const c of categories) {
+          try {
+            await appState.vodManager.getAllItems(type, c.id);
+          } catch (e) {
+            log.warn(TAG, `listing ${type}/${c.id} failed: ${e.message}`);
+          }
+        }
+      })().finally(() => fills.delete(key));
+      fills.set(key, walk);
+    }
+    return fills.get(key);
+  }
+
   // Titles of one category, or of every visible category when none is given.
+  // A full catalog can take minutes to read, longer than players wait for an
+  // answer, so the all-categories form waits up to allTitlesWaitMs and then
+  // answers with what has been read; the rest fills in for the next request.
   async function listTitles(type, categories, categoryId) {
-    const wanted = categoryId
-      ? categories.filter((c) => String(c.id) === String(categoryId))
-      : categories;
+    const { vodManager } = appState;
+    const { titles } = state();
     const out = [];
-    for (const c of wanted) {
-      const items = await appState.vodManager.getAllItems(type, c.id);
+    const add = (c, items) => {
       for (const item of items) {
-        titles.set(String(item.id), item);
+        titles.set(`${type}:${item.id}`, item);
         out.push({ item, categoryId: String(c.id) });
       }
+    };
+
+    if (categoryId) {
+      const c = categories.find((cat) => String(cat.id) === String(categoryId));
+      if (c) add(c, await vodManager.getAllItems(type, c.id));
+      return out;
     }
+
+    const walk = fillAll(type, categories);
+    let timer;
+    await Promise.race([walk, new Promise((r) => { timer = setTimeout(r, allTitlesWaitMs); })]);
+    clearTimeout(timer);
+    for (const c of categories) add(c, vodManager.peekAllItems(type, c.id) ?? []);
     return out;
   }
+
+  // A show by id, from either listing it can appear in.
+  const findShow = (titles, id) => titles.get(`series:${id}`) ?? titles.get(`vod:${id}`);
 
   const movieRow = (req) => ({ item, categoryId }, i) => ({
     num: i + 1,
@@ -225,7 +284,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   });
 
   function vodInfo(req, vodId) {
-    const item = titles.get(String(vodId));
+    const item = state().titles.get(`vod:${vodId}`);
     const cover = posterFor(req, item?.screenshotUri);
     const secs = (item?.durationMin || 0) * 60;
     return {
@@ -258,18 +317,32 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     };
   }
 
-  // Seasons and episodes for a show: one portal request for the seasons, then
-  // one per season. Cached, since players reopen a show often.
-  async function seriesInfo(req, seriesId) {
-    const hit = seriesInfoCache.get(String(seriesId));
+  // A show's seasons and their episodes from the portal: one request for the
+  // seasons, then one per season. Cached, since players reopen a show often.
+  // Only the portal's data is cached — the response is built per request, so
+  // image URLs follow each caller's own address.
+  async function portalSeasons(seriesId) {
+    const { seasons } = state();
+    const hit = seasons.get(String(seriesId));
     if (hit && Date.now() - hit.ts < SERIES_INFO_TTL_MS) return hit.value;
 
     const { vodManager } = appState;
-    const show = titles.get(String(seriesId));
+    const value = [];
+    for (const season of await vodManager.getSeasons(seriesId)) {
+      value.push({ season, episodes: await vodManager.getEpisodes(seriesId, season.id) });
+    }
+    seasons.set(String(seriesId), { value, ts: Date.now() });
+    return value;
+  }
+
+  async function seriesInfo(req, seriesId) {
+    const { titles } = state();
+    const portal = currentPortal();
+    const show = findShow(titles, seriesId);
     const seasons = [];
     const episodes = {};
     const episodeRow = (ref, num, title, image, seasonNo) => ({
-      id: String(idStore.idFor(ref)),
+      id: String(idStore.idFor({ portal, ...ref })),
       episode_num: num,
       title,
       container_extension: CONTAINER,
@@ -280,11 +353,9 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
       direct_source: '',
     });
 
-    const portalSeasons = await vodManager.getSeasons(seriesId);
-    for (const [i, s] of portalSeasons.entries()) {
+    for (const [i, { season: s, episodes: eps }] of (await portalSeasons(seriesId)).entries()) {
       const seasonNo = parseInt(s.seasonNumber, 10) || i + 1;
       const cover = posterFor(req, s.screenshotUri);
-      const eps = await vodManager.getEpisodes(seriesId, s.id);
       episodes[seasonNo] = eps.map((e, j) => {
         const num = parseInt(e.seriesNumber, 10) || j + 1;
         return episodeRow(
@@ -302,7 +373,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
       seasons.push({ id: 1, season_number: 1, name: 'Season 1', episode_count: show.episodes.length, cover, cover_big: cover, air_date: '' });
     }
 
-    const value = {
+    return {
       seasons,
       info: {
         name: show?.name || '',
@@ -318,8 +389,6 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
       },
       episodes,
     };
-    seriesInfoCache.set(String(seriesId), { value, ts: Date.now() });
-    return value;
   }
 
   // ── EPG ────────────────────────────────────────────────────────────────────
@@ -416,19 +485,21 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
 
   const STREAM_FILE = /^(-?\d+)(?:\.\w+)?$/;
 
-  function playLive(req, res, next) {
+  // Only the /live/ form. The bare /<user>/<pass>/<id> form some players
+  // accept is left out: as a catch-all it turned any stray 3-part URL ending
+  // in a number into a stream start, and a new create_link ends the stream
+  // already playing.
+  router.get('/live/:user/:pass/:file', (req, res, next) => {
     const m = STREAM_FILE.exec(req.params.file);
     if (!m) return next();
     forward(proxyRouter, `/stream/${m[1]}`)(req, res, next);
-  }
-
-  router.get('/live/:user/:pass/:file', playLive);
+  });
 
   router.get('/movie/:user/:pass/:file', (req, res, next) => {
     const m = STREAM_FILE.exec(req.params.file);
     if (!m) return next();
     const p = new URLSearchParams({ videoId: m[1] });
-    const cmd = titles.get(m[1])?.cmd;
+    const cmd = state().titles.get(`vod:${m[1]}`)?.cmd;
     if (cmd) p.set('cmd', cmd);
     req.url = `/vod/stream?${p}`;
     proxyRouter(req, res, next);
@@ -439,6 +510,9 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     if (!m) return next();
     const ep = idStore.get(m[1]);
     if (!ep) return res.status(404).send('Unknown episode — reopen the show to refresh its episode list');
+    if (ep.portal !== currentPortal()) {
+      return res.status(404).send('This episode is from another portal — reopen the show to refresh its episode list');
+    }
     const p = new URLSearchParams({ videoId: ep.showId });
     if (ep.series)    p.set('series', String(ep.series));
     if (ep.seasonId)  p.set('seasonId', ep.seasonId);
@@ -446,9 +520,6 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
     req.url = `/vod/stream?${p}`;
     proxyRouter(req, res, next);
   });
-
-  // Some players drop the /live prefix: /<user>/<pass>/<streamId>.ts
-  router.get('/:user/:pass/:file', playLive);
 
   return router;
 };
