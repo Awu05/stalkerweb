@@ -72,6 +72,16 @@ const profilesManager = new ProfilesManager(config.dataDir);
 // languages (VOD categories) can reach it without a second constructor arg.
 appState.profilesManager = profilesManager;
 
+// Filter applied to the M3U / XMLTV / XSPF exports: the active profile's hidden
+// genres and languages, plus adult channels unless Show Adult Content is on.
+// Read per request, so a change in Settings applies to the next export.
+const { buildExportFilter } = require('./lib/exportFilter');
+const exportSettingsCache = new (require('./cache/CacheManager'))(config.dataDir);
+appState.getExportFilter = () => buildExportFilter({
+  profile:   profilesManager.getActive(),
+  showAdult: exportSettingsCache.load()?.show_adult === true,
+});
+
 const { authRoutes, connectPortal } = require('./routes/auth')(appState, config);
 
 // ── Idle auto-disconnect ───────────────────────────────────────────────────

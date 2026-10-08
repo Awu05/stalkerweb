@@ -11,6 +11,7 @@
 const express = require('express');
 const { groupChannels } = require('./m3u');
 const log = require('../logger');
+const { exportFilterFor } = require('../lib/exportFilter');
 const TAG = 'xspf';
 
 const VLC_EXT = 'http://www.videolan.org/vlc/playlist/0';      // extension application id
@@ -88,9 +89,11 @@ module.exports = function xspfModule(appState, logoManager) {
       || '';
 
     const base = `${req.protocol}://${req.get('host')}`;
-    const xml  = buildXspf(channels, channelManager.getGroups(), base, logoFor);
+    // Hidden genres/languages and adult channels are left out (?all=1 keeps them).
+    const shown = channels.filter(exportFilterFor(req, appState).keep);
+    const xml   = buildXspf(shown, channelManager.getGroups(), base, logoFor);
 
-    log.info(TAG, `serving playlist: ${channels.length} channels`);
+    log.info(TAG, `serving playlist: ${shown.length} of ${channels.length} channels`);
     res.set('Content-Type', 'application/xspf+xml; charset=utf-8');
     res.set('Content-Disposition', 'attachment; filename="stalkerweb.xspf"');
     res.set('Cache-Control', 'no-cache');

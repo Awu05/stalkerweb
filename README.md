@@ -166,6 +166,11 @@ Set the M3U URL to: `http://your-host:8983/api/m3u`
 ### 2. Add XMLTV Guide
 Set the XMLTV URL to: `http://your-host:8983/api/xmltv`
 
+The playlist and guide only include channels you haven't hidden: genres and
+languages turned off under Settings → Genre Filters are left out, as are adult
+channels unless Show Adult Content is on. Add `?all=1` to either URL to include
+every channel.
+
 Channels the portal has no guide data for get 6-hour placeholder blocks so they
 still show in the guide. Add `?filler=none` to leave them out for a smaller,
 faster import. The feed is gzip-compressed for clients that accept it and cached
