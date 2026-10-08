@@ -253,12 +253,13 @@ const profilesRoutes  = require('./routes/profiles')(profilesManager);
 const exportRoutes    = require('./routes/export')(config);
 const logsRoutes      = require('./routes/logs');
 const XtreamIdStore   = require('./lib/XtreamIdStore');
+const xtreamIdStore   = new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json'));
 const xtreamRoutes    = require('./routes/xtream')(appState, {
   proxyRouter: proxyRoutes,
   m3uRouter:   m3uRoutes,
   xmltvRouter: xmltvRoutes,
   logoManager,
-  idStore:     new XtreamIdStore(path.join(config.dataDir, 'xtream-episodes.json')),
+  idStore:     xtreamIdStore,
 });
 
 app.use('/api/auth', authRoutes);
@@ -367,6 +368,7 @@ const httpServer = app.listen(config.port, () => {
 // ── Graceful shutdown ──────────────────────────────────────────────────────
 function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
+  xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();
