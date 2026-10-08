@@ -146,7 +146,8 @@ class StreamDiagnostics {
       if (produced >= 3 && produced * target > 2 * Math.max(elapsed, 1)) {
         const durs = [...body.matchAll(/#EXTINF:([\d.]+)/g)].map((m) => parseFloat(m[1]));
         const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : target;
-        this._warn(c, `source moved ${produced} segments ahead in ${elapsed.toFixed(1)}s (segments about ${avg.toFixed(1)}s long) — faster than real time; players fall out of the window and jump`);
+        const newest = body.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).at(-1)?.split('?')[0].split('/').slice(-3).join('/');
+        this._warn(c, `source moved ${produced} segments ahead in ${elapsed.toFixed(1)}s (segments about ${avg.toFixed(1)}s long, newest ${newest}) — renumbered at a restart, or racing ahead of real time`);
       }
     }
     c.seqAt = { seq, at: now };

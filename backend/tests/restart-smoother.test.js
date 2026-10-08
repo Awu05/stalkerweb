@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { RestartSmoother, parsePlaylist } from '../lib/restartSmoother.js'
+import { RestartSmoother, parsePlaylist, timeFromName } from '../lib/restartSmoother.js'
 
 const BASE = 'http://cdn/live/mono.m3u8?token=t'
 // A playlist window starting at `seq`; `disc` marks segments preceded by a discontinuity.
@@ -100,5 +100,95 @@ describe('RestartSmoother', () => {
     await smoother.rewrite('a', BASE, playlist(100, 3, [102]))
     const b = parsePlaylist(await smoother.rewrite('b', BASE, playlist(102, 2)))
     expect(b.header).toContain('#EXT-X-MEDIA-SEQUENCE:102')   // stream b never dropped anything
+  })
+
+  // ── Servers that name segments by time (Flussonic), as measured ───────────
+  // name(t): the segment starting t seconds after 20:41:00, 6 s long unless given.
+  const name = (t, ms = 6000) => {
+    const m = Math.floor(t / 60), sec = t % 60
+    return `tracks-v1a1/2026/10/08/20/${String(41 + m).padStart(2, '0')}/${String(sec).padStart(2, '0')}-${String(ms).padStart(5, '0')}.ts?token=t`
+  }
+  // A playlist from [time, disc?] pairs, numbered from `seq` as the server did.
+  const timed = (seq, segs) =>
+    `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7\n#EXT-X-MEDIA-SEQUENCE:${seq}\n` +
+    segs.map(([t, disc, ms]) => `${disc ? '#EXT-X-DISCONTINUITY\n' : ''}#EXTINF:${(ms ?? 6000) / 1000},\n${name(t, ms)}`).join('\n') + '\n'
+  const uris = (out) => parsePlaylist(out).segments.map((x) => /20\/(\d+\/\d+)-/.exec(x.uri)[1])
+
+  it('reads start and length from time-based names', () => {
+    expect(timeFromName('http://h/x/tracks-v1a1/2026/10/08/20/42/14-06474.ts?token=a'))
+      .toEqual({ start: Date.UTC(2026, 9, 8, 20, 42, 14) / 1000, dur: 6.474 })
+    expect(timeFromName('http://h/x/seg100.ts')).toBeNull()
+  })
+
+  it('keeps numbering steady when the source renumbers and repeats after a restart', async () => {
+    // Before: 20:41:56, 20:42:02, 20:42:08, 20:42:14 numbered 547617–547620.
+    const before = await smoother.rewrite('k', BASE, timed(547617, [[56], [62], [68], [74, false, 6474]]))
+    expect(parsePlaylist(before).header).toContain('#EXT-X-MEDIA-SEQUENCE:547617')
+    // The restart: the same files renumbered 10 ahead, then new files from
+    // 20:42:03 — content already listed — and only 20:42:21 actually new.
+    const after = await smoother.rewrite('k', BASE, timed(547628, [
+      [68], [74, false, 6474], [63, true], [69], [75], [81],
+    ]))
+    const p = parsePlaylist(after)
+    expect(p.header).toContain('#EXT-X-MEDIA-SEQUENCE:547619')     // where it was, not 547628
+    expect(uris(after)).toEqual(['42/08', '42/14', '42/21'])
+    expect(p.segments[2].disc).toBe(true)                          // the restart stays marked
+    expect(drops).toEqual([547630, 547631, 547632])
+    // Next reload: the old files are gone; 20:42:21 kept its number.
+    const later = parsePlaylist(await smoother.rewrite('k', BASE, timed(547631, [[75], [81], [87]])))
+    expect(later.header).toContain('#EXT-X-MEDIA-SEQUENCE:547621')
+    expect(later.header).toContain('#EXT-X-DISCONTINUITY-SEQUENCE:1')
+    expect(later.segments.map((x) => x.disc)).toEqual([false, false])
+  })
+
+  it('leaves out content repeated from long before, not just the last segment', async () => {
+    await smoother.rewrite('k', BASE, timed(10, [[60], [66], [72], [78]]))
+    // The source went back 20 s.
+    const out = await smoother.rewrite('k', BASE, timed(14, [[60, true], [66], [72], [78], [84]]))
+    expect(uris(out)).toEqual(['42/00', '42/06', '42/12', '42/18', '42/24'])
+    expect(parsePlaylist(out).header).toContain('#EXT-X-MEDIA-SEQUENCE:10')
+  })
+
+  it('keeps the last playlist while the source only repeats', async () => {
+    const first = await smoother.rewrite('k', BASE, timed(10, [[60], [66]]))
+    const out = await smoother.rewrite('k', BASE, timed(20, [[50, true], [56], [62]]))
+    expect(out).toBe(first)
+  })
+
+  it('starts after a gap when a listed segment disappears', async () => {
+    await smoother.rewrite('k', BASE, timed(10, [[60], [66], [72]]))
+    // 20:42:06 is no longer listed, but the segments around it are.
+    const out = await smoother.rewrite('k', BASE, timed(10, [[60], [72], [78]]))
+    expect(uris(out)).toEqual(['42/12', '42/18'])
+    expect(parsePlaylist(out).header).toContain('#EXT-X-MEDIA-SEQUENCE:12')
+  })
+
+  it('treats a clock that went far back as a new clock, not a repeat', async () => {
+    await smoother.rewrite('k', BASE, timed(10, [[600], [606]]))   // 20:51:00, 20:51:06
+    const out = parsePlaylist(await smoother.rewrite('k', BASE, timed(12, [[0, true], [6]])))   // 20:41:00
+    expect(drops).toEqual([])
+    expect(out.header).toContain('#EXT-X-MEDIA-SEQUENCE:12')
+  })
+
+  it('gives up leaving out repeats after 45 s in a row', async () => {
+    await smoother.rewrite('k', BASE, timed(10, [[60], [66], [72], [78], [84], [90], [96], [102], [108]]))
+    // Back 59 s (new files, cut a second off the old ones), and it keeps
+    // coming from there: 7 repeats (42 s) are left out, then it resyncs.
+    const out = await smoother.rewrite('k', BASE, timed(19, [[55, true], [61], [67], [73], [79], [85], [91], [97], [103], [109]]))
+    expect(drops.length).toBe(7)
+    expect(uris(out)).toEqual(['42/37', '42/43', '42/49'])
+    expect(parsePlaylist(out).header).toContain('#EXT-X-DISCONTINUITY-SEQUENCE:1')
+  })
+
+  it('passes a time-named stream without restarts through unchanged', async () => {
+    const a = timed(10, [[60], [66], [72]])
+    const b = timed(11, [[66], [72], [78]])
+    expect(await smoother.rewrite('k', BASE, a)).toBe(a)
+    expect(await smoother.rewrite('k', BASE, b)).toBe(b)
+  })
+
+  it('passes byte-range playlists through', async () => {
+    const body = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:6,\n#EXT-X-BYTERANGE:100@0\nall.ts\n#EXTINF:6,\n#EXT-X-BYTERANGE:100@100\nall.ts\n'
+    expect(await smoother.rewrite('k', BASE, body)).toBe(body)
   })
 })
