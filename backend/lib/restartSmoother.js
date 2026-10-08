@@ -106,8 +106,9 @@ function parsePlaylist(body) {
 class RestartSmoother {
   /**
    * @param {object} opts
-   * @param {(url: string) => Promise<{video:number|null,audio:number|null}|null>} opts.probe
-   *   reads the start timestamps of a segment (the proxy fetches its first bytes)
+   * @param {(url: string, channel: string) => Promise<{video:number|null,audio:number|null}|null>} opts.probe
+   *   reads the start timestamps of a segment (the proxy fetches its first bytes,
+   *   on the channel's connection)
    * @param {(ch: string, seq: number) => void} [opts.onDrop]
    *   a segment the source numbered `seq` was left out
    */
@@ -129,13 +130,13 @@ class RestartSmoother {
     if (this.pts.size > 2000) this.pts.delete(this.pts.keys().next().value);
   }
 
-  async _ptsOf(url) {
+  async _ptsOf(url, channel) {
     const key = pathOf(url);
     if (this.pts.has(key)) return this.pts.get(key);
     let timer;
     try {
       const ts = await Promise.race([
-        this.probe(url),
+        this.probe(url, channel),
         new Promise((r) => { timer = setTimeout(() => r(null), this.probeTimeoutMs); }),
       ]);
       const start = ts?.video ?? ts?.audio ?? null;
@@ -259,7 +260,7 @@ class RestartSmoother {
       st.dropped.delete(id);   // not listed for a while: judged afresh
 
       const time = timeFromName(url);
-      const repeat = st.last ? await this._repeat(st.last, seg, url, time) : null;
+      const repeat = st.last ? await this._repeat(st.last, seg, url, time, channel) : null;
       // Never hold the playlist still so long that players give up on it
       // (ExoPlayer: 3.5 target durations) — resync instead.
       const stalled = this.now() - st.lastNewAt > STALL_TARGETS * target * 1000;
@@ -299,7 +300,7 @@ class RestartSmoother {
 
   // How much of `seg` repeats content up to the end of `prev` (seconds), when
   // that is enough to leave it out; null to keep it.
-  async _repeat(prev, seg, url, time) {
+  async _repeat(prev, seg, url, time, channel) {
     let prevStart, prevDur, curStart, dur;
     if (time && prev.time) {
       // Times from the names are one clock across restarts: anything shortly
@@ -310,8 +311,8 @@ class RestartSmoother {
     } else if (seg.disc) {
       // Stream timestamps reset at restarts, so only a start just after the
       // previous one is clearly a repeat; a clock that jumped elsewhere isn't.
-      prevStart = await this._ptsOf(prev.url);
-      curStart = await this._ptsOf(url);
+      prevStart = await this._ptsOf(prev.url, channel);
+      curStart = await this._ptsOf(url, channel);
       prevDur = prev.dur;
       dur = seg.dur || prev.dur;
       if (prevStart === null || curStart === null || curStart < prevStart - 1) return null;
