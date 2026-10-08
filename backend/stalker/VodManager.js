@@ -13,6 +13,7 @@ const TAG = 'VodManager';
 // don't re-resolve — which previously fell into the nothing_to_play fallback.
 const VOD_LINK_TTL_MS = 5 * 60 * 1000;
 const CATEGORY_TTL_MS = 30 * 60 * 1000;
+const EMPTY_CATEGORY_TTL_MS = 60 * 1000;
 
 // Whole-category listings (getAllItems) for clients that ask for a category's
 // full contents at once, like the Xtream API. A category is one portal page
@@ -21,6 +22,7 @@ const CATEGORY_TTL_MS = 30 * 60 * 1000;
 const LISTING_TTL_MS      = 60 * 60 * 1000;
 const LISTING_MAX_PAGES   = 150;   // ~2,100 titles per category
 const LISTING_PAGE_GAP_MS = 150;
+const PARTIAL_LISTING_TTL_MS = 2 * 60 * 1000;
 
 class VodManager {
   constructor(client, { pageGapMs = LISTING_PAGE_GAP_MS } = {}) {
@@ -32,18 +34,25 @@ class VodManager {
   }
 
   // Returns the cached value for `key`, or runs `fetch` once for every caller
-  // waiting on it. A failed fetch is not cached.
-  _cached(cache, key, ttlMs, fetch) {
+  // waiting on it. `ttlFor(value)` says how long a result is kept, so a doubtful
+  // one (empty, partial) can expire sooner. A failed fetch is not cached.
+  _cached(cache, key, ttlFor, fetch) {
     const hit = cache.get(key);
-    if (hit && (hit.pending || Date.now() - hit.ts < ttlMs)) {
+    if (hit && (hit.pending || Date.now() - hit.ts < hit.ttl)) {
       return hit.pending || Promise.resolve(hit.value);
     }
     const pending = fetch().then(
-      (value) => { cache.set(key, { value, ts: Date.now() }); return value; },
+      (value) => { cache.set(key, { value, ts: Date.now(), ttl: ttlFor(value) }); return value; },
       (e)     => { cache.delete(key); throw e; },
     );
     cache.set(key, { pending });
     return pending;
+  }
+
+  // The cached value for `key` if it is fresh, else undefined. Never fetches.
+  _peek(cache, key) {
+    const hit = cache.get(key);
+    return hit && !hit.pending && Date.now() - hit.ts < hit.ttl ? hit.value : undefined;
   }
 
   // ── Categories ─────────────────────────────────────────────────────────────
@@ -52,7 +61,11 @@ class VodManager {
   // /api/channels/languages both ask for it on every request. Concurrent
   // callers share one in-flight portal request.
   getCategories(type = 'vod') {
-    return this._cached(this._categoryCache, type, CATEGORY_TTL_MS, () => this._fetchCategories(type));
+    // An empty list is usually a bad portal response (an error object instead
+    // of the list), so it is kept only briefly rather than the full TTL.
+    return this._cached(this._categoryCache, type,
+      (cats) => (cats.length ? CATEGORY_TTL_MS : EMPTY_CATEGORY_TTL_MS),
+      () => this._fetchCategories(type));
   }
 
   async _fetchCategories(type) {
@@ -114,14 +127,24 @@ class VodManager {
 
   // Every title in a category, cached (see LISTING_TTL_MS). Pages are read in
   // order with a pause between them; a page that fails after the first ends
-  // the walk with what was read so far.
+  // the walk with what was read so far, and that partial list is kept only
+  // briefly so the next request tries again.
   getAllItems(type, categoryId) {
     const key = `${type}:${categoryId}`;
-    return this._cached(this._listingCache, key, LISTING_TTL_MS, () => this._fetchAllItems(type, String(categoryId)));
+    return this._cached(this._listingCache, key,
+      (r) => (r.complete ? LISTING_TTL_MS : PARTIAL_LISTING_TTL_MS),
+      () => this._fetchAllItems(type, String(categoryId)),
+    ).then((r) => r.items);
+  }
+
+  /** A category's titles if a fresh listing is cached, else undefined. */
+  peekAllItems(type, categoryId) {
+    return this._peek(this._listingCache, `${type}:${categoryId}`)?.items;
   }
 
   async _fetchAllItems(type, categoryId) {
     const items = [];
+    let complete = true;
     let pages = 1;
     for (let p = 1; p <= Math.min(pages, LISTING_MAX_PAGES); p++) {
       if (p > 1 && this._pageGapMs) await new Promise((r) => setTimeout(r, this._pageGapMs));
@@ -133,7 +156,8 @@ class VodManager {
         js = r?.js || {};
       } catch (e) {
         if (p === 1) throw e;
-        log.warn(TAG, `listing ${type}/${categoryId}: page ${p} failed (${e.message}) — keeping ${items.length} titles`);
+        log.warn(TAG, `listing ${type}/${categoryId}: page ${p} failed (${e.message}) — keeping ${items.length} titles for now`);
+        complete = false;
         break;
       }
       const data = Array.isArray(js.data) ? js.data : [];
@@ -153,7 +177,7 @@ class VodManager {
       }
     }
     log.info(TAG, `listing ${type}/${categoryId}: ${items.length} titles`);
-    return items;
+    return { items, complete };
   }
 
   // ── Seasons / Episodes (TV-show drill-down) ─────────────────────────────────
