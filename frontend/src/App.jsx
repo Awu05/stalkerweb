@@ -95,7 +95,10 @@ function IdleBadge({ idleInfo, collapsed }) {
     return () => clearInterval(id)
   }, [idleInfo])
 
-  if (!idleInfo?.lastActivityAt || collapsed) return null
+  // No timeout means auto-disconnect is off ("Never" in Settings) — the status
+  // poll still reports lastActivityAt, so this must check the timeout too, or
+  // the badge stays up showing whatever countdown it last computed.
+  if (!idleInfo?.lastActivityAt || !idleInfo?.idleTimeoutMs || collapsed) return null
   return (
     <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)] opacity-60 hover:opacity-100 transition-opacity" title="Auto-disconnect when idle">
       <Timer size={11} className="shrink-0" />
