@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
 import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, VIEWER_GONE, getViewers, createViewer, getMyViewer } from './stalkerApi'
 import LoginPage from './pages/LoginPage'
-import { syncVodProgressFromBackend } from '@/lib/vodProgress'
+import { loadWatch } from '@/lib/vodProgress'
 import { fetchProfiles } from '@/lib/profiles'
 import ViewerPicker, { ViewerAvatar } from '@/components/ViewerPicker'
 import { getViewerId, setViewerId, chooseViewer } from '@/lib/viewer'
@@ -273,6 +273,7 @@ function AppInner() {
   async function switchViewer(id) {
     setViewerId(id)
     invalidateFavoritesCache()
+    loadWatch()
     applyViewer(await getMyViewer())
     setPickerOpen(false)
     setPickerRequired(false)
@@ -318,8 +319,7 @@ function AppInner() {
       }
       try {
         // Profiles must be fetched (and any leftover localStorage profiles
-        // migrated in) before anything reads getActiveProfileId() — including
-        // syncVodProgressFromBackend()'s per-profile localStorage scoping below.
+        // migrated in) before anything reads getActiveProfileId().
         const [status, settings, list] = await Promise.all([getStatus(), getSettings(), getViewers(), fetchProfiles().catch(() => {})])
         const pick = chooseViewer(list.viewers, getViewerId())
         setViewerId(pick.id)
@@ -328,7 +328,7 @@ function AppInner() {
         applyViewer(await getMyViewer())
         setConnected(status.connected)
         if (status.version) setVersion(status.version)
-        syncVodProgressFromBackend().catch(() => {})
+        loadWatch()   // what this viewer watched (after the viewer is set above)
         setEpgEnabled(settings.epg_enabled !== false)
         if (status.watchdog?.lastPingAt) setLastPingAt(status.watchdog.lastPingAt)
         if (status.lastActivityAt) updateIdleInfo(status.lastActivityAt, status.idleTimeoutMs)

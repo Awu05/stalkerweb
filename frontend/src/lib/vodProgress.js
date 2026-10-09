@@ -1,36 +1,34 @@
-// Persisted "Continue Watching" progress for VOD movies and series episodes.
-// localStorage is the fast/synchronous path; the backend is the source of truth
-// for cross-device/cross-browser sync. Both are kept in lock-step:
-//   - reads come from localStorage (instant, no await)
-//   - writes go to localStorage immediately AND fire-and-forget PUT to backend
-//   - syncVodProgressFromBackend() merges the backend list into localStorage;
-//     call it once on app load so any progress made on another device appears.
+// What the current viewer has watched on the VOD page — resume points, the
+// "Recently watched" history and the titles finished — kept on the server per
+// viewer (backend viewers/WatchStore.js), so it follows them to any device.
+// Held here in memory for instant reads: loadWatch() fetches it (on start-up,
+// on a viewer switch, when the VOD page opens), and each save answers with the
+// viewer's lists, which replace it.
 
-import { getVodProgressBackend, saveVodProgressBackend, removeVodProgressBackend } from '../stalkerApi'
-import { getActiveProfileId } from './profiles'
+import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory } from '../stalkerApi'
 
-const VOD_PROGRESS_MAX = 20
+// Mirrors backend viewers/WatchStore.js.
+export const VOD_RESUME_MIN_SECS = 30     // less is "only just started"
+export const VOD_DONE_FRACTION   = 0.95   // more is finished
 
-// Scoped per-profile — same as recentlyWatched.js/epgReminders.js — so
-// switching portals doesn't show (or let Resume navigate to) another
-// portal's in-progress videoId, which is meaningless outside its own catalog.
-function storageKey() {
-  const id = getActiveProfileId()
-  return id ? `sw_vod_progress_${id}` : 'sw_vod_progress'
+let watch = { progress: [], history: [], watched: [] }
+const listeners = new Set()
+
+function set(next) {
+  if (!next || !Array.isArray(next.progress)) return
+  watch = next
+  listeners.forEach((fn) => fn(watch))
 }
 
-// Don't offer resume for the first 30s (barely started) or the last 5%
-// (effectively finished — clear it instead so it leaves the row).
-export const VOD_RESUME_MIN_SECS = 30
-export const VOD_DONE_FRACTION   = 0.95
+/** Called with the viewer's lists whenever they change; returns an unsubscribe. */
+export function onWatchChange(fn) {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
 
-export function getVodProgressList() {
-  try {
-    const list = JSON.parse(localStorage.getItem(storageKey()) || '[]')
-    return Array.isArray(list) ? list : []
-  } catch {
-    return []
-  }
+export async function loadWatch() {
+  try { set(await getWatch()) } catch { /* offline or signed out — keep what's here */ }
+  return watch
 }
 
 // Composite key so a movie and each episode of a series track independently.
@@ -39,93 +37,36 @@ export function makeVodKey({ videoId, seasonId = '', episodeId = '' }) {
 }
 
 export function getVodProgress(key) {
-  return getVodProgressList().find(e => e.key === key) || null
+  return watch.progress.find((e) => e.key === key) || null
 }
 
-export function removeVodProgress(key) {
-  const list = getVodProgressList().filter(e => e.key !== key)
-  localStorage.setItem(storageKey(), JSON.stringify(list))
-  removeVodProgressBackend(key).catch(() => {})
+/** Recently watched, newest first: a show once, with the episode played last. */
+export function getVodHistory() {
+  return watch.history
 }
 
-// entry: { key, title, episodeTitle, screenshotUrl, position, duration, params }
-// Drops the entry (rather than saving) when the title is barely started or
-// effectively finished, so the Continue Watching row self-prunes.
+// entry: { key, title, episodeTitle, screenshotUrl, params, position, duration }.
+// The server decides what to keep: nothing for a title only just started, no
+// resume point once finished (but it stays in the history, marked watched).
 export function saveVodProgress(entry) {
   if (!entry?.key || !entry.duration || !isFinite(entry.duration)) return
-  const list = getVodProgressList().filter(e => e.key !== entry.key)
-  const fraction = entry.position / entry.duration
-  if (entry.position < VOD_RESUME_MIN_SECS || fraction >= VOD_DONE_FRACTION) {
-    if (fraction >= VOD_DONE_FRACTION) markWatched(entry.key)
-    localStorage.setItem(storageKey(), JSON.stringify(list))
-    removeVodProgressBackend(entry.key).catch(() => {})
-    return
-  }
-  const withTs = { ...entry, updatedAt: Date.now() }
-  const next = [withTs, ...list].slice(0, VOD_PROGRESS_MAX)
-  localStorage.setItem(storageKey(), JSON.stringify(next))
-  saveVodProgressBackend(withTs).catch(() => {})
+  saveWatch(entry).then(set).catch(() => {})
 }
 
-// ── Watched ───────────────────────────────────────────────────────────────
-// Titles finished on this device, by title id (a show by its own id, whichever
-// episode was finished), for the VOD page's "Not watched yet" filter. Kept
-// apart from the progress list, which drops a title once it is finished.
-const WATCHED_MAX = 2000
-
-function watchedKey() {
-  const id = getActiveProfileId()
-  return id ? `sw_vod_watched_${id}` : 'sw_vod_watched'
+export function removeFromVodHistory(titleId) {
+  set({ ...watch, history: watch.history.filter((e) => e.id !== titleId), progress: watch.progress.filter((e) => e.key.split(':')[0] !== titleId) })
+  removeWatchTitle(titleId).then(set).catch(() => loadWatch())
 }
 
-function readWatched() {
-  try {
-    const list = JSON.parse(localStorage.getItem(watchedKey()) || '[]')
-    return Array.isArray(list) ? list : []
-  } catch {
-    return []
-  }
+export function clearVodHistory() {
+  set({ ...watch, history: [] })
+  clearWatchHistory().then(set).catch(() => loadWatch())
 }
 
-function markWatched(key) {
-  const id = String(key).split(':')[0]
-  if (!id) return
-  try {
-    const list = [id, ...readWatched().filter((x) => x !== id)].slice(0, WATCHED_MAX)
-    localStorage.setItem(watchedKey(), JSON.stringify(list))
-  } catch { /* storage full or blocked — not remembered */ }
-}
-
-/** Ids of titles started (in Continue Watching) or finished on this device. */
+/** Ids of titles the viewer started or finished — for the "Not watched" filter. */
 export function getWatchedVodIds() {
-  const ids = new Set(readWatched())
-  for (const e of getVodProgressList()) ids.add(String(e.key).split(':')[0])
+  const ids = new Set(watch.watched)
+  for (const e of watch.history) ids.add(String(e.id))
+  for (const e of watch.progress) ids.add(String(e.key).split(':')[0])
   return ids
-}
-
-// Fetch the backend list and merge it into localStorage. Backend entries win
-// when the same key exists in both (most-recently-updated takes precedence).
-// Call once on app load so progress from other devices/browsers is visible.
-export async function syncVodProgressFromBackend() {
-  let remote
-  try {
-    remote = await getVodProgressBackend()
-  } catch {
-    return // backend unavailable — localStorage already has local progress
-  }
-  if (!Array.isArray(remote) || remote.length === 0) return
-
-  const local = getVodProgressList()
-  const merged = new Map(local.map(e => [e.key, e]))
-  for (const re of remote) {
-    const le = merged.get(re.key)
-    if (!le || (re.updatedAt ?? 0) > (le.updatedAt ?? 0)) {
-      merged.set(re.key, re)
-    }
-  }
-  // Re-sort by updatedAt desc and cap
-  const sorted = [...merged.values()]
-    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, VOD_PROGRESS_MAX)
-  localStorage.setItem(storageKey(), JSON.stringify(sorted))
 }
