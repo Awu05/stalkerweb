@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import express from 'express'
-import { visibleVodCategories, toCategorySet } from '../lib/vodCategoryFilter.js'
+import { visibleVodCategories, toCategorySet, isAllCategory } from '../lib/vodCategoryFilter.js'
 import vodModule from '../routes/vod.js'
 
 const cats = [
@@ -50,5 +50,19 @@ describe('GET /api/vod/categories', () => {
   it('lists every category with ?all=1, for the Settings list', async () => {
     const { categories } = await (await fetch(`${base}?all=1`)).json()
     expect(categories.map((c) => c.id)).toEqual(['*', '1', '2', '3'])
+  })
+})
+
+describe('the catch-all category', () => {
+  it('is recognised by its title too, whatever its id', () => {
+    const odd = [{ id: '0', title: ' All ' }, { id: '1', title: 'KIDS MOVIES' }, { id: '2', title: 'ACTION' }]
+    const shown = visibleVodCategories(odd, { hiddenCategories: toCategorySet(['KIDS MOVIES']) })
+    expect(shown.map((c) => c.id)).toEqual(['2'])
+  })
+
+  it('is one rule, shared', () => {
+    expect(isAllCategory({ id: '*', title: 'Everything' })).toBe(true)
+    expect(isAllCategory({ id: '7', title: 'all' })).toBe(true)
+    expect(isAllCategory({ id: '7', title: 'All Movies' })).toBe(false)
   })
 })
