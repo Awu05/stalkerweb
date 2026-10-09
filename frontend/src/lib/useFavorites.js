@@ -4,26 +4,30 @@ import { showToast } from './toast'
 
 let favsCache = null
 let favsInflight = null
+let favsGen = 0   // bumped on a viewer switch: a request from before can't fill the cache
 
-function getCachedFavorites() {
+export function loadFavorites() {
   if (favsCache) return Promise.resolve(favsCache)
   if (favsInflight) return favsInflight
+  const gen = favsGen
   favsInflight = getFavorites()
-    .then(r => { favsCache = r; favsInflight = null; return r })
-    .catch(e => { favsInflight = null; throw e })
+    .then(r => { if (gen === favsGen) { favsCache = r; favsInflight = null } return r })
+    .catch(e => { if (gen === favsGen) favsInflight = null; throw e })
   return favsInflight
 }
 
 function invalidateFavs() { favsCache = null }
 
-export function invalidateFavoritesCache() { favsCache = null }
+// After a viewer switch (or disconnect): drop the cache and any request still
+// loading the previous viewer's favorites.
+export function invalidateFavoritesCache() { favsCache = null; favsInflight = null; favsGen++ }
 
 export function useFavorites() {
   const [favoriteIds, setFavoriteIds] = useState(new Set())
 
   useEffect(() => {
     let cancelled = false
-    getCachedFavorites()
+    loadFavorites()
       .then(r => { if (!cancelled) setFavoriteIds(new Set(r.channels.map(c => String(c.uniqueId)))) })
       .catch(() => {})
     return () => { cancelled = true }

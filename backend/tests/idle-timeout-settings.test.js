@@ -88,7 +88,7 @@ describe('settings route: idle_timeout_minutes', () => {
   })
 
   it('leaves the timeout alone when saving other settings', async () => {
-    await post({ show_adult: true })
+    await post({ epg_enabled: false })
     expect(applied).toEqual([])
   })
 })

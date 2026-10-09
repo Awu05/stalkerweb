@@ -13,6 +13,7 @@
 const express = require('express');
 const sessionMiddleware = require('../middleware/session');
 const log = require('../logger');
+const { refuseIfGone } = require('./viewers');
 const TAG = 'favorites';
 
 // Enrich a list of uniqueId strings with channel objects from channelManager.
@@ -32,9 +33,13 @@ function enrichChannels(ids, channelManager) {
   return ids.map(id => channelManager.getChannel(id) ?? { uniqueId: id, name: '' });
 }
 
-module.exports = function favoritesModule(favoritesManager, appState) {
+module.exports = function favoritesModule(viewers, appState) {
   const router = express.Router();
   const guard = sessionMiddleware(appState);
+  // This request's viewer's favorites (lib/viewerContext.js sets req.viewer).
+  const favs = (req) => viewers.favoritesOf(req.viewer.id);
+  // Never the default viewer's favorites in place of a deleted viewer's.
+  router.use(refuseIfGone);
 
   // uniqueId used to be a hash of name+number and is now the portal's own id,
   // so favorites saved by an older build hold ids the client will never match
@@ -44,24 +49,27 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   // Deferred to here rather than done at load time because ChannelManager has
   // no reference to favorites. Flagged per ChannelManager instance, so a
   // reconnect (which builds a new one) retries; the migration is idempotent.
-  function migrateFavoriteIdsOnce() {
+  // Tracked per viewer, since each has its own list.
+  function migrateFavoriteIdsOnce(req) {
     const cm = appState?.channelManager;
-    if (!cm || cm._favoriteIdsMigrated) return;
+    if (!cm) return;
+    cm._favoriteIdsMigrated ??= new Set();
+    if (cm._favoriteIdsMigrated.has(req.viewer.id)) return;
     // A partial list would leave genuinely-unknown ids untouched, which is
     // right, but don't mark it done until the full list is in.
     if (cm.getProgress?.().loading || cm.getChannels().length === 0) return;
     try {
-      favoritesManager.migrateLegacyIds(id => cm.resolveLegacyId(id));
-      cm._favoriteIdsMigrated = true;
+      favs(req).migrateLegacyIds(id => cm.resolveLegacyId(id));
+      cm._favoriteIdsMigrated.add(req.viewer.id);
     } catch (e) {
       log.warn(TAG, `favorite id migration failed: ${e.message}`);
     }
   }
 
   // GET /api/favorites
-  router.get('/', guard, (_req, res) => {
-    migrateFavoriteIdsOnce();
-    const raw = favoritesManager.getRaw();
+  router.get('/', guard, (req, res) => {
+    migrateFavoriteIdsOnce(req);
+    const raw = favs(req).getRaw();
     const cm  = appState?.channelManager;
     res.json({
       channels: enrichChannels(raw.channels, cm),
@@ -76,13 +84,13 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   router.post('/channels', (req, res) => {
     const { uniqueId } = req.body;
     if (!uniqueId) return res.status(400).json({ error: 'uniqueId required' });
-    favoritesManager.addChannel(uniqueId);
+    favs(req).addChannel(uniqueId);
     res.json({ success: true });
   });
 
   // DELETE /api/favorites/channels/:id
   router.delete('/channels/:id', (req, res) => {
-    favoritesManager.removeChannel(req.params.id);
+    favs(req).removeChannel(req.params.id);
     res.json({ success: true });
   });
 
@@ -90,21 +98,21 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   router.post('/groups', (req, res) => {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
-    const group = favoritesManager.createGroup(name);
+    const group = favs(req).createGroup(name);
     res.json({ success: true, group });
   });
 
   // PUT /api/favorites/groups/:id  { name }
   router.put('/groups/:id', (req, res) => {
     const { name } = req.body;
-    const g = favoritesManager.renameGroup(req.params.id, name);
+    const g = favs(req).renameGroup(req.params.id, name);
     if (!g) return res.status(404).json({ error: 'Group not found' });
     res.json({ success: true, group: g });
   });
 
   // DELETE /api/favorites/groups/:id
   router.delete('/groups/:id', (req, res) => {
-    favoritesManager.deleteGroup(req.params.id);
+    favs(req).deleteGroup(req.params.id);
     res.json({ success: true });
   });
 
@@ -112,7 +120,7 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   router.post('/groups/:id/channels', (req, res) => {
     const { uniqueId } = req.body;
     if (!uniqueId) return res.status(400).json({ error: 'uniqueId required' });
-    const g = favoritesManager.addChannelToGroup(req.params.id, uniqueId);
+    const g = favs(req).addChannelToGroup(req.params.id, uniqueId);
     if (!g) return res.status(404).json({ error: 'Group not found' });
     res.json({ success: true });
   });
@@ -121,7 +129,7 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   router.put('/channels/order', (req, res) => {
     const { order } = req.body;
     if (!Array.isArray(order)) return res.status(400).json({ error: 'order array required' });
-    favoritesManager.reorderChannels(order);
+    favs(req).reorderChannels(order);
     res.json({ success: true });
   });
 
@@ -129,13 +137,13 @@ module.exports = function favoritesModule(favoritesManager, appState) {
   router.put('/groups/order', (req, res) => {
     const { order } = req.body;
     if (!Array.isArray(order)) return res.status(400).json({ error: 'order array required' });
-    favoritesManager.reorderGroups(order);
+    favs(req).reorderGroups(order);
     res.json({ success: true });
   });
 
   // DELETE /api/favorites/groups/:id/channels/:chId
   router.delete('/groups/:id/channels/:chId', (req, res) => {
-    const g = favoritesManager.removeChannelFromGroup(req.params.id, req.params.chId);
+    const g = favs(req).removeChannelFromGroup(req.params.id, req.params.chId);
     if (!g) return res.status(404).json({ error: 'Group not found' });
     res.json({ success: true });
   });

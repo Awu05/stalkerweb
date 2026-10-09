@@ -1,19 +1,25 @@
 import { invalidateChannelCache } from './lib/channelCache'
 import { invalidateFavoritesCache } from './lib/useFavorites'
+import { getViewerId } from './lib/viewer'
 
 const BASE = '/api'
 const TIMEOUT_MS = 30_000
 export const ACCESS_REQUIRED = 'sw:access-required'
+// This device's viewer was deleted on another device: App shows the picker.
+export const VIEWER_GONE = 'sw:viewer-gone'
 
 async function _fetch(path, opts = {}) {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
-    const r = await fetch(BASE + path, { ...opts, signal: controller.signal })
+    const viewer = getViewerId()
+    const headers = viewer ? { ...opts.headers, 'X-Viewer': viewer } : opts.headers
+    const r = await fetch(BASE + path, { ...opts, headers, signal: controller.signal })
     if (!r.ok) {
       const e = await r.json().catch(() => ({ error: r.statusText }))
       // Signed out (ACCESS_KEY set, cookie missing or revoked): App shows the login.
       if (r.status === 401 && e.accessRequired) window.dispatchEvent(new Event(ACCESS_REQUIRED))
+      if (r.status === 409 && e.viewerGone) window.dispatchEvent(new Event(VIEWER_GONE))
       throw new Error(e.error || r.statusText)
     }
     return r.json()
@@ -74,6 +80,16 @@ export const saveConfig = (body) => _put('/auth/config', body)
 // ── Settings ──────────────────────────────────────────────────────────────
 export const getSettings = () => _get('/settings')
 export const saveSettings = (body) => _post('/settings', body)
+
+// ── Viewers ───────────────────────────────────────────────────────────────
+// Each person's favorites and channel filters (backend routes/viewers.js).
+// "me" is whichever viewer this device sends in X-Viewer.
+export const getViewers    = () => _get('/viewers')
+export const createViewer  = (body) => _post('/viewers', body)
+export const updateViewer  = (id, body) => _put(`/viewers/${encodeURIComponent(id)}`, body)
+export const deleteViewer  = (id) => _delete(`/viewers/${encodeURIComponent(id)}`)
+export const getMyViewer   = () => _get('/viewers/me')
+export const saveMyFilters = (body) => _put('/viewers/me/filters', body)
 
 // ── Profiles ──────────────────────────────────────────────────────────────
 // Server-side portal connection profiles — same list on every browser/device

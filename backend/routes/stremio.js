@@ -76,11 +76,12 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   // Category name → id for one kind, for its genre dropdown. Names are what
   // Stremio sends back, so they must be unique; a repeat gets its id appended.
   // Cached briefly per portal: every catalog page needs its own kind's list,
-  // and rebuilding it re-read settings and re-sorted every channel.
-  const genreCache = new Map(); // `${portal}|${kind}` → { value, ts }
+  // and rebuilding it re-read settings and re-sorted every channel. Keyed by
+  // the viewer's filters too, so one viewer never gets another's categories.
+  const genreCache = new Map(); // `${portal}|${kind}|${filter key}` → { value, ts }
   async function genresFor(kind) {
     if (!connected()) return { list: [], required: false };
-    const key = `${cat.currentPortal()}|${kind}`;
+    const key = `${cat.currentPortal()}|${kind}|${appState.getExportFilter?.().key ?? ''}`;
     const hit = genreCache.get(key);
     if (hit && Date.now() - hit.ts < GENRES_TTL_MS) return hit.value;
 
@@ -141,11 +142,18 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
     // a new version — and refreshes its stored genre lists — when they change.
     const [major = '1', minor = '0'] = String(version).split('.');
     const patch = parseInt(hash(JSON.stringify([portalTag(), g])).slice(0, 7), 16);
+    // Each viewer installs their own copy (their own channel filters) from a
+    // /v/<id>/ link, which gets an id of its own; the plain link keeps the
+    // original id so existing installs carry on. The id follows the link, not
+    // which viewer is the default, so deleting the default viewer never hands
+    // its id to someone else's installed addon.
+    const viewer = req.viewer;
+    const own = req.viewerInPath === true && !!viewer;
     res.set('Cache-Control', 'no-cache');
     res.json({
-      id: 'com.stalkerweb.addon',
+      id: own ? `com.stalkerweb.addon.${viewer.id}` : 'com.stalkerweb.addon',
       version: `${major}.${minor}.${patch}`,
-      name: 'StalkerWeb',
+      name: own ? `StalkerWeb (${viewer.name})` : 'StalkerWeb',
       description: 'Live TV, movies and series from your Stalker portal, by category.',
       logo: `${baseUrl(req)}/favicon.svg`,
       resources: ['catalog', 'meta', 'stream'],

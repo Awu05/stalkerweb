@@ -59,7 +59,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   const fills = new Map(); // `${portal}|${type}` → promise
 
   const showAdult = () => appState.getShowAdult?.() === true;
-  const hiddenLanguages = () => appState.profilesManager?.activeDisabledLanguages?.() ?? new Set();
+  const hiddenLanguages = () => appState.getHiddenLanguages?.() ?? new Set();
 
   const logoFor = (ch) => (logoManager ? logoManager.resolveOverride(ch.name) : '')
     || ch.iconPath

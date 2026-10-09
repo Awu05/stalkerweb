@@ -15,7 +15,6 @@ const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic'];
 const DEFAULTS = {
   epg_enabled: true,
   vod_enabled: true,
-  show_adult: false,
   disabled_genres: [],
   stbemu_profile_name: '',
   stbemu_stb_model: 'MAG250',
@@ -32,7 +31,6 @@ module.exports = function settingsModule(config, appState = null, access = null)
     res.json({
       epg_enabled:             saved.epg_enabled !== undefined ? saved.epg_enabled : DEFAULTS.epg_enabled,
       vod_enabled:             saved.vod_enabled !== undefined ? saved.vod_enabled : DEFAULTS.vod_enabled,
-      show_adult:              saved.show_adult !== undefined  ? saved.show_adult  : DEFAULTS.show_adult,
       disabled_genres:         Array.isArray(saved.disabled_genres) ? saved.disabled_genres : DEFAULTS.disabled_genres,
       stbemu_profile_name:     saved.stbemu_profile_name     ?? DEFAULTS.stbemu_profile_name,
       stbemu_stb_model:        saved.stbemu_stb_model        ?? DEFAULTS.stbemu_stb_model,
@@ -57,10 +55,9 @@ module.exports = function settingsModule(config, appState = null, access = null)
 
   router.post('/', (req, res) => {
     const existing = cache.load() || {};
-    const { epg_enabled, vod_enabled, show_adult, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir, idle_timeout_minutes, live_buffer_seconds } = req.body;
+    const { epg_enabled, vod_enabled, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir, idle_timeout_minutes, live_buffer_seconds } = req.body;
     if (epg_enabled !== undefined)            existing.epg_enabled            = !!epg_enabled;
     if (vod_enabled !== undefined)            existing.vod_enabled            = !!vod_enabled;
-    if (show_adult !== undefined)             existing.show_adult             = !!show_adult;
     if (disabled_genres !== undefined)        existing.disabled_genres        = Array.isArray(disabled_genres)
                                                 ? disabled_genres.filter(s => typeof s === 'string')
                                                 : [];

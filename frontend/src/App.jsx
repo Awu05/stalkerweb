@@ -4,10 +4,13 @@ import { Tv2, Settings, Heart, Loader2, Film, LayoutGrid, Download, PanelLeftClo
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
-import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED } from './stalkerApi'
+import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, VIEWER_GONE, getViewers, createViewer, getMyViewer } from './stalkerApi'
 import LoginPage from './pages/LoginPage'
 import { syncVodProgressFromBackend } from '@/lib/vodProgress'
-import { fetchProfiles, getActiveProfileId, getProfileGenres } from '@/lib/profiles'
+import { fetchProfiles } from '@/lib/profiles'
+import ViewerPicker, { ViewerAvatar } from '@/components/ViewerPicker'
+import { getViewerId, setViewerId, chooseViewer } from '@/lib/viewer'
+import { invalidateFavoritesCache } from '@/lib/useFavorites'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { ToastHost } from '@/components/ToastHost'
 import { ReminderBell } from '@/components/ReminderBell'
@@ -96,7 +99,7 @@ function LogoMark({ collapsed }) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
-function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile }) {
+function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
   const { reminders, removeReminder } = useReminders()
   const status = useStatusDetails(connected, lastPingAt, idleInfo)
 
@@ -150,6 +153,20 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
         </div>
 
         <div className={cn('shrink-0 border-t border-[var(--color-border)] p-3 flex flex-col gap-1', collapsed && 'items-center')}>
+          {viewer && (
+            <button
+              onClick={() => { onCloseMobile?.(); onSwitchViewer() }}
+              title="Switch viewer"
+              aria-label={`Watching as ${viewer.name}. Switch viewer`}
+              className={cn(
+                'flex items-center gap-3 rounded-[var(--radius-md)] text-sm font-medium h-10 text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)]/70 transition-all duration-150',
+                collapsed ? 'justify-center w-10 mx-auto' : 'px-3 w-full'
+              )}
+            >
+              <ViewerAvatar viewer={viewer} size={22} />
+              {!collapsed && <span className="truncate">{viewer.name}</span>}
+            </button>
+          )}
           <NavItem to="/settings" icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
 
           {/* Status: connection (details on hover), version, sign out */}
@@ -203,6 +220,10 @@ function AppInner() {
   const [showAdult, setShowAdult]   = useState(false)
   const [disabledGenres, setDisabledGenres] = useState(new Set())
   const [disabledLanguages, setDisabledLanguages] = useState(new Set())
+  const [viewer, setViewer]   = useState(null)   // /api/viewers/me
+  const [viewers, setViewers] = useState([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerRequired, setPickerRequired] = useState(false)
   const [lastPingAt, setLastPingAt] = useState(null)
   const [idleInfo, setIdleInfo] = useState(null) // { lastActivityAt, idleTimeoutMs }
   const [version, setVersion] = useState(null)
@@ -230,11 +251,52 @@ function AppInner() {
     )
   }
 
+  // The viewer's own filters drive every channel list (Channels, Guide, Player).
+  function applyViewer(me) {
+    setViewer(me)
+    setShowAdult(!!me.showAdult)
+    setDisabledGenres(new Set(me.disabledGenres ?? []))
+    setDisabledLanguages(new Set(me.disabledLanguages ?? []))
+  }
+
+  async function refreshViewers() {
+    const [list, me] = await Promise.all([getViewers(), getMyViewer()])
+    setViewers(list.viewers)
+    applyViewer(me)
+  }
+
+  async function switchViewer(id) {
+    setViewerId(id)
+    invalidateFavoritesCache()
+    applyViewer(await getMyViewer())
+    setPickerOpen(false)
+    setPickerRequired(false)
+  }
+
+  async function addViewerFromPicker(name) {
+    const v = await createViewer({ name })
+    await switchViewer(v.id)
+    setViewers((await getViewers()).viewers)
+  }
+
   // Any API call answered "sign in first" (the cookie expired or the key changed).
   useEffect(() => {
     const onRequired = () => setNeedsLogin(true)
     window.addEventListener(ACCESS_REQUIRED, onRequired)
     return () => window.removeEventListener(ACCESS_REQUIRED, onRequired)
+  }, [])
+
+  // This device's viewer was deleted on another device: forget it and ask again.
+  useEffect(() => {
+    const onGone = () => {
+      setViewerId(null)
+      invalidateFavoritesCache()
+      getViewers().then(l => setViewers(l.viewers)).catch(() => {})
+      setPickerRequired(true)
+      setPickerOpen(true)
+    }
+    window.addEventListener(VIEWER_GONE, onGone)
+    return () => window.removeEventListener(VIEWER_GONE, onGone)
   }, [])
 
   useEffect(() => {
@@ -253,16 +315,16 @@ function AppInner() {
         // Profiles must be fetched (and any leftover localStorage profiles
         // migrated in) before anything reads getActiveProfileId() — including
         // syncVodProgressFromBackend()'s per-profile localStorage scoping below.
-        const [status, settings] = await Promise.all([getStatus(), getSettings(), fetchProfiles().catch(() => {})])
+        const [status, settings, list] = await Promise.all([getStatus(), getSettings(), getViewers(), fetchProfiles().catch(() => {})])
+        const pick = chooseViewer(list.viewers, getViewerId())
+        setViewerId(pick.id)
+        setViewers(list.viewers)
+        if (pick.needsPicker) { setPickerRequired(true); setPickerOpen(true) }
+        applyViewer(await getMyViewer())
         setConnected(status.connected)
         if (status.version) setVersion(status.version)
         syncVodProgressFromBackend().catch(() => {})
         setEpgEnabled(settings.epg_enabled !== false)
-        setShowAdult(!!settings.show_adult)
-        // Genre filters are strictly per-profile — an empty list means "no
-        // filters", not "inherit".
-        const activeId = getActiveProfileId()
-        setDisabledGenres(new Set(activeId ? getProfileGenres(activeId) : []))
         if (status.watchdog?.lastPingAt) setLastPingAt(status.watchdog.lastPingAt)
         if (status.lastActivityAt) updateIdleInfo(status.lastActivityAt, status.idleTimeoutMs)
       } catch {
@@ -293,8 +355,10 @@ function AppInner() {
   // (e.g. the 30s poll updating local idle/ping badges). Must run before any
   // early return to keep hook order stable.
   const ctxValue = useMemo(
-    () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo }),
-    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages]
+    () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
+      viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the functions only call setters
+    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers]
   )
 
   if (needsLogin) return <LoginPage />
@@ -310,6 +374,14 @@ function AppInner() {
   return (
     <AppContext.Provider value={ctxValue}>
       <TooltipProvider delayDuration={300}>
+        {pickerOpen && (
+          <ViewerPicker
+            viewers={viewers}
+            onPick={switchViewer}
+            onCreate={addViewerFromPicker}
+            onClose={pickerRequired ? undefined : () => setPickerOpen(false)}
+          />
+        )}
         <Sidebar
           connected={connected}
           epgEnabled={epgEnabled}
@@ -321,6 +393,8 @@ function AppInner() {
           onToggle={toggleSidebar}
           mobileOpen={mobileNavOpen}
           onCloseMobile={() => setMobileNavOpen(false)}
+          viewer={viewer}
+          onSwitchViewer={() => setPickerOpen(true)}
         />
 
         {/* Mobile top bar — hidden at lg+, where the sidebar takes over */}
@@ -348,7 +422,7 @@ function AppInner() {
           )}
         >
           <Suspense fallback={<div className="flex h-48 items-center justify-center"><Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" /></div>}>
-          <Routes>
+          <Routes key={viewer?.id ?? 'none'}>
             <Route path="/settings" element={<SetupPage />} />
             <Route
               path="/channels"

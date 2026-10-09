@@ -15,7 +15,7 @@ import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
   downloadStbEmuBackup, getChannels, getLogoMap, getProxiedLogoUrl, getGroups,
-  getLogoStripWords, addLogoStripWord, deleteLogoStripWord, getLanguages,
+  getLogoStripWords, addLogoStripWord, deleteLogoStripWord, getLanguages, saveMyFilters,
 } from '../stalkerApi'
 import { invalidateChannelCache } from '../lib/channelCache'
 import { invalidateFavoritesCache } from '../lib/useFavorites'
@@ -23,8 +23,10 @@ import { useApp } from '@/lib/appContext'
 import {
   fetchProfiles, createProfile, updateProfile, deleteProfile,
   normalizePortal, DEFAULT_FORM,
-  setActiveProfile, setProfileGenres, setProfileLanguages, getActiveProfileId,
+  setActiveProfile, getActiveProfileId,
 } from '@/lib/profiles'
+import ViewersCard from '@/components/ViewersCard'
+import { viewerQuery, viewerPath } from '@/lib/viewer'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -485,7 +487,8 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onD
 export default function SetupPage() {
   const navigate = useNavigate()
   const { connected, setConnected, setEpgEnabled, showAdult, setShowAdult,
-          disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo } = useApp()
+          disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
+          viewer, applyViewer } = useApp()
 
   // ── Profiles ────────────────────────────────────────────────────────────────
   const [profiles, setProfiles]     = useState([])
@@ -704,15 +707,9 @@ export default function SetupPage() {
       invalidateChannelCache()
       invalidateFavoritesCache()
 
-      // Mark this profile active and load ITS genre filters into the app
-      // context so ChannelsPage / PlayerPage filter by the right list.
+      // Mark this profile active. Channel filters belong to the viewer, not
+      // the portal profile, so they stay as they are.
       await setActiveProfile(profile.id).catch(() => {})
-      setDisabledGenres(new Set(
-        Array.isArray(profile.disabledGenres) ? profile.disabledGenres : []
-      ))
-      setDisabledLanguages(new Set(
-        Array.isArray(profile.disabledLanguages) ? profile.disabledLanguages : []
-      ))
 
       setNotice({ type: 'success', msg: `Connected to ${profile.name || profile.portal}` })
       setTimeout(() => navigate('/channels'), 900)
@@ -819,7 +816,8 @@ export default function SetupPage() {
   }
   async function handleAdultToggle(val) {
     setShowAdult(val)
-    try { await saveSettings({ show_adult: val }) } catch { /* non-critical */ }
+    invalidateChannelCache()
+    try { applyViewer(await saveMyFilters({ showAdult: val })) } catch { setShowAdult(!val) }
   }
   async function handleSaveDownloadDir() {
     if (!downloadDir.trim()) return
@@ -881,17 +879,12 @@ export default function SetupPage() {
   const idleParsed = parseInt(idleMinutes, 10)
   const idleValid  = /^\d+$/.test(idleMinutes.trim()) && idleParsed >= 1 && idleParsed <= 10080
 
-  // Genre filters are stored per-profile on the backend. Update the app
-  // context and local profile list immediately (optimistic), persist to the
-  // server in the background, and invalidate the channel cache so the
-  // channel/player pages re-filter on next visit.
+  // Genre filters belong to the current viewer. Update the app context
+  // immediately (optimistic), save on the server, and invalidate the channel
+  // cache so the channel/player pages re-filter on next visit.
   function persistGenres(set) {
     setDisabledGenres(set)
-    const activeId = getActiveProfileId()
-    if (activeId) {
-      setProfiles(prev => prev.map(p => p.id === activeId ? { ...p, disabledGenres: [...set] } : p))
-      setProfileGenres(activeId, [...set]).catch(() => {})
-    }
+    saveMyFilters({ disabledGenres: [...set] }).catch(() => {})
     invalidateChannelCache()
   }
   function handleToggleGenre(genreName) {
@@ -910,11 +903,7 @@ export default function SetupPage() {
   // "LANGUAGE | SECTION" shape but never the section half.
   function persistLanguages(set) {
     setDisabledLanguages(set)
-    const activeId = getActiveProfileId()
-    if (activeId) {
-      setProfiles(prev => prev.map(p => p.id === activeId ? { ...p, disabledLanguages: [...set] } : p))
-      setProfileLanguages(activeId, [...set]).catch(() => {})
-    }
+    saveMyFilters({ disabledLanguages: [...set] }).catch(() => {})
     invalidateChannelCache()
   }
   function handleToggleLanguage(lang) {
@@ -1071,6 +1060,10 @@ export default function SetupPage() {
           // With ACCESS_KEY set, players can't sign in — the links carry a
           // playback-only token in their path instead (backend lib/access.js).
           const k = shareToken ? `/k/${shareToken}` : ''
+          // The current viewer's channels (the default viewer's links are unchanged).
+          const vq = viewerQuery(viewer)
+          const vp = viewerPath(viewer)
+          const xtreamUser = viewer && !viewer.isDefault ? <>the username <strong>{viewer.name}</strong></> : 'any username'
           return (
             <Card title="IPTV Links" description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs.">
               <LinkRow
@@ -1078,8 +1071,8 @@ export default function SetupPage() {
                 icon={Server}
                 url={origin}
                 hint={shareToken
-                  ? "Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, any username, and the Xtream password below."
-                  : "Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin's Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with any username and password."}
+                  ? <>Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin&apos;s Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, {xtreamUser}, and the Xtream password below.</>
+                  : <>Live TV, movies and series, each by category — the way the portal lays them out. In Jellyfin&apos;s Xtream plugin, TiviMate, IPTV Smarters or any Xtream player, enter this as the server, with {xtreamUser} and any password.</>}
               />
               {shareToken && (
                 <LinkRow
@@ -1092,7 +1085,7 @@ export default function SetupPage() {
               <LinkRow
                 label="Stremio Addon"
                 icon={Server}
-                url={`${stremioOrigin}${k}/stremio/manifest.json`}
+                url={`${stremioOrigin}${k}${vp}/stremio/manifest.json`}
                 hint={stremioOrigin.startsWith('https:')
                   ? <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install.</>
                   : <>Live TV, movies and series by category in Stremio: Addons → paste this link in the search box → Install. Stremio needs an <strong>https://</strong> address unless it runs on this same computer and the link starts with http://127.0.0.1 — see the README for HTTPS.</>}
@@ -1100,28 +1093,28 @@ export default function SetupPage() {
               <LinkRow
                 label="M3U Playlist"
                 icon={ListVideo}
-                url={`${origin}${k}/api/m3u`}
+                url={`${origin}${k}/api/m3u${vq}`}
                 filename="stalkerweb.m3u"
-                hint={<>Channel list — add as an M3U / playlist URL in your IPTV client or tuner. For players that don&apos;t group channels (Jellyfin Live TV), add <code className="font-mono">?prefix=1</code> to put the category in each name, like “Sports | ESPN”.</>}
+                hint={<>Channel list — add as an M3U / playlist URL in your IPTV client or tuner. For players that don&apos;t group channels (Jellyfin Live TV), add <code className="font-mono">{vq ? '&prefix=1' : '?prefix=1'}</code> to put the category in each name, like “Sports | ESPN”.</>}
               />
               <LinkRow
                 label="VLC Playlist"
                 icon={ListVideo}
-                url={`${origin}${k}/api/xspf`}
+                url={`${origin}${k}/api/xspf${vq}`}
                 filename="stalkerweb.xspf"
                 hint="The same channels for VLC, with a folder per category — VLC shows M3U files as one flat list. Open it in VLC, or use Media → Open Network Stream with this URL."
               />
               <LinkRow
                 label="XMLTV EPG Guide"
                 icon={CalendarDays}
-                url={`${origin}${k}/api/xmltv`}
+                url={`${origin}${k}/api/xmltv${vq}`}
                 filename="stalkerweb-epg.xml"
                 hint={epg
                   ? 'Program guide in XMLTV format — add as the EPG / guide URL alongside the M3U.'
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
               />
               <p className="text-xs text-[var(--color-muted)]">
-                All of these leave out the genres and languages hidden under Genre Filters, and adult content unless Show Adult Content is on. Add <code className="font-mono">?all=1</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
+                These links show {viewer ? <><strong>{viewer.name}</strong>&apos;s</> : 'your'} channels: they leave out the genres and languages hidden under My channels, and adult content unless it is turned on there. Each viewer gets their own links. Add <code className="font-mono">{vq ? '&all=1' : '?all=1'}</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
               </p>
               {shareToken && (
                 <p className="text-xs text-[var(--color-muted)]">
@@ -1145,13 +1138,6 @@ export default function SetupPage() {
               <p className="text-xs text-[var(--color-muted)] mt-0.5">Disable if your portal does not support EPG data.</p>
             </div>
             <Switch checked={epg} onCheckedChange={handleEpgToggle} />
-          </div>
-          <div className="flex items-center justify-between pt-4 border-t border-[var(--color-border)]">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">Show Adult Content</p>
-              <p className="text-xs text-[var(--color-muted)] mt-0.5">Parental lock for categories like &quot;FOR ADULTS&quot;.</p>
-            </div>
-            <Switch checked={showAdult} onCheckedChange={handleAdultToggle} />
           </div>
           <div className="pt-4 border-t border-[var(--color-border)]">
             <Field label="Download Directory" id="download-dir" hint="Where VOD downloads are saved on the server's disk. Changes apply to new downloads only.">
@@ -1283,7 +1269,22 @@ export default function SetupPage() {
         </Card>
 
         {/* ── Genre Filters ────────────────────────────────────────────────── */}
-        <Card title="Genre Filters" description="Choose which genres appear in your channel browser, grouped by language. These filters are saved per-profile — each portal connection keeps its own list.">
+        {/* ── Viewers ─────────────────────────────────────────────────────── */}
+        <Card title="Viewers" description="Everyone who watches here. Each viewer has their own favorites and channel filters; every other setting on this page is shared.">
+          <ViewersCard />
+        </Card>
+
+        <Card
+          title={viewer ? `My channels (${viewer.name})` : 'My channels'}
+          description="Which channels you see: hide genres and languages, and choose whether adult content is shown. These belong to you — other viewers keep their own."
+        >
+          <div className="flex items-center justify-between pb-3 mb-1 border-b border-[var(--color-border)]">
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">Show Adult Content</p>
+              <p className="text-xs text-[var(--color-muted)] mt-0.5">Parental lock for categories like &quot;FOR ADULTS&quot;.</p>
+            </div>
+            <Switch checked={showAdult} onCheckedChange={handleAdultToggle} />
+          </div>
           {!connected ? (
             <p className="text-sm text-[var(--color-muted)]">Connect to a portal to manage genre filters.</p>
           ) : genresLoading ? (
