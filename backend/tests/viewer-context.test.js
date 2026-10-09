@@ -7,10 +7,11 @@ const all = [
   { id: 'view_andy', name: 'Andy' },
   { id: 'view_sam', name: 'Sam' },
 ]
+let lookups = 0   // how often the viewers store was asked
 const store = {
-  get: (id) => all.find((v) => v.id === id) ?? null,
-  getDefault: () => all[0],
-  findByName: (n) => all.find((v) => v.id === String(n).toLowerCase() || v.name.toLowerCase() === String(n).toLowerCase()) ?? null,
+  get: (id) => { lookups++; return all.find((v) => v.id === id) ?? null },
+  getDefault: () => { lookups++; return all[0] },
+  findByName: (n) => { lookups++; return all.find((v) => v.id === String(n).toLowerCase() || v.name.toLowerCase() === String(n).toLowerCase()) ?? null },
 }
 
 describe('viewer context', () => {
@@ -20,6 +21,9 @@ describe('viewer context', () => {
     const app = express()
     app.use(express.json())
     app.use(ctx.middleware)
+    app.use(ctx.refuseDeletedLinks)
+    // A route that never asks who the viewer is, like a stream segment.
+    app.get('/proxy/segment', (_req, res) => res.json({ ok: true }))
     const answer = async (req, res) => {
       await new Promise((r) => setTimeout(r, 5))
       res.json({ req: req.viewer.id, current: ctx.current()?.id, path: req.path })
@@ -58,9 +62,21 @@ describe('viewer context', () => {
     expect(await ask('/v/view_sam/api/m3u?viewer=view_sam', { 'X-Viewer': 'view_andy' })).toMatchObject({ req: 'view_andy' })
   })
 
-  it('falls back to the default for an unknown or deleted viewer', async () => {
-    expect(await ask('/api/m3u?viewer=view_gone')).toMatchObject({ req: 'view_def' })
-    expect(await ask('/v/view_gone/stremio/manifest.json')).toMatchObject({ req: 'view_def', path: '/stremio/manifest.json' })
+  it("refuses a link that names a deleted viewer, rather than showing the default viewer's channels", async () => {
+    for (const path of ['/api/m3u?viewer=view_gone', '/v/view_gone/stremio/manifest.json']) {
+      const r = await fetch(base + path)
+      expect(r.status).toBe(404)
+      expect(await r.text()).toMatch(/deleted/)
+    }
+  })
+
+  it('leaves an unknown X-Viewer to the routes (the website shows its picker)', async () => {
     expect(await ask('/api/favorites', { 'X-Viewer': 'view_gone' })).toMatchObject({ req: 'view_def' })
+  })
+
+  it('does not look up viewers for requests that never use one', async () => {
+    lookups = 0
+    expect((await fetch(base + '/proxy/segment')).status).toBe(200)
+    expect(lookups).toBe(0)
   })
 })

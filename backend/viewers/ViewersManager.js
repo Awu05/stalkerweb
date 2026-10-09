@@ -96,6 +96,13 @@ class ViewersManager {
     }
     this._warned = false;
     const viewers = Array.isArray(raw?.viewers) ? raw.viewers.filter((v) => v && typeof v.id === 'string') : [];
+    // A hand-edited entry may lack a name or carry odd fields: fill in what the
+    // rest of the code relies on, so one bad entry can't break every request.
+    viewers.forEach((v, i) => {
+      if (typeof v.name !== 'string' || !v.name.trim()) v.name = `Viewer ${i + 1}`;
+      if (!COLORS.includes(v.color)) v.color = COLORS[i % COLORS.length];
+      v.formerNames = strings(v.formerNames);
+    });
     const defaultViewerId = viewers.some((v) => v.id === raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
     const data = { defaultViewerId, viewers };
     this._cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };

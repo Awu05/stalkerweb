@@ -108,3 +108,30 @@ describe('viewers API and favorites', () => {
     expect(defaultFavs).toEqual(['1'])
   })
 })
+
+describe('portal profile edits', () => {
+  it('keep the filters a profile held before viewers existed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-profile-edit-'))
+    const viewers = new ViewersManager(dir)
+    viewers.ensureInitialized({})
+    viewers.setFilters(viewers.getDefault().id, { disabledGenres: ['Sports'] })
+    const profiles = new ProfilesManager(dir)
+    const p = profiles.create({ name: 'Portal', disabledGenres: ['Old'], disabledLanguages: ['DE'] })
+    const context = createViewerContext(viewers)
+    const app = express()
+    app.use(express.json())
+    app.use(context.middleware)
+    app.use('/api/profiles', profilesModule(profiles))
+    const server = await new Promise((r) => { const s = app.listen(0, () => r(s)) })
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/api/profiles`
+      // The editor sends back what it was given, the viewer's filters included.
+      const shown = (await (await fetch(base)).json()).profiles[0]
+      await fetch(`${base}/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...shown, name: 'Renamed' }) })
+      expect(profiles.get(p.id)).toMatchObject({ name: 'Renamed', disabledGenres: ['Old'], disabledLanguages: ['DE'] })
+    } finally {
+      server.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

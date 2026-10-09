@@ -8,7 +8,6 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { toLanguageSet } = require('../lib/languages');
 const log  = require('../logger');
 const TAG  = 'ProfilesManager';
 
@@ -57,11 +56,6 @@ class ProfilesManager {
   getActive() {
     const d = this._load();
     return d.activeProfileId ? d.profiles.find(p => p.id === d.activeProfileId) || null : null;
-  }
-
-  /** Languages the active profile has hidden, ready for comparison. */
-  activeDisabledLanguages() {
-    return toLanguageSet(this.getActive()?.disabledLanguages);
   }
 
   // Accepts a client-supplied id (used when migrating existing localStorage

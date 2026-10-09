@@ -152,6 +152,19 @@ describe('reading viewers.json', () => {
   })
 })
 
+describe('a viewers.json edited by hand', () => {
+  it('copes with a viewer that has no name', () => {
+    viewers.ensureInitialized({})
+    const file = path.join(dir, 'viewers.json')
+    const d = JSON.parse(fs.readFileSync(file, 'utf8'))
+    d.viewers.push({ id: 'view_noname', formerNames: 'x' })
+    fs.writeFileSync(file, JSON.stringify(d))
+    expect(viewers.findByName('nobody')).toBe(null)
+    expect(viewers.list().viewers.map((v) => v.name)).toEqual(['Default', 'Viewer 2'])
+    expect(viewers.create({ name: 'Andy' }).name).toBe('Andy')
+  })
+})
+
 describe('an unreadable viewers.json', () => {
   it('is never overwritten: a temporary Default is served and changes are refused', () => {
     viewers.ensureInitialized({ favorites: { channels: ['1'] } })

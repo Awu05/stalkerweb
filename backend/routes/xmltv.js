@@ -29,6 +29,7 @@ const { channelGenre } = require('./m3u');
 const { readyForClient } = require('../lib/clientSession');
 const TAG = 'xmltv';
 const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
 // Filler for channels the portal has no EPG for, so they still appear in the
 // client's guide. Coarse on purpose: hourly blocks over 7 days were 168
@@ -175,11 +176,13 @@ function buildGuideXml({ channels, groups, epgData, filler = true, categories = 
 
 module.exports = function xmltvModule(appState) {
   const router = express.Router();
-  // A few built guides, one per variant (viewer's filter, period, filler,
-  // categories), so viewers whose apps refresh in turn don't rebuild it each
-  // time. Few, because each holds the whole guide twice (plain and gzipped).
-  const cache = new Map(); // variant → { channels, channelCount, groups, epgData, builtAt, raw, gzipped }
-  const CACHE_SLOTS = 3;
+  // Built guides, one per variant (viewer's filter, period, filler, categories),
+  // so viewers whose apps refresh in turn don't rebuild it each time. Only the
+  // gzipped copy is kept (nearly every client takes gzip; the rest get it
+  // unzipped), guides built from an older channel list are dropped, and the
+  // total stays within a budget, oldest out first.
+  const cache = new Map(); // variant → { channels, channelCount, groups, epgData, builtAt, gzipped }
+  const CACHE_BUDGET_BYTES = 48 * 1024 * 1024;
 
   router.get('/', async (req, res) => {
     await readyForClient(appState, { waitForChannels: true });  // after an idle disconnect
@@ -227,10 +230,19 @@ module.exports = function xmltvModule(appState) {
       const shown = channels.filter(filter.keep);
       const { xml, realEpgCount, syntheticCount } = buildGuideXml({ channels: shown, groups, epgData, filler, categories });
       const raw = Buffer.from(xml, 'utf8');
-      entry = { channels, channelCount: channels.length, groups, epgData, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
+      entry = { channels, channelCount: channels.length, groups, epgData, builtAt: Date.now(), gzipped: await gzip(raw) };
+      for (const [k, e] of cache) {
+        if (e.channels !== channels || e.groups !== groups || e.epgData !== epgData) cache.delete(k);
+      }
       cache.delete(variant);
       cache.set(variant, entry);
-      while (cache.size > CACHE_SLOTS) cache.delete(cache.keys().next().value);   // the oldest
+      let total = 0;
+      for (const e of cache.values()) total += e.gzipped.length;
+      for (const [k, e] of cache) {   // oldest first; the one just built always stays
+        if (total <= CACHE_BUDGET_BYTES || k === variant) break;
+        cache.delete(k);
+        total -= e.gzipped.length;
+      }
       log.info(TAG, `built guide: ${shown.length} of ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} filler) — ` +
         `${(raw.length / 1e6).toFixed(1)}MB, ${(entry.gzipped.length / 1e6).toFixed(1)}MB gzipped, ${Date.now() - t0}ms`);
     } else {
@@ -244,7 +256,7 @@ module.exports = function xmltvModule(appState) {
       res.set('Content-Encoding', 'gzip');
       return res.send(entry.gzipped);
     }
-    res.send(entry.raw);
+    res.send(await gunzip(entry.gzipped));
   });
 
   return router;

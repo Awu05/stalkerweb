@@ -166,6 +166,8 @@ app.use(access.stripPrefix);
 app.use(viewerContext.middleware);
 app.use('/api/access', access.routes());
 app.use(access.gate);
+// A link naming a deleted viewer is refused (after the gate, so strangers learn nothing).
+app.use(viewerContext.refuseDeletedLinks);
 
 // Timeout comes from IDLE_TIMEOUT_MINUTES, overridden by a value saved on the
 // Settings page (see routes/settings.js). 0 = never auto-disconnect.
