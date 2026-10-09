@@ -29,11 +29,11 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
         <h2 className="text-sm font-semibold text-[var(--color-text)]">Recently watched</h2>
         <button type="button" onClick={onClear} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">Clear</button>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+      <div className={TILE_ROW}>
         {entries.map(e => {
           const pct = !e.finished && e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
           return (
-            <div key={e.id} className="group relative shrink-0 w-36 sm:w-40">
+            <div key={e.id} className="group relative min-w-0">
               <button
                 onClick={() => onOpen(e)}
                 aria-label={`${e.finished ? 'Watched' : 'Resume'}: ${e.title}${e.episodeTitle ? `, ${e.episodeTitle}` : ''}`}
@@ -90,9 +90,9 @@ function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
         <h2 className="text-sm font-semibold text-[var(--color-text)]">My List</h2>
         <button type="button" onClick={onSeeAll} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">See all</button>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+      <div className={TILE_ROW}>
         {entries.map((e) => (
-          <div key={e.id} className="shrink-0 w-36 sm:w-40">
+          <div key={e.id} className="min-w-0">
             <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
           </div>
         ))}
@@ -114,7 +114,7 @@ function MyListView({ toWatch, completed, empty, kind, onOpen, onDownload }) {
     )
   }
   const grid = (entries, done) => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
+    <div className={TILE_GRID}>
       {entries.map((e) => (
         <div key={e.id} className="flex flex-col gap-1">
           <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
@@ -158,6 +158,16 @@ function itemFromParams(params) {
   }
 }
 
+// ── Tile sizes ────────────────────────────────────────────────────────────
+// Every VOD tile is one column of TILE_GRID wide — in the grid, and in the
+// Recently watched and My List rows, which scroll sideways in columns of
+// exactly that width (100% less the gaps, over the column count, per
+// breakpoint). Keep the two in step.
+const TILE_GRID = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6'
+const TILE_ROW = 'grid grid-flow-col gap-4 sm:gap-5 md:gap-6 overflow-x-auto pt-1 pb-3 -mx-1 px-1 ' +
+  'auto-cols-[calc((100%_-_1rem)/2)] sm:auto-cols-[calc((100%_-_2.5rem)/3)] md:auto-cols-[calc((100%_-_4.5rem)/4)] ' +
+  'lg:auto-cols-[calc((100%_-_6rem)/5)] xl:auto-cols-[calc((100%_-_9rem)/7)]'
+
 // ── Thumbnail component ───────────────────────────────────────────────────
 // VOD artwork from these portals is almost always a movie-poster crop (2:3),
 // not a 16:9 backdrop — a 16:9 box just letterboxed it with big empty bars.
@@ -193,7 +203,7 @@ function VodCard({ item, onClick, onDownload }) {
   return (
     <button
       onClick={() => onClick(item)}
-      className="group text-left flex flex-col gap-1.5 rounded-[var(--radius-md)] overflow-hidden transition-all duration-200 hover:scale-[1.03] hover:shadow-[var(--shadow-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary-light)]"
+      className="group w-full min-w-0 text-left flex flex-col gap-1.5 rounded-[var(--radius-md)] overflow-hidden transition-all duration-200 hover:scale-[1.03] hover:shadow-[var(--shadow-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary-light)]"
     >
       <div className="relative">
         <Thumb src={item.screenshotUrl} name={item.name} isHD={item.isHD} />
@@ -861,7 +871,7 @@ export default function VodPage() {
 
           {!isMyList && shownItems.length > 0 && (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
+              <div className={TILE_GRID}>
                 {shownItems.map(item => (
                   <VodCard key={item.id} item={item} onClick={handleItemClick} onDownload={downloadMovie} />
                 ))}

@@ -60,7 +60,7 @@ function ChannelCard({ channel, logoUrl, onRemove, onClick, dragHandlers, isDrag
       onDragOver={dragHandlers?.onDragOver}
       onDragEnd={dragHandlers?.onDragEnd}
       className={cn(
-        'group relative rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] p-4 flex flex-col items-center gap-2.5 hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] transition-all cursor-pointer select-none',
+        'group relative rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] px-4 pb-4 pt-10 flex flex-col items-center gap-2.5 hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] transition-all cursor-pointer select-none',
         isDragging && 'opacity-40'
       )}
       onClick={() => onClick(channel)}
