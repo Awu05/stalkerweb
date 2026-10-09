@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import stremioModule from '../routes/stremio.js'
 import XtreamIdStore from '../lib/XtreamIdStore.js'
+import { createViewerContext } from '../lib/viewerContext.js'
 
 const groups = [{ id: '1', name: 'News' }, { id: '2', name: 'Kids & Family' }, { id: '3', name: 'Adult' }]
 const ch = (uniqueId, name, number, genreId) =>
@@ -65,6 +66,13 @@ describe('Stremio addon', () => {
       ensureSession: async () => { reconnects++; appState.channelManager = channelManager; appState.vodManager = vodManager },
     }
     const app = express()
+    // Viewers as the server resolves them (lib/viewerContext.js): /v/<id>/… links.
+    const people = [{ id: 'view_def', name: 'Default' }, { id: 'view_andy', name: 'Andy' }]
+    app.use(createViewerContext({
+      get: (id) => people.find((v) => v.id === id) ?? null,
+      getDefault: () => people[0],
+      findByName: () => null,
+    }).middleware)
     app.use('/stremio', stremioModule(appState, { idStore: new XtreamIdStore(null), version: '1.2.3' }))
     server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
     base = `http://127.0.0.1:${server.address().port}`
@@ -93,17 +101,16 @@ describe('Stremio addon', () => {
     expect(genreOf('movie').isRequired).toBe(false)
   })
 
-  it('gives a non-default viewer its own addon id and name, so both can be installed', async () => {
-    appState.currentViewer = () => ({ id: 'view_andy', name: 'Andy' })
-    appState.isDefaultViewer = () => false
-    try {
-      const m = await get('/manifest.json')
-      expect(m).toMatchObject({ id: 'com.stalkerweb.addon.view_andy', name: 'StalkerWeb (Andy)' })
-    } finally {
-      delete appState.currentViewer
-      delete appState.isDefaultViewer
-    }
+  it("gives each viewer's link its own addon id and name, so several can be installed", async () => {
+    const viaLink = async (id) => (await fetch(`${base}/v/${id}/stremio/manifest.json`)).json()
+    expect(await viaLink('view_andy')).toMatchObject({ id: 'com.stalkerweb.addon.view_andy', name: 'StalkerWeb (Andy)' })
     expect((await get('/manifest.json')).id).toBe('com.stalkerweb.addon')
+  })
+
+  it("keeps an addon's identity when its viewer becomes the default", async () => {
+    // Deleting the default viewer makes another one the default; that viewer's
+    // installed /v/<id> link must keep its own id, never take the plain one.
+    expect((await (await fetch(`${base}/v/view_def/stremio/manifest.json`)).json()).id).toBe('com.stalkerweb.addon.view_def')
   })
 
   it('never hands one viewer the genres another viewer\'s filters allow', async () => {

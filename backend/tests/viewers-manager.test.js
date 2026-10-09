@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -71,6 +71,23 @@ describe('viewers', () => {
     expect(viewers.update(a.id, { name: 'ANDY' }).name).toBe('ANDY')
   })
 
+  it('refuses names that are not text or hold control characters', () => {
+    expect(statusOf(() => viewers.create({ name: {} }))).toBe(400)
+    expect(statusOf(() => viewers.create({ name: 42 }))).toBe(400)
+    expect(statusOf(() => viewers.create({ name: 'An\ndy' }))).toBe(400)
+    expect(statusOf(() => viewers.create({ name: 'Andy\u0007' }))).toBe(400)
+    expect(viewers.create({ name: 'Zoë' }).name).toBe('Zoë')
+  })
+
+  it('still finds a renamed viewer by its old name, unless someone now has that name', () => {
+    const a = viewers.create({ name: 'Andy' })
+    viewers.update(a.id, { name: 'Andrew' })
+    expect(viewers.findByName('andy').id).toBe(a.id)      // an Xtream app set up with the old name
+    expect(viewers.findByName('Andrew').id).toBe(a.id)
+    const b = viewers.create({ name: 'Andy' })             // the old name is free to take
+    expect(viewers.findByName('Andy').id).toBe(b.id)
+  })
+
   it('only accepts palette colors', () => {
     const a = viewers.create({ name: 'Andy' })
     expect(statusOf(() => viewers.update(a.id, { color: 'red' }))).toBe(400)
@@ -101,6 +118,37 @@ describe('viewers', () => {
     expect(viewers.getDefault().disabledGenres).toEqual([])
     expect(statusOf(() => viewers.setFilters(a.id, { disabledGenres: 'Sports' }))).toBe(400)
     expect(statusOf(() => viewers.setFilters(a.id, { showAdult: 'yes' }))).toBe(400)
+  })
+})
+
+describe('reading viewers.json', () => {
+  it('reads the file once, not on every request, yet sees an edit made by hand', () => {
+    viewers.ensureInitialized({})
+    const file = path.join(dir, 'viewers.json')
+    const spy = vi.spyOn(fs, 'readFileSync')
+    try {
+      viewers.getDefault()
+      viewers.list()
+      viewers.findByName('Default')
+      expect(spy.mock.calls.filter(([p]) => String(p) === file).length).toBeLessThanOrEqual(1)
+    } finally {
+      spy.mockRestore()
+    }
+    const d = JSON.parse(fs.readFileSync(file, 'utf8'))
+    d.viewers[0].name = 'Family'
+    fs.writeFileSync(file, JSON.stringify(d, null, 2) + '\n'.repeat(3)) // a different size, like a hand edit
+    expect(viewers.getDefault().name).toBe('Family')
+  })
+
+  it('does not keep a change whose save failed', () => {
+    viewers.ensureInitialized({})
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('disk full') })
+    try {
+      expect(() => viewers.create({ name: 'Andy' })).toThrow('disk full')
+    } finally {
+      spy.mockRestore()
+    }
+    expect(viewers.list().viewers.map((v) => v.name)).toEqual(['Default'])
   })
 })
 

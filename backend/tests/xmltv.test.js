@@ -176,3 +176,32 @@ describe('GET /api/xmltv', () => {
     expect(count(xml, 'programme')).toBe(2)
   })
 })
+
+describe('GET /api/xmltv for several viewers', () => {
+  it('keeps each viewer\'s guide cached, so alternating viewers do not rebuild it', async () => {
+    const builds = { a: 0, b: 0 }
+    const filterOf = (k) => ({ key: k, keep: () => { builds[k]++; return true } })
+    let current = filterOf('a')
+    const appState = {
+      channelManager: { getChannels: () => channels, getGroups: () => groups },
+      guideManager: { loadGuide: async () => epgData },
+      getExportFilter: () => current,
+    }
+    const app = express()
+    app.use('/api/xmltv', xmltvModule(appState))
+    const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
+    const url = `http://127.0.0.1:${server.address().port}/api/xmltv`
+    try {
+      const filterA = filterOf('a'), filterB = filterOf('b')
+      for (const f of [filterA, filterB, filterA, filterB]) {
+        current = f
+        expect((await fetch(url)).status).toBe(200)
+      }
+      // One build each: every channel checked once per viewer, not per request.
+      expect(builds.a).toBe(channels.length)
+      expect(builds.b).toBe(channels.length)
+    } finally {
+      server.close()
+    }
+  })
+})

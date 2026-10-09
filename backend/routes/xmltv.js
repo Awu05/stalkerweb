@@ -175,7 +175,11 @@ function buildGuideXml({ channels, groups, epgData, filler = true, categories = 
 
 module.exports = function xmltvModule(appState) {
   const router = express.Router();
-  let cache = null; // { channels, channelCount, filterKey, groups, epgData, period, filler, categories, builtAt, raw, gzipped }
+  // A few built guides, one per variant (viewer's filter, period, filler,
+  // categories), so viewers whose apps refresh in turn don't rebuild it each
+  // time. Few, because each holds the whole guide twice (plain and gzipped).
+  const cache = new Map(); // variant → { channels, channelCount, groups, epgData, builtAt, raw, gzipped }
+  const CACHE_SLOTS = 3;
 
   router.get('/', async (req, res) => {
     await readyForClient(appState, { waitForChannels: true });  // after an idle disconnect
@@ -210,21 +214,25 @@ module.exports = function xmltvModule(appState) {
     const categories = req.query.categories !== 'none';
     // Same channels as the M3U: hidden genres/languages and adult channels are
     // left out (?all=1 keeps them). The cache keys on the source list plus the
-    // filter's key, since the filtered array is new on every request.
+    // filter's key (one per viewer), since the filtered array is new on every request.
     const filter = exportFilterFor(req, appState);
     // channels.length too: the array is filled in place while a load runs.
-    const fresh  = cache && cache.channels === channels && cache.channelCount === channels.length &&
-                   cache.filterKey === filter.key && cache.groups === groups &&
-                   cache.epgData === epgData && cache.period === period && cache.filler === filler && cache.categories === categories &&
-                   Date.now() - cache.builtAt < CACHE_TTL_MS;
+    const variant = JSON.stringify([filter.key, period, filler, categories]);
+    let entry = cache.get(variant);
+    const fresh  = entry && entry.channels === channels && entry.channelCount === channels.length &&
+                   entry.groups === groups && entry.epgData === epgData &&
+                   Date.now() - entry.builtAt < CACHE_TTL_MS;
     if (!fresh) {
       const t0 = Date.now();
       const shown = channels.filter(filter.keep);
       const { xml, realEpgCount, syntheticCount } = buildGuideXml({ channels: shown, groups, epgData, filler, categories });
       const raw = Buffer.from(xml, 'utf8');
-      cache = { channels, channelCount: channels.length, filterKey: filter.key, groups, epgData, period, filler, categories, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
+      entry = { channels, channelCount: channels.length, groups, epgData, builtAt: Date.now(), raw, gzipped: await gzip(raw) };
+      cache.delete(variant);
+      cache.set(variant, entry);
+      while (cache.size > CACHE_SLOTS) cache.delete(cache.keys().next().value);   // the oldest
       log.info(TAG, `built guide: ${shown.length} of ${channels.length} channels (${realEpgCount} real EPG, ${syntheticCount} filler) — ` +
-        `${(raw.length / 1e6).toFixed(1)}MB, ${(cache.gzipped.length / 1e6).toFixed(1)}MB gzipped, ${Date.now() - t0}ms`);
+        `${(raw.length / 1e6).toFixed(1)}MB, ${(entry.gzipped.length / 1e6).toFixed(1)}MB gzipped, ${Date.now() - t0}ms`);
     } else {
       log.debug(TAG, 'serving cached guide');
     }
@@ -234,9 +242,9 @@ module.exports = function xmltvModule(appState) {
     res.set('Vary', 'Accept-Encoding');
     if (/\bgzip\b/i.test(req.get('Accept-Encoding') || '')) {
       res.set('Content-Encoding', 'gzip');
-      return res.send(cache.gzipped);
+      return res.send(entry.gzipped);
     }
-    res.send(cache.raw);
+    res.send(entry.raw);
   });
 
   return router;

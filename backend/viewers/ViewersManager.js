@@ -16,6 +16,7 @@ const TAG  = 'ViewersManager';
 
 const COLORS   = ['#5b8def', '#e5484d', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e93d82', '#978365'];
 const MAX_NAME = 30;
+const MAX_FORMER_NAMES = 5;   // old names kept for Xtream usernames (findByName)
 
 class ViewerError extends Error {
   constructor(status, message) {
@@ -74,7 +75,18 @@ class ViewersManager {
     return true;
   }
 
+  // Every request asks who its viewer is, so the parsed file is kept in memory
+  // and only read again when its size or modified time changes (a hand edit).
   _load() {
+    let stat;
+    try {
+      stat = fs.statSync(this._file);
+    } catch (e) {
+      if (e.code === 'ENOENT') return { defaultViewerId: null, viewers: [] };
+      return this._unreadable(e);
+    }
+    const c = this._cache;
+    if (c && c.mtimeMs === stat.mtimeMs && c.size === stat.size) return c.data;
     let raw;
     try {
       raw = JSON.parse(fs.readFileSync(this._file, 'utf8'));
@@ -85,7 +97,9 @@ class ViewersManager {
     this._warned = false;
     const viewers = Array.isArray(raw?.viewers) ? raw.viewers.filter((v) => v && typeof v.id === 'string') : [];
     const defaultViewerId = viewers.some((v) => v.id === raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
-    return { defaultViewerId, viewers };
+    const data = { defaultViewerId, viewers };
+    this._cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };
+    return data;
   }
 
   // A viewers.json that exists but can't be read or parsed (a hand edit gone
@@ -107,7 +121,10 @@ class ViewersManager {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
       fs.renameSync(tmp, this._file);
+      const stat = fs.statSync(this._file);
+      this._cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };
     } catch (e) {
+      this._cache = null;   // the change was made in memory: read the file again
       log.error(TAG, `save failed: ${e.message}`);
       throw e;
     }
@@ -127,14 +144,20 @@ class ViewersManager {
     const d = this._data();
     const v = d.viewers.find((x) => x.id === id);
     if (!v) throw new ViewerError(404, 'Viewer not found.');
-    change(v, d);
+    try {
+      change(v, d);
+    } catch (e) {
+      this._cache = null;   // a change refused halfway must not linger in memory
+      throw e;
+    }
     this._save(d);
     return v;
   }
 
   _checkName(d, name, exceptId = null) {
-    const n = String(name ?? '').trim();
+    const n = typeof name === 'string' ? name.trim() : '';
     if (!n || n.length > MAX_NAME) throw new ViewerError(400, `A name of 1–${MAX_NAME} characters is required.`);
+    if (/\p{Cc}/u.test(n)) throw new ViewerError(400, 'A name cannot contain line breaks or control characters.');
     if (d.viewers.some((v) => v.id !== exceptId && v.name.toLowerCase() === n.toLowerCase())) {
       throw new ViewerError(409, `There is already a viewer called "${n}".`);
     }
@@ -161,11 +184,18 @@ class ViewersManager {
     return d.viewers.find((v) => v.id === d.defaultViewerId);
   }
 
-  /** A viewer by name or id, ignoring case (Xtream usernames), or null. */
+  /**
+   * A viewer by name or id, ignoring case (Xtream usernames), or null. A name a
+   * viewer had before a rename still finds it, so Xtream apps set up with the
+   * old name keep working — unless another viewer now has that name.
+   */
   findByName(nameOrId) {
     const n = String(nameOrId ?? '').trim().toLowerCase();
     if (!n) return null;
-    return this._data().viewers.find((v) => v.id.toLowerCase() === n || v.name.toLowerCase() === n) || null;
+    const all = this._data().viewers;
+    return all.find((v) => v.id.toLowerCase() === n || v.name.toLowerCase() === n)
+      || all.find((v) => (v.formerNames ?? []).some((f) => f.toLowerCase() === n))
+      || null;
   }
 
   create({ name, color } = {}) {
@@ -178,7 +208,13 @@ class ViewersManager {
 
   update(id, { name, color } = {}) {
     return this._mutate(id, (v, d) => {
-      if (name !== undefined) v.name = this._checkName(d, name, id);
+      if (name !== undefined) {
+        const next = this._checkName(d, name, id);
+        if (next.toLowerCase() !== v.name.toLowerCase()) {
+          v.formerNames = [v.name, ...(v.formerNames ?? []).filter((f) => f.toLowerCase() !== next.toLowerCase())].slice(0, MAX_FORMER_NAMES);
+        }
+        v.name = next;
+      }
       v.color = this._checkColor(color, v.color);
     });
   }

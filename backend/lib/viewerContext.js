@@ -46,6 +46,9 @@ function createViewerContext(viewers) {
     }
     const viewer = pick(req, fromPath);
     req.viewer = viewer;
+    // Whether the link itself names this viewer (/v/<id>/) — the Stremio addon's
+    // identity follows the link, so it never changes under an installed addon.
+    req.viewerInPath = !!fromPath && viewer.id === fromPath;
     // The website names its viewer in X-Viewer; one that no longer exists was
     // deleted on another device. Routes that would otherwise read or change the
     // default viewer's data in its place refuse instead (VIEWER_GONE).
