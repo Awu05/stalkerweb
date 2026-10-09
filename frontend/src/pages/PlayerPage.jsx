@@ -18,6 +18,7 @@ import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
+import { jumpTarget, resumePosition, rangesOf } from '@/lib/stallRecovery'
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -492,6 +493,10 @@ export default function PlayerPage() {
   const reconnectAttempts = useRef(0)
   const MAX_RECONNECT_ATTEMPTS = 8
   const recoveringRef     = useRef(false)
+  // The HLS segment on screen ({ sn, start }), and where a reconnect should
+  // rejoin ({ channel, sn, offset }) — so it carries on rather than rewinding.
+  const playingFragRef    = useRef(null)
+  const resumeRef         = useRef(null)
 
   const [rawData, setRawData]         = useState(null)
   const [channels, setChannels]       = useState([])
@@ -641,6 +646,8 @@ export default function PlayerPage() {
     retryCount.current = 0
     reconnectAttempts.current = 0
     recoveringRef.current = false
+    playingFragRef.current = null
+    resumeRef.current = null
     const token = ++loadTokenRef.current
     loadStreamRef.current(activeChannel.uniqueId, false, token)
   }, [activeChannel?.uniqueId])
@@ -663,6 +670,13 @@ export default function PlayerPage() {
     }
     recoveringRef.current = true
     reconnectAttempts.current++
+    // Rejoin at the spot that was playing: a fresh player otherwise starts a few
+    // segments back from the newest, replaying what was just watched.
+    const frag = playingFragRef.current
+    const t = videoRef.current?.currentTime
+    resumeRef.current = frag && Number.isFinite(t)
+      ? { channel: activeChannelRef.current?.uniqueId, sn: frag.sn, offset: t - frag.start }
+      : null
     const delay = Math.min(1500 * 2 ** (reconnectAttempts.current - 1), 15000)
     setStatus('loading')
     setErrorMsg('Connection lost — reconnecting…')
@@ -767,8 +781,30 @@ export default function PlayerPage() {
 
     const playHls = (src) => {
       if (Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
+        // After a reconnect on the same channel, start loading at the spot that
+        // was playing (resumeRef, set by recoverStream) instead of the default.
+        const resume = resumeRef.current?.channel === activeChannelRef.current?.uniqueId ? resumeRef.current : null
+        resumeRef.current = null
+        playingFragRef.current = null
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true, autoStartLoad: !resume })
         hlsRef.current = hls
+        if (resume) {
+          // A media playlist arrives with the manifest, so its segments are
+          // known before loading starts. A multivariant one only loads its media
+          // playlist once loading has started — start at the default, then move.
+          let started = false
+          hls.once(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+            if (!data.levels?.[0]?.details) { started = true; hls.startLoad(-1) }
+          })
+          hls.once(Hls.Events.LEVEL_LOADED, (_e, data) => {
+            const pos = resumePosition(data.details?.fragments ?? [], resume)
+            if (pos !== null) hls.startLoad(pos)
+            else if (!started) hls.startLoad(-1)
+          })
+        }
+        hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+          playingFragRef.current = { sn: data.frag.sn, start: data.frag.start }
+        })
         hls.loadSource(src)
         hls.attachMedia(video)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -851,22 +887,36 @@ export default function PlayerPage() {
 
   // Stall watchdog: a frozen live stream frequently emits no error at all (the
   // MSE buffer just stops, or the upstream silently closes). If the playback
-  // clock stops advancing while we believe we're playing, reconnect.
+  // clock stops advancing while we believe we're playing, reconnect. First,
+  // though, try jumping over a hole in the loaded video — where a source
+  // restarts, the player often freezes in front of one with more video already
+  // loaded past it (lib/stallRecovery.js), and a jump avoids a reconnect.
   useEffect(() => {
     if (status !== 'playing') return
     const video = videoRef.current
     if (!video) return
     let lastTime = video.currentTime
     let lastAdvance = Date.now()
+    let jumped = false
     const id = setInterval(() => {
       if (document.hidden || video.paused || recoveringRef.current) {
-        lastTime = video.currentTime; lastAdvance = Date.now(); return
+        lastTime = video.currentTime; lastAdvance = Date.now(); jumped = false; return
       }
       if (video.currentTime > lastTime + 0.25) {
-        lastTime = video.currentTime; lastAdvance = Date.now(); return
+        lastTime = video.currentTime; lastAdvance = Date.now(); jumped = false; return
       }
-      if (Date.now() - lastAdvance > 12000) recoverStream()
-    }, 4000)
+      const frozenFor = Date.now() - lastAdvance
+      if (!jumped && frozenFor >= 3000) {
+        jumped = true
+        const to = jumpTarget(rangesOf(video.buffered), video.currentTime)
+        if (to !== null) {
+          console.info(`[player] frozen at ${video.currentTime.toFixed(2)}s — jumping to ${to.toFixed(2)}s`)
+          video.currentTime = to
+          return
+        }
+      }
+      if (frozenFor > 12000) recoverStream()
+    }, 2000)
     return () => clearInterval(id)
   }, [status, recoverStream])
 
