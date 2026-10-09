@@ -20,6 +20,7 @@ const MAX_NAME = 30;
 class ViewerError extends Error {
   constructor(status, message) {
     super(message);
+    this.name = 'ViewerError';
     this.status = status;
   }
 }
