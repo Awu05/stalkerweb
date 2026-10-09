@@ -418,8 +418,8 @@ export default function FavoritesView({ query = '', onRemoved }) {
   return (
     <div className="flex flex-col gap-8">
       {empty && (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-          <Heart size={40} className="text-[var(--color-muted)]" />
+        <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
+          <Heart size={28} className="text-[var(--color-muted)]" />
           <p className="text-sm text-[var(--color-muted)]">No favorites yet.</p>
           <p className="text-xs text-[var(--color-muted)]">Use the heart on any channel to add it here.</p>
         </div>

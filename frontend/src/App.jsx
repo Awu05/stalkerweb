@@ -461,8 +461,8 @@ function AppInner() {
                 </RequireAuth>
               }
             />
-            {/* Favorites live on the Channels page now (its Favorites pill). */}
-            <Route path="/favorites" element={<Navigate to="/channels?view=favorites" replace />} />
+            {/* Favorites live on the Channels page now (its Favorites section). */}
+            <Route path="/favorites" element={<Navigate to="/channels" replace />} />
             <Route
               path="/guide"
               element={
