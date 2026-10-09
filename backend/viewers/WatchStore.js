@@ -6,6 +6,9 @@
 //   history:  the last titles played, a show once with the episode played last,
 //             finished ones included — the VOD page's "Recently watched" row
 //   watched:  ids of titles finished, for the "Not watched" filter
+//   list:     My List — titles saved to watch later, newest first; each moves
+//             to Completed (completedAt) when finished: a movie at its end, a
+//             show at its last episode — or by hand
 // Ids are the portal's own, meaningless on another portal — hence per portal.
 
 const fs   = require('fs');
@@ -19,8 +22,15 @@ const DONE_FRACTION   = 0.95;  // more is finished
 const PROGRESS_MAX = 50;
 const HISTORY_MAX  = 20;
 const WATCHED_MAX  = 2000;
+const LIST_MAX     = 500;
 
-const empty = () => ({ progress: [], history: [], watched: [] });
+// What My List keeps of a title: enough to show its tile, filter it and play
+// it, without asking the portal again.
+const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'genres', 'rating', 'added', 'durationMin',
+  'screenshotUrl', 'cmd', 'description', 'director', 'actors'];
+const listItem = (item) => Object.fromEntries(LIST_FIELDS.filter((k) => item[k] !== undefined).map((k) => [k, item[k]]));
+
+const empty = () => ({ progress: [], history: [], watched: [], list: [] });
 const titleIdOf = (key) => String(key).split(':')[0];
 
 class WatchStore {
@@ -58,7 +68,7 @@ class WatchStore {
       d[viewerId][p] = empty();
     }
     const b = d[viewerId][p];
-    for (const k of ['progress', 'history', 'watched']) if (!Array.isArray(b[k])) b[k] = [];
+    for (const k of ['progress', 'history', 'watched', 'list']) if (!Array.isArray(b[k])) b[k] = [];
     return b;
   }
 
@@ -88,6 +98,42 @@ class WatchStore {
       b.history = [{ id, key, ...info, position, duration, finished, updatedAt }, ...b.history.filter((e) => e.id !== id)].slice(0, HISTORY_MAX);
     }
     if (finished) b.watched = [id, ...b.watched.filter((x) => x !== id)].slice(0, WATCHED_MAX);
+
+    // My List: a movie is done at its end; a show at its last episode (the
+    // player says so — it knows the show's seasons).
+    const done = finished && (!key.includes(':') || entry.lastEpisode === true);
+    const saved = b.list.find((e) => e.id === id);
+    if (done && saved && !saved.completedAt) saved.completedAt = updatedAt;
+  }
+
+  /** A title onto My List (once; already there, it stays where it is). */
+  addToList(viewerId, portal, item) {
+    if (!item?.id) return this.get(viewerId, portal);
+    const d = this._load();
+    const b = this._bucket(d, viewerId, portal, true);
+    const id = String(item.id);
+    if (!b.list.some((e) => e.id === id)) {
+      b.list = [{ id, item: { ...listItem(item), id }, addedAt: Date.now(), completedAt: null }, ...b.list].slice(0, LIST_MAX);
+      this._save(d);
+    }
+    return b;
+  }
+
+  removeFromList(viewerId, portal, id) {
+    const d = this._load();
+    const b = this._bucket(d, viewerId, portal, true);
+    b.list = b.list.filter((e) => e.id !== String(id));
+    this._save(d);
+    return b;
+  }
+
+  /** Moved to Completed, or back to To watch. */
+  setListCompleted(viewerId, portal, id, completed) {
+    const d = this._load();
+    const b = this._bucket(d, viewerId, portal, true);
+    const e = b.list.find((x) => x.id === String(id));
+    if (e) { e.completedAt = completed ? Date.now() : null; this._save(d); }
+    return b;
   }
 
   /**

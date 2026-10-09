@@ -237,6 +237,9 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   //   PUT    /api/vod/watch              — a position reached { key, title, … }
   //   DELETE /api/vod/watch/history/:id  — a title out of Recently watched
   //   DELETE /api/vod/watch/history      — Recently watched cleared
+  //   PUT    /api/vod/watch/list         — a title onto My List { id, name, … }
+  //   DELETE /api/vod/watch/list/:id     — a title off My List
+  //   PUT    /api/vod/watch/list/:id/completed — { completed } To watch ⇄ Completed
   const portalOf = () => appState.client?.getBasePath?.() || '';
   const watchAnswer = (fn) => (req, res) => {
     if (!watchStore) return res.json({ progress: [], history: [], watched: [] });
@@ -252,6 +255,9 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   router.put('/watch', watchAnswer((req) => watchStore.record(req.viewer.id, portalOf(), req.body ?? {})));
   router.delete('/watch/history/:id', watchAnswer((req) => watchStore.removeTitle(req.viewer.id, portalOf(), req.params.id)));
   router.delete('/watch/history', watchAnswer((req) => watchStore.clearHistory(req.viewer.id, portalOf())));
+  router.put('/watch/list', watchAnswer((req) => watchStore.addToList(req.viewer.id, portalOf(), req.body ?? {})));
+  router.delete('/watch/list/:id', watchAnswer((req) => watchStore.removeFromList(req.viewer.id, portalOf(), req.params.id)));
+  router.put('/watch/list/:id/completed', watchAnswer((req) => watchStore.setListCompleted(req.viewer.id, portalOf(), req.params.id, req.body?.completed === true)));
 
   return router;
 };
