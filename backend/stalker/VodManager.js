@@ -7,6 +7,20 @@
 const log = require('../logger');
 const TAG = 'VodManager';
 
+// Seasons and episodes from the first, whatever order the portal lists them in
+// (many list the newest first): by number, then — for any without one — by
+// name, counting digits as numbers ("Episode 3" before "Episode 11").
+function firstToLast(numberField) {
+  const num = (x) => { const n = parseInt(x[numberField], 10); return Number.isFinite(n) ? n : null; };
+  return (a, b) => {
+    const na = num(a), nb = num(b);
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null) return -1;
+    if (nb !== null) return 1;
+    return String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
+  };
+}
+
 // Resolved VOD links carry a long-lived token (valid for the whole movie), but
 // resolution is slow/fragile on some portals (multiple round-trips, occasional
 // timeouts). Cache the resolved URL briefly so player reloads/seeks/recovery
@@ -254,7 +268,7 @@ class VodManager {
       name:          s.season_name || s.name || s.o_name || `Season ${s.season_number || s.id}`,
       seasonNumber:  s.season_number != null ? String(s.season_number) : '',
       screenshotUri: s.screenshot_uri || s.screenshot || null,
-    }));
+    })).sort(firstToLast('seasonNumber'));
   }
 
   async getEpisodes(showId, seasonId) {
@@ -273,7 +287,7 @@ class VodManager {
       seriesNumber:  e.series_number != null ? String(e.series_number) : '',
       name:          e.series_name || e.name || `Episode ${e.series_number || e.id}`,
       screenshotUri: e.screenshot_uri || e.screenshot || null,
-    }));
+    })).sort(firstToLast('seriesNumber'));
   }
 
   // Resolve a specific episode's concrete file record (id + direct url) via the
