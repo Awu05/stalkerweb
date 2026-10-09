@@ -54,7 +54,7 @@ module.exports = function vodRoutes(appState, config) {
 
   // GET /api/vod/categories?type=vod|series
   //
-  // Filtered by the active profile's hidden languages. Done here rather than in
+  // Filtered by the current viewer's hidden languages. Done here rather than in
   // each client because every client would otherwise need the same mapping, and
   // because the portal's own catch-all category has to be dropped alongside it
   // (see below) — a decision better made once.
@@ -63,7 +63,7 @@ module.exports = function vodRoutes(appState, config) {
     const type = req.query.type === 'series' ? 'series' : 'vod';
     const categories = await vodManager.getCategories(type);
 
-    const hidden = appState.profilesManager?.activeDisabledLanguages() ?? new Set();
+    const hidden = appState.getHiddenLanguages?.() ?? new Set();
     if (hidden.size === 0) return res.json({ categories });
 
     // VOD items carry no category, so items fetched through the portal's "All"
