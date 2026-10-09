@@ -68,6 +68,10 @@ export default function VodPlayerPage() {
   const [volume, setVolume]           = useState(80)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration]       = useState(0)
+  // Where the seek bar is being dragged to (percent), or null. The video only
+  // seeks when the drag ends: one seek, not one per pixel moved, and the
+  // playing position can't pull the handle back mid-drag.
+  const [scrubPct, setScrubPct]       = useState(null)
   const [showControls, setShowControls] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP]               = useState(false)
@@ -363,10 +367,13 @@ export default function VodPlayerPage() {
 
   function seek(pct) {
     const v = videoRef.current; if (!v || !duration) return
-    v.currentTime = (pct / 100) * duration
+    const t = (pct / 100) * duration
+    v.currentTime = t
+    setCurrentTime(t)   // the handle stays where it was dropped while the video catches up
   }
 
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
+  const shownTime = scrubPct != null ? (scrubPct / 100) * duration : currentTime
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem)] bg-black">
@@ -478,15 +485,19 @@ export default function VodPlayerPage() {
           {/* Seek bar */}
           {duration > 0 && (
             <div className="px-4 pb-1" onClick={e => e.stopPropagation()}>
+              {/* py-2.5: a taller target than the 4px track, so a click just
+                  off it seeks instead of landing on the video and pausing. */}
               <Slider
                 min={0} max={100} step={0.1}
-                value={[progressPct]}
-                onValueChange={([v]) => seek(v)}
-                className="w-full"
+                value={[scrubPct ?? progressPct]}
+                onValueChange={([v]) => setScrubPct(v)}
+                onValueCommit={([v]) => { seek(v); setScrubPct(null) }}
+                aria-label="Seek"
+                className="w-full py-2.5 cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] text-white/50 mt-0.5">
-                <span>{formatTime(currentTime)}</span>
-                <span>-{formatTime(duration - currentTime)}</span>
+              <div className="flex justify-between text-[10px] text-white/50">
+                <span>{formatTime(shownTime)}</span>
+                <span>-{formatTime(duration - shownTime)}</span>
               </div>
             </div>
           )}
