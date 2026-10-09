@@ -12,6 +12,8 @@ const config = {
   httpsKey: process.env.HTTPS_KEY || '',
   // Optional access key (see lib/access.js). Unset = no login, as before.
   accessKey: (process.env.ACCESS_KEY || '').trim(),
+  // Live delay buffer default, seconds (0 = off); Settings can override.
+  liveBufferSeconds: Math.max(0, Math.min(120, parseInt(process.env.LIVE_BUFFER_SECONDS || '0', 10) || 0)),
 };
 
 config.cacheDir = path.join(config.dataDir, 'cache');

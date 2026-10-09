@@ -509,6 +509,11 @@ export default function SetupPage() {
   const [httpsPort, setHttpsPort]       = useState(null)  // HTTPS_PORT, for the Stremio link
   const [shareToken, setShareToken]     = useState(null)  // with ACCESS_KEY: the playback token for the links
   const [idleSaving, setIdleSaving]     = useState(false)
+  // Live delay buffer, seconds (0 = off). bufferSaved is what the server has.
+  const [bufferSeconds, setBufferSeconds] = useState('0')
+  const [bufferSaved, setBufferSaved]     = useState(null)
+  const [bufferSaving, setBufferSaving]   = useState(false)
+  const [bufferNotice, setBufferNotice]   = useState(null)
   const [idleNotice, setIdleNotice]     = useState(null)
   const [logoStats, setLogoStats]   = useState(null)
   const [logoOverrides, setLogoOverrides] = useState({})
@@ -586,6 +591,10 @@ export default function SetupPage() {
         setDownloadDir(s.download_dir || '')
         if (s.idle_timeout_default != null) setIdleDefault(s.idle_timeout_default)
         setHttpsPort(s.https_port || null)
+        if (s.live_buffer_seconds != null) {
+          setBufferSaved(s.live_buffer_seconds)
+          setBufferSeconds(String(s.live_buffer_seconds))
+        }
         setShareToken(s.access_share_token || null)
         if (s.idle_timeout_minutes != null) {
           setIdleSaved(s.idle_timeout_minutes)
@@ -846,6 +855,24 @@ export default function SetupPage() {
       setTimeout(() => setIdleNotice(null), 2500)
     }
   }
+  async function saveLiveBuffer(seconds) {
+    setBufferSaving(true)
+    setBufferNotice(null)
+    try {
+      await saveSettings({ live_buffer_seconds: seconds })
+      setBufferSaved(seconds)
+      setBufferSeconds(String(seconds))
+      setBufferNotice({ type: 'success', msg: seconds ? 'Saved — applies to channels started from now on.' : 'Live buffer turned off.' })
+    } catch (err) {
+      setBufferNotice({ type: 'error', msg: err.message })
+    } finally {
+      setBufferSaving(false)
+      setTimeout(() => setBufferNotice(null), 3000)
+    }
+  }
+  const bufferParsed = parseInt(bufferSeconds, 10)
+  const bufferValid  = /^\d+$/.test(bufferSeconds.trim()) && bufferParsed >= 0 && bufferParsed <= 120
+
   function handleIdleNeverToggle(never) {
     setIdleNever(never)
     const minutes = never ? 0 : parseInt(idleMinutes, 10)
@@ -1198,6 +1225,57 @@ export default function SetupPage() {
             {idleNotice && (
               <p className={cn('text-xs mt-1', idleNotice.type === 'error' ? 'text-[var(--color-live)]' : 'text-[var(--color-success)]')}>
                 {idleNotice.msg}
+              </p>
+            )}
+          </div>
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">Live Buffer</p>
+                <p className="text-xs text-[var(--color-muted)] mt-0.5">
+                  Keeps live channels this many seconds behind live and downloads ahead, so short stalls and restarts at the source play through instead of pausing. Uses memory while a channel plays (about 100 MB for 30 s of 4K). 0 turns it off.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 pl-4">
+                <span className="text-xs text-[var(--color-muted)]">On</span>
+                <Switch
+                  checked={(bufferSaved ?? 0) > 0}
+                  onCheckedChange={on => saveLiveBuffer(on ? (bufferParsed > 0 ? bufferParsed : 30) : 0)}
+                  disabled={bufferSaving}
+                />
+              </div>
+            </div>
+            {(bufferSaved ?? 0) > 0 && (
+              <div className="flex items-center gap-2 mt-3">
+                <Input
+                  id="live-buffer"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={120}
+                  value={bufferSeconds}
+                  onChange={e => setBufferSeconds(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && bufferValid && bufferParsed !== bufferSaved) saveLiveBuffer(bufferParsed) }}
+                  aria-label="Live buffer in seconds"
+                  className="w-28"
+                />
+                <span className="text-sm text-[var(--color-muted)]">seconds</span>
+                <Button
+                  type="button"
+                  onClick={() => saveLiveBuffer(bufferParsed)}
+                  disabled={bufferSaving || !bufferValid || bufferParsed === bufferSaved}
+                  className="shrink-0 h-9 px-3 text-xs ml-auto"
+                >
+                  {bufferSaving ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            )}
+            {bufferSeconds.trim() !== '' && !bufferValid && (
+              <p className="text-xs mt-1 text-[var(--color-live)]">Enter a whole number from 0 to 120.</p>
+            )}
+            {bufferNotice && (
+              <p className={cn('text-xs mt-1', bufferNotice.type === 'error' ? 'text-[var(--color-live)]' : 'text-[var(--color-success)]')}>
+                {bufferNotice.msg}
               </p>
             )}
           </div>

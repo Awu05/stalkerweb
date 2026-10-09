@@ -95,6 +95,28 @@ side by side on the same device.
 **Phone and tablet only:** Google Cast and picture-in-picture.
 **TV only:** leanback launcher entry, D-pad focus handling and overscan-safe padding.
 
+## Live buffer
+
+Some providers' live streams stall or restart every minute or so: the
+playlist stops for a few seconds, or the source resends the last 10–20
+seconds and then races to catch up. Players show that as pauses or skips.
+
+**Settings → App Preferences → Live Buffer** (or `LIVE_BUFFER_SECONDS`)
+keeps live channels that many seconds behind live. While a channel plays,
+StalkerWeb downloads each segment as soon as the source lists it and hands
+them to players at normal speed, so a stall shorter than the buffer plays
+through, and a burst after it refills the buffer instead of making players
+jump ahead.
+
+- 30 seconds suits most sources; up to 120.
+- It uses memory while a channel plays: about 100 MB for 30 seconds of 4K.
+- Live TV is that much behind live, and a channel starts on the oldest part
+  of the source's window.
+- Off (0) by default. Encrypted and fMP4 streams aren't buffered.
+
+Look for `live-buffer` in the logs: `buffer ran dry` means a stall was
+longer than the buffer.
+
 ## Access key
 
 Without an access key, anyone who can reach StalkerWeb can use it: watch on

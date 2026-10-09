@@ -96,6 +96,9 @@ appState.getExportFilter = () => buildExportFilter({
   showAdult: exportSettingsCache.load()?.show_adult === true,
 });
 appState.getShowAdult = () => exportSettingsCache.load()?.show_adult === true;
+// Live delay buffer (routes/proxy.js, lib/liveBuffer.js): seconds held ahead of
+// players on live channels, 0 = off. Saved in Settings, else LIVE_BUFFER_SECONDS.
+appState.getLiveBufferSeconds = () => exportSettingsCache.load()?.live_buffer_seconds ?? config.liveBufferSeconds;
 
 const { authRoutes, connectPortal } = require('./routes/auth')(appState, config);
 
