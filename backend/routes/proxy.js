@@ -851,6 +851,9 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       res.set('Access-Control-Allow-Origin', '*');
       if (response.headers['content-range'])  res.set('Content-Range', response.headers['content-range']);
       if (response.headers['content-length']) res.set('Content-Length', response.headers['content-length']);
+      // Tells the browser it may ask for any byte range — without it some
+      // treat the file as unseekable and a seek just stalls.
+      if (response.headers['accept-ranges'] || response.headers['content-range']) res.set('Accept-Ranges', 'bytes');
       res.write(firstChunk);
       response.data.resume();
       response.data.on('error', err => { log.error(TAG, `VOD proxy: pipe error: ${err.message}`); res.destroy(); });
