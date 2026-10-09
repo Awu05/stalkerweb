@@ -21,8 +21,9 @@ describe('applyVodFilters', () => {
   it('filters by genre, decade, rating, recently added and HD — together', () => {
     const f = (x) => ids(applyVodFilters(items, { ...NO_FILTERS, ...x }, { now }))
     expect(f({ genre: 'Drama' })).toEqual(['1', '2'])
-    expect(f({ decade: '2000s' })).toEqual(['1'])
-    expect(f({ decade: 'Older' })).toEqual(['3'])
+    expect(f({ year: '2000s' })).toEqual(['1'])
+    expect(f({ year: 'Older' })).toEqual(['3'])
+    expect(f({ year: '2016' })).toEqual(['2'])
     expect(f({ minRating: 7.8 })).toEqual(['2', '3'])
     expect(f({ addedDays: 7 })).toEqual(['1', '3'])
     expect(f({ hd: true })).toEqual(['1', '3'])
@@ -46,7 +47,7 @@ describe('filterOptions', () => {
   it('offers what the titles have', () => {
     expect(filterOptions(items)).toEqual({
       genres: ['Crime', 'Drama', 'Horror', 'Sci-Fi'],
-      decades: ['2020s', '2010s', '2000s', 'Older'],
+      years: ['2021', '2016', '2007', '1979'],   // few years: each one
       hasRating: true,
       hasHD: true,
     })
@@ -63,5 +64,25 @@ describe('decadeOf', () => {
     expect(decadeOf('1985')).toBe('1980s')
     expect(decadeOf('1979')).toBe('Older')
     expect(decadeOf('')).toBe(null)
+  })
+})
+
+describe('year choices', () => {
+  const years = (...ys) => ys.map((y, i) => t(String(i), { year: String(y) }))
+
+  it('lists each year when there are only a few — a category of new releases', () => {
+    expect(filterOptions(years(2026, 2025, 2026, 2024)).years).toEqual(['2026', '2025', '2024'])
+  })
+
+  it('lists decades when the years are many', () => {
+    const many = years(...Array.from({ length: 30 }, (_, i) => 1990 + i))
+    expect(filterOptions(many).years).toEqual(['2010s', '2000s', '1990s'])
+  })
+
+  it('filters by a single year, or by a decade', () => {
+    const list = years(2026, 2025, 2016)
+    expect(ids(applyVodFilters(list, { ...NO_FILTERS, year: '2025' }, { now }))).toEqual(['1'])
+    expect(ids(applyVodFilters(list, { ...NO_FILTERS, year: '2020s' }, { now }))).toEqual(['0', '1'])
+    expect(ids(applyVodFilters(list, { ...NO_FILTERS, year: 'Older' }, { now }))).toEqual([])
   })
 })
