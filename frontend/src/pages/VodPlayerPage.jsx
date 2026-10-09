@@ -4,10 +4,13 @@ import Hls from 'hls.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   ChevronLeft, AlertCircle, Loader2, Clock, Calendar, X, PictureInPicture2,
+  SkipBack, SkipForward, ListVideo,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { getVodStreamUrl } from '../stalkerApi'
+import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import EpisodePanel from '@/components/EpisodePanel'
+import { episodeNeighbours } from '@/lib/episodeNav'
 import {
   makeVodKey, getVodProgress, saveVodProgress,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
@@ -28,7 +31,8 @@ export default function VodPlayerPage() {
   const navigate        = useNavigate()
   const location        = useLocation()
   // Back to where the player was opened from; opened directly, to VOD.
-  const goBack = () => (location.key === 'default' ? navigate('/vod') : navigate(-1))
+  const openedDirectly = location.key === 'default' || location.state?.direct === true
+  const goBack = () => (openedDirectly ? navigate('/vod') : navigate(-1))
 
   const videoId      = searchParams.get('videoId') || ''
   const cmd          = searchParams.get('cmd') || ''
@@ -58,6 +62,73 @@ export default function VodPlayerPage() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP]               = useState(false)
   const [resumedFrom, setResumedFrom] = useState(0) // >0 → show "resumed" banner
+
+  // ── A show's episodes: the list, next / previous, auto-play next ──────────
+  const isEpisode = !!(seasonId || episodeId)
+  const [seasons, setSeasons]           = useState(null)   // in order; null while loading
+  const [episodesBySeason, setEpisodes] = useState({})     // seasonId → episodes, in order
+  const [panelSeason, setPanelSeason]   = useState(seasonId)
+  const [episodesOpen, setEpisodesOpen] = useState(false)  // the pop-up list on narrow screens
+  const [upNext, setUpNext]             = useState(null)   // { season, episode } after the end
+  const loadingSeasons = useRef(new Set())
+
+  useEffect(() => {
+    setSeasons(null); setEpisodes({}); loadingSeasons.current = new Set()
+    if (!isEpisode || !videoId) return
+    let cancelled = false
+    getVodSeasons(videoId).then((r) => { if (!cancelled) setSeasons(r.seasons || []) }).catch(() => { if (!cancelled) setSeasons([]) })
+    return () => { cancelled = true }
+  }, [videoId, isEpisode])
+
+  const loadSeason = useCallback((id) => {
+    if (!id || loadingSeasons.current.has(id)) return
+    loadingSeasons.current.add(id)
+    getVodEpisodes(videoId, id)
+      .then((r) => setEpisodes((m) => ({ ...m, [id]: r.episodes || [] })))
+      .catch(() => { loadingSeasons.current.delete(id) })
+  }, [videoId])
+
+  useEffect(() => { setPanelSeason(seasonId) }, [seasonId])
+  useEffect(() => { if (seasons) { loadSeason(seasonId); loadSeason(panelSeason) } }, [seasons, seasonId, panelSeason, loadSeason])
+
+  const neighbours = seasons ? episodeNeighbours(seasons, episodesBySeason, seasonId, episodeId) : { prev: null, next: null, needs: [] }
+  const needsKey = neighbours.needs.join(',')
+  useEffect(() => { needsKey.split(',').filter(Boolean).forEach(loadSeason) }, [needsKey, loadSeason])
+
+  // Another episode of the same show: the player link with that episode, in
+  // place of this one in the history, so Back still leaves the show.
+  function playEpisode(season, ep) {
+    if (!season || !ep) return
+    const next = new URLSearchParams(searchParams)
+    next.set('series', String(ep.seriesNumber || '0'))
+    next.set('seasonId', String(season.id))
+    next.set('episodeId', String(ep.episodeId))
+    next.set('episodeTitle', ep.name || `Episode ${ep.seriesNumber}`)
+    setUpNext(null)
+    setEpisodesOpen(false)
+    navigate(`/vod-player?${next}`, { replace: true, state: { direct: openedDirectly } })
+  }
+  const playEpisodeRef = useRef(playEpisode)
+  useEffect(() => { playEpisodeRef.current = playEpisode })
+  const nextRef = useRef(null)
+  useEffect(() => { nextRef.current = neighbours.next })
+  const prevRef = useRef(null)
+  useEffect(() => { prevRef.current = neighbours.prev })
+  useEffect(() => { setUpNext(null) }, [seasonId, episodeId])
+
+  // N / P: next and previous episode, from a keyboard or TV remote.
+  useEffect(() => {
+    if (!isEpisode) return
+    const onKey = (e) => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return
+      const n = e.code === 'KeyN' ? nextRef.current : e.code === 'KeyP' ? prevRef.current : null
+      if (!n) return
+      e.preventDefault()
+      playEpisodeRef.current(n.season, n.episode)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isEpisode])
 
   useEffect(() => { volumeRef.current = volume }, [volume])
   useEffect(() => { mutedRef.current  = muted  }, [muted])
@@ -212,7 +283,7 @@ export default function VodPlayerPage() {
     const onDur    = () => setDuration(v.duration || 0)
     const onPlay   = () => { setPlaying(true); setStatus('playing') }
     const onPause  = () => { setPlaying(false); setStatus('paused') }
-    const onEnded  = () => { setPlaying(false); setStatus('paused') }
+    const onEnded  = () => { setPlaying(false); setStatus('paused'); if (nextRef.current) setUpNext(nextRef.current) }
     v.addEventListener('timeupdate',       onTime)
     v.addEventListener('durationchange',   onDur)
     v.addEventListener('play',             onPlay)
@@ -366,6 +437,23 @@ export default function VodPlayerPage() {
           </div>
         )}
 
+        {upNext && (
+          <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
+        )}
+
+        {episodesOpen && (
+          <div className="lg:hidden absolute inset-0 z-40 flex items-end sm:items-center justify-center bg-black/60" onClick={() => setEpisodesOpen(false)}>
+            <div className="w-full sm:max-w-md max-h-[75%] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[var(--color-surface)] p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center mb-2">
+                <p className="text-sm font-semibold text-[var(--color-text)] truncate">{title}</p>
+                <button onClick={() => setEpisodesOpen(false)} className="ml-auto p-1 text-[var(--color-muted)] hover:text-[var(--color-text)]" aria-label="Close"><X size={16} /></button>
+              </div>
+              <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
+                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode} />
+            </div>
+          </div>
+        )}
+
         {/* Controls bar */}
         <div className={cn(
           'absolute bottom-0 inset-x-0 z-20 transition-opacity duration-300',
@@ -392,11 +480,23 @@ export default function VodPlayerPage() {
             className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent"
             onClick={e => e.stopPropagation()}
           >
+            {isEpisode && (
+              <button onClick={() => playEpisode(neighbours.prev?.season, neighbours.prev?.episode)} disabled={!neighbours.prev}
+                className="text-white/80 hover:text-white p-1 transition-colors disabled:opacity-30" aria-label="Previous episode" title="Previous episode (P)">
+                <SkipBack size={18} fill="currentColor" />
+              </button>
+            )}
             <button onClick={togglePlayPause} className="text-white/90 hover:text-white p-1 transition-colors">
               {playing
                 ? <Pause size={20} fill="currentColor" />
                 : <Play  size={20} fill="currentColor" />}
             </button>
+            {isEpisode && (
+              <button onClick={() => playEpisode(neighbours.next?.season, neighbours.next?.episode)} disabled={!neighbours.next}
+                className="text-white/80 hover:text-white p-1 transition-colors disabled:opacity-30" aria-label="Next episode" title="Next episode (N)">
+                <SkipForward size={18} fill="currentColor" />
+              </button>
+            )}
             <div className="flex items-center gap-2 group/vol">
               <button onClick={() => setMuted(m => !m)} className="text-white/90 hover:text-white p-1 transition-colors">
                 {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
@@ -407,6 +507,11 @@ export default function VodPlayerPage() {
               </div>
             </div>
             <div className="flex-1" />
+            {isEpisode && (
+              <button onClick={() => setEpisodesOpen(true)} className="lg:hidden text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors" aria-label="Episodes" title="Episodes">
+                <ListVideo size={18} />
+              </button>
+            )}
             {document.pictureInPictureEnabled && (
               <button
                 onClick={togglePiP}
@@ -467,8 +572,41 @@ export default function VodPlayerPage() {
               <p className="text-xs text-[var(--color-text)]">{decodeURIComponent(searchParams.get('actors'))}</p>
             </div>
           )}
+
+          {isEpisode && (
+            <div className="pt-3 border-t border-[var(--color-border)]">
+              <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
+                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode} />
+            </div>
+          )}
         </div>
       </aside>
+    </div>
+  )
+}
+
+// At the end of an episode: the next one plays in 10 s, unless cancelled.
+function UpNextCard({ next, onPlay, onCancel }) {
+  const [left, setLeft] = useState(10)
+  const onPlayRef = useRef(onPlay)
+  useEffect(() => { onPlayRef.current = onPlay })
+  useEffect(() => {
+    if (left <= 0) { onPlayRef.current(); return }
+    const t = setTimeout(() => setLeft((n) => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [left])
+  const name = next.episode.name || `Episode ${next.episode.seriesNumber}`
+  return (
+    <div className="absolute right-4 bottom-24 z-30 w-72 rounded-[var(--radius-md)] bg-black/85 backdrop-blur p-3 text-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <p className="text-[10px] uppercase tracking-wide text-white/60">Up next · in {left}s</p>
+      <p className="text-sm font-semibold truncate">{name}</p>
+      <p className="text-xs text-white/60 truncate">{next.season.name}</p>
+      <div className="flex gap-2 mt-2">
+        <button autoFocus onClick={onPlay} className="flex-1 flex items-center justify-center gap-1.5 rounded-[var(--radius-sm)] bg-white text-black text-xs font-semibold py-1.5">
+          <Play size={12} fill="currentColor" /> Play now
+        </button>
+        <button onClick={onCancel} className="flex-1 rounded-[var(--radius-sm)] bg-white/15 hover:bg-white/25 text-xs font-medium py-1.5">Cancel</button>
+      </div>
     </div>
   )
 }
