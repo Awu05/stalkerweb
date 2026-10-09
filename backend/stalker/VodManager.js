@@ -86,13 +86,14 @@ class VodManager {
   // is portal pages 4–6. Clients page with page+1 until page === totalPages;
   // when `page` meant the first portal page instead, each "next page" re-read
   // two pages it already had — duplicate titles and wasted portal requests.
-  async getItems({ type = 'vod', categoryId, page = 1, search = '', fav = 0, maxPages = 3 } = {}) {
+  // `sort` is the portal's own order: 'added' (newest first) or 'name' (A–Z).
+  async getItems({ type = 'vod', categoryId, page = 1, search = '', fav = 0, maxPages = 3, sort = 'added' } = {}) {
     const firstPortalPage = (page - 1) * maxPages + 1;
     const params = {
       type,
       action: 'get_ordered_list',
       category: String(categoryId),
-      sortby:   'added',
+      sortby:   sort === 'name' ? 'name' : 'added',
       fav:      String(fav),
       p:        String(firstPortalPage),
     };

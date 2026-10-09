@@ -188,8 +188,9 @@ export const getVodCategories = (type = 'vod') =>
 export const getAllVodCategories = (type = 'vod') =>
   _get(`/vod/categories?type=${type}&all=1`)
 
-export const getVodItems = ({ type = 'vod', category, page = 1, search = '', fav = 0 }) => {
-  const p = new URLSearchParams({ type, category: String(category), page: String(page) })
+// sort: 'name' (A–Z) or 'added' (newest first) — the portal's own order.
+export const getVodItems = ({ type = 'vod', category, page = 1, search = '', fav = 0, sort = 'added' }) => {
+  const p = new URLSearchParams({ type, category: String(category), page: String(page), sort })
   if (search) p.set('search', search)
   if (fav)    p.set('fav', '1')
   return _get(`/vod/items?${p}`)

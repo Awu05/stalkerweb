@@ -371,6 +371,11 @@ export default function VodPage() {
     setContinueList(list => list.filter(e => e.key !== key))
   }
 
+  // Title order: A–Z (the default) or newest first, remembered on this device.
+  // A ref too, so a change reloads with the new order straight away.
+  const [sort, setSort] = useState(() => { try { return localStorage.getItem('sw:vodSort') === 'added' ? 'added' : 'name' } catch { return 'name' } })
+  const sortRef = useRef(sort)
+
   // Load items when category / search changes
   const loadItems = useCallback(async (catId, q, page, token) => {
     if (!catId) return
@@ -378,7 +383,7 @@ export default function VodPage() {
     setItemsLoading(true)
     setItemsError('')
     try {
-      const r = await getVodItems({ type: vodType, category: catId, page, search: q })
+      const r = await getVodItems({ type: vodType, category: catId, page, search: q, sort: sortRef.current })
       if (itemsTokenRef.current !== token) return // superseded by a newer category/search change
       if (page === 1) {
         setItems(r.items)
@@ -395,6 +400,17 @@ export default function VodPage() {
       if (itemsTokenRef.current === token) { itemsLoadingRef.current = false; setItemsLoading(false) }
     }
   }, [vodType])
+
+  function changeSort(next) {
+    if (next === sort) return
+    sortRef.current = next
+    setSort(next)
+    try { localStorage.setItem('sw:vodSort', next) } catch { /* not remembered */ }
+    if (!selectedCategory) return
+    const token = ++itemsTokenRef.current
+    setItems([])
+    loadItems(selectedCategory.id, search, 1, token)
+  }
 
   const selectCategory = useCallback((cat) => {
     setSelectedCategory(cat)
@@ -605,6 +621,22 @@ export default function VodPage() {
               {totalItems > 0 ? `${totalItems.toLocaleString()} titles` : ''}
             </span>
           )}
+          <div role="group" aria-label="Sort titles" className="ml-auto flex shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] p-0.5">
+            {[['name', 'A–Z'], ['added', 'Newest']].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={sort === id}
+                onClick={() => changeSort(id)}
+                className={cn(
+                  'px-2.5 py-1 rounded-[calc(var(--radius-sm)-2px)] text-xs font-medium transition-colors',
+                  sort === id ? 'bg-[var(--color-primary)] text-[var(--color-bg)]' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Items grid */}

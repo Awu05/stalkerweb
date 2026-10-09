@@ -15,6 +15,7 @@ const express = require('express');
 const router  = express.Router();
 const sessionMiddleware = require('../middleware/session');
 const { visibleVodCategories } = require('../lib/vodCategoryFilter');
+const { vodLayout } = require('../lib/seriesCategories');
 
 const log = require('../logger');
 const TAG = 'vod';
@@ -52,16 +53,22 @@ module.exports = function vodRoutes(appState, config) {
 
   // GET /api/vod/categories?type=vod|series[&all=1]
   //
-  // Filtered by the current viewer's hidden movie & series categories (and an
-  // old hidden-languages list), dropping the portal's "All" pseudo-category
+  // Movies or Series. On a portal with no series section, the movie categories
+  // named for shows are its Series (lib/seriesCategories.js). Filtered by the
+  // current viewer's hidden movie & series categories (and an old
+  // hidden-languages list), dropping the portal's "All" pseudo-category
   // whenever anything is hidden (lib/vodCategoryFilter.js). Done here rather
   // than in each client, so every client gets the same answer. ?all=1 lists
-  // every category, for the Settings list where they are hidden.
+  // the portal's own categories as they are, for the Settings list.
   router.get('/categories', guard, async (req, res) => {
     const { vodManager } = appState;
     const type = req.query.type === 'series' ? 'series' : 'vod';
-    const categories = await vodManager.getCategories(type);
-    if (req.query.all === '1') return res.json({ categories });
+    if (req.query.all === '1') {
+      const own = await vodManager.getCategories(type).catch((e) => { if (type === 'series') return []; throw e; });
+      return res.json({ categories: own });
+    }
+    const layout = await vodLayout(vodManager);
+    const categories = type === 'series' ? layout.series : layout.movies;
     res.json({
       categories: visibleVodCategories(categories, {
         hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
@@ -70,16 +77,19 @@ module.exports = function vodRoutes(appState, config) {
     });
   });
 
-  // GET /api/vod/items?type=vod|series&category=X&page=1&search=&fav=0
+  // GET /api/vod/items?type=vod|series&category=X&page=1&search=&fav=0&sort=added|name
   router.get('/items', guard, async (req, res) => {
     const { vodManager } = appState;
     const { category, search = '', fav = '0', page = '1' } = req.query;
-    const type = req.query.type === 'series' ? 'series' : 'vod';
+    let type = req.query.type === 'series' ? 'series' : 'vod';
+    // A portal without a series section keeps its shows in the movie section.
+    if (type === 'series') type = (await vodLayout(vodManager)).seriesType;
 
     if (!category) return res.status(400).json({ error: 'category is required' });
 
     const result = await vodManager.getItems({
       type,
+      sort:       req.query.sort === 'name' ? 'name' : 'added',
       categoryId: category,
       page:       Math.max(1, parseInt(page, 10) || 1),
       search:     search.trim(),

@@ -86,6 +86,8 @@ describe('Stremio addon', () => {
     seriesRejects = false
     reconnects = 0
     channelList = channels
+    // A fresh connection each test (the real app builds a new VodManager).
+    if (appState) appState.vodManager._noSeriesUntil = 0
   })
 
   const get = async (path) => (await fetch(`${base}/stremio${path}`)).json()
@@ -96,8 +98,10 @@ describe('Stremio addon', () => {
     expect(m.version).toMatch(/^1\.2\.\d+$/)
     const genreOf = (type) => m.catalogs.find((c) => c.type === type).extra.find((e) => e.name === 'genre')
     expect(genreOf('tv').options).toEqual(['News', 'Kids & Family'])       // the hidden one is left out
-    expect(genreOf('movie').options).toEqual(['Action', 'Shows'])          // no "All"
-    expect(genreOf('series')).toMatchObject({ options: ['Action', 'Shows'], isRequired: true }) // no series section
+    // No series section: "Shows" is named for shows, so it is a series
+    // category (lib/seriesCategories.js) with a home board of its own.
+    expect(genreOf('movie').options).toEqual(['Action'])                     // no "All"
+    expect(genreOf('series')).toMatchObject({ options: ['Shows'], isRequired: false })
     expect(genreOf('movie').isRequired).toBe(false)
   })
 
