@@ -36,7 +36,7 @@ function Controls({
           <button onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
             {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
-          <div className="w-0 overflow-hidden group-hover/vol:w-20 transition-all duration-200">
+          <div className="w-0 overflow-hidden group-hover/vol:w-20 group-focus-within/vol:w-20 transition-all duration-200">
             <Slider min={0} max={100} step={1} value={[muted ? 0 : volume]} onValueChange={([v]) => onVolume(v)} className="w-20" />
           </div>
         </div>
@@ -51,7 +51,7 @@ function Controls({
         </div>
       ) : (
         <div className="flex items-center gap-1 text-xs text-white/50 mr-2 hidden sm:block">
-          Space·F·M·P·↑↓·0-9
+          OK·F·M·P·↑↓·←→·0-9
         </div>
       )}
       <div className="flex items-center gap-1">
@@ -153,7 +153,7 @@ function EpgProgress({ epg }) {
 }
 
 // ── Channel list panel ────────────────────────────────────────────────────
-function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext, onSelect, onToggleFavorite }) {
+function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext, onSelect, onToggleFavorite, focusRequest = 0, onLeave }) {
   const [query, setQuery]         = useState('')
   const [activeGroup, setGroup]   = useState('')
   const [favsOnly, setFavsOnly]   = useState(false)
@@ -186,6 +186,43 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
       el.scrollTo({ top: itemTop - el.clientHeight / 2 + ROW_H / 2, behavior: 'smooth' })
     }
   }, [activeId])
+
+  // Moves the highlight to row `idx` (virtualized: scroll it in, then focus it).
+  function focusRow(idx) {
+    const el = scrollRef.current
+    if (!el || idx < 0 || idx >= filteredRef.current.length) return
+    const top = idx * ROW_H
+    if (top < el.scrollTop || top + ROW_H > el.scrollTop + el.clientHeight) {
+      el.scrollTop = top - el.clientHeight / 2 + ROW_H / 2
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.querySelector(`[data-row="${idx}"]`)?.focus({ preventScroll: true })
+    }))
+  }
+
+  // The player asks for the highlight (→ on a remote): put it on the playing channel.
+  useEffect(() => {
+    if (!focusRequest) return
+    const idx = filteredRef.current.findIndex(ch => String(ch.uniqueId) === String(activeId))
+    focusRow(Math.max(0, idx))
+  }, [focusRequest]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ↑/↓ move the highlight through the rows instead of changing channel;
+  // ← leaves the list. OK on a row plays it (it's a button).
+  function onRowsKeyDown(e) {
+    const row = e.target.closest?.('[data-row]')
+    if (!row) return
+    const idx = Number(row.dataset.row)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopPropagation()
+      focusRow(idx + (e.key === 'ArrowDown' ? 1 : -1))
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      e.stopPropagation()
+      onLeave?.()
+    }
+  }
 
   function selectGroup(id) {
     setGroup(id)
@@ -249,7 +286,7 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
       {/* overflow-anchor:none — stop the browser's scroll anchoring from fighting
           virtualization (rows mount/unmount as we scroll), which otherwise sends
           scrollTop into an oscillation when auto-scrolling to the active channel. */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto [overflow-anchor:none]">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto [overflow-anchor:none]" onKeyDown={onRowsKeyDown}>
         {filtered.length === 0 ? (
           <p className="px-3 py-4 text-xs text-[var(--color-muted)] text-center">
             {favsOnly ? 'No favorites in this view.' : 'No channels found.'}
@@ -257,7 +294,8 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
         ) : (
           <div style={{ height: totalHeight, position: 'relative' }}>
             <div style={{ transform: `translateY(${offsetY}px)` }}>
-              {visibleItems.map(ch => {
+              {visibleItems.map((ch, i) => {
+                const rowIndex = Math.round(offsetY / ROW_H) + i
                 const isFav   = favoriteIds.has(String(ch.uniqueId))
                 const epg     = nowNext?.[String(ch.uniqueId)]
                 const isActive = String(ch.uniqueId) === String(activeId)
@@ -282,7 +320,7 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
                         {ch.number}
                       </span>
                     )}
-                    <button className="flex items-center gap-2 flex-1 text-left min-w-0 h-full" onClick={() => onSelect(ch)}>
+                    <button data-row={rowIndex} className="flex items-center gap-2 flex-1 text-left min-w-0 h-full rounded-[var(--radius-sm)]" onClick={() => onSelect(ch)}>
                       <ChannelLogo src={logoMap[String(ch.uniqueId)] || getProxiedLogoUrl(ch.iconPath)} name={ch.name} size="xs" />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs truncate leading-tight">{ch.name}</p>
@@ -294,7 +332,7 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
                     </button>
                     <button
                       onClick={() => onToggleFavorite(ch)}
-                      className={cn('shrink-0 p-0.5 rounded transition-colors', isFav ? 'text-rose-500' : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 hover:text-rose-400')}
+                      className={cn('shrink-0 p-0.5 rounded transition-colors', isFav ? 'text-rose-500' : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100 hover:text-rose-400')}
                     >
                       <Heart size={12} fill={isFav ? 'currentColor' : 'none'} />
                     </button>
@@ -326,6 +364,24 @@ function savePlayerPrefs(patch) {
   } catch { /* storage full or blocked */ }
 }
 
+// Phone-width screens: the channel list goes over the video instead of beside it.
+const NARROW = '(max-width: 767px)'
+const isNarrowNow = () => typeof window !== 'undefined' && !!window.matchMedia?.(NARROW).matches
+function useNarrow() {
+  const [narrow, setNarrow] = useState(isNarrowNow)
+  useEffect(() => {
+    const m = window.matchMedia?.(NARROW)
+    if (!m) return
+    const onChange = (e) => setNarrow(e.matches)
+    m.addEventListener('change', onChange)
+    return () => m.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
+
+// Remote "back" keys: Backspace, and the Back key of LG (webOS) and Samsung (Tizen) TVs.
+const isBackKey = (e) => e.key === 'Backspace' || e.key === 'GoBack' || e.key === 'XF86Back' || e.keyCode === 461 || e.keyCode === 10009
+
 // ── Player page ───────────────────────────────────────────────────────────
 export default function PlayerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -335,6 +391,8 @@ export default function PlayerPage() {
   // the history entry (selectChannel), so one step back is always that page;
   // opened directly (a bookmark, a reload), there is none — go to Channels.
   const goBack = () => (location.key === 'default' ? navigate('/channels') : navigate(-1))
+  const goBackRef = useRef(goBack)
+  goBackRef.current = goBack
   const initChannelId   = searchParams.get('channel')
   const initChannelName = searchParams.get('name') ? decodeURIComponent(searchParams.get('name')) : ''
 
@@ -395,7 +453,11 @@ export default function PlayerPage() {
   const [status, setStatus]         = useState('idle')
   const [errorMsg, setErrorMsg]     = useState('')
   const [showControls, setShowControls] = useState(true)
-  const [showList, setShowList]     = useState(prefs.showList ?? true)
+  const narrow = useNarrow()
+  // Starts closed on a phone, where it covers the video; elsewhere as last left.
+  const [showList, setShowList]     = useState(() => (isNarrowNow() ? false : (prefs.showList ?? true)))
+  const [listFocus, setListFocus]   = useState(0)   // bump to put the highlight in the list
+  const lastPointer = useRef('mouse')
   const [playing, setPlaying]       = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP]           = useState(false)
@@ -415,7 +477,7 @@ export default function PlayerPage() {
   useEffect(() => { volumeRef.current = volume; savePlayerPrefs({ volume }) }, [volume])
 
   // Persist sidebar visibility
-  useEffect(() => { savePlayerPrefs({ showList }) }, [showList])
+  useEffect(() => { if (!isNarrowNow()) savePlayerPrefs({ showList }) }, [showList])
 
   // Fetch now/next EPG and refresh it periodically so the sidebar's "now
   // playing" titles and progress bars don't freeze during a long session.
@@ -775,6 +837,31 @@ export default function PlayerPage() {
   useEffect(() => {
     function onKey(e) {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      resetHideTimer()   // a remote has no mouse: any key brings the controls up
+
+      if (isBackKey(e)) {
+        e.preventDefault()
+        goBackRef.current()
+        return
+      }
+      // OK / Enter: on a focused button it presses the button; otherwise play/pause.
+      if (e.key === 'Enter') {
+        if (e.target.closest?.('button, a, [role="button"]')) return
+        e.preventDefault()
+        togglePlayPause()
+        return
+      }
+      if (e.code === 'ArrowRight') {
+        e.preventDefault()
+        setShowList(true)
+        setListFocus(n => n + 1)
+        return
+      }
+      if (e.code === 'ArrowLeft') {
+        e.preventDefault()
+        setShowList(false)
+        return
+      }
 
       // Digit keys: channel number jump
       if (/^\d$/.test(e.key)) {
@@ -834,7 +921,7 @@ export default function PlayerPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey); clearTimeout(jumpTimer.current) }
-  }, [])
+  }, [resetHideTimer])
 
   function togglePlayPause() {
     const v = videoRef.current
@@ -879,6 +966,7 @@ export default function PlayerPage() {
   }
 
   function selectChannel(ch) {
+    if (isNarrowNow()) setShowList(false)
     setActiveChannel(ch)
     setSearchParams({ channel: ch.uniqueId, name: encodeURIComponent(ch.name) }, { replace: true })
     savePlayerPrefs({ lastChannelId: String(ch.uniqueId), lastChannelName: ch.name })
@@ -886,13 +974,20 @@ export default function PlayerPage() {
   selectChannelRef.current = selectChannel
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] bg-black">
+    <div className="relative flex h-[calc(100dvh-3.5rem)] lg:h-dvh bg-black">
       <div
         ref={containerRef}
-        className="relative flex-1 flex items-center justify-center bg-black"
-        onMouseMove={resetHideTimer}
+        tabIndex={-1}
+        className="relative flex-1 flex items-center justify-center bg-black outline-none"
+        onMouseMove={(e) => { if (lastPointer.current === 'mouse' && e.movementX + e.movementY !== 0) resetHideTimer() }}
         onMouseLeave={() => clearTimeout(hideTimer.current)}
-        onClick={togglePlayPause}
+        onPointerDown={(e) => { lastPointer.current = e.pointerType || 'mouse' }}
+        onClick={() => {
+          // On a touch screen the first tap only brings the controls up.
+          if (lastPointer.current !== 'mouse' && !showControls && status === 'playing') { resetHideTimer(); return }
+          resetHideTimer()
+          togglePlayPause()
+        }}
       >
         <video ref={videoRef} className="w-full h-full object-contain" playsInline />
 
@@ -933,7 +1028,7 @@ export default function PlayerPage() {
                   reconnectAttempts.current = 0
                   loadStream(activeChannel.uniqueId, false, ++loadTokenRef.current)
                 }}
-                className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white text-sm hover:bg-[var(--color-primary-hover)] transition-colors"
+                className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] text-sm hover:bg-[var(--color-primary-hover)] transition-colors"
               >
                 Retry
               </button>
@@ -978,16 +1073,34 @@ export default function PlayerPage() {
         </div>
       </div>
 
-      <div className={cn('transition-all duration-300 overflow-hidden shrink-0', showList ? 'w-72' : 'w-0')}>
-        {channels.length > 0 && (
-          <ChannelList
-            channels={channels} activeId={activeChannel?.uniqueId}
-            logoMap={logoMap} favoriteIds={favoriteIds}
-            groups={groups} nowNext={nowNext}
-            onSelect={selectChannel} onToggleFavorite={toggleFavorite}
-          />
-        )}
-      </div>
+      {narrow ? (
+        showList && channels.length > 0 && (
+          <>
+            <div className="absolute inset-0 z-30 bg-black/50" onClick={() => setShowList(false)} />
+            <div className="absolute inset-y-0 right-0 z-40 w-[85%] max-w-xs shadow-2xl">
+              <ChannelList
+                channels={channels} activeId={activeChannel?.uniqueId}
+                logoMap={logoMap} favoriteIds={favoriteIds}
+                groups={groups} nowNext={nowNext}
+                onSelect={selectChannel} onToggleFavorite={toggleFavorite}
+                focusRequest={listFocus} onLeave={() => { setShowList(false); containerRef.current?.focus() }}
+              />
+            </div>
+          </>
+        )
+      ) : (
+        <div className={cn('transition-all duration-300 overflow-hidden shrink-0', showList ? 'w-72' : 'w-0')}>
+          {channels.length > 0 && (
+            <ChannelList
+              channels={channels} activeId={activeChannel?.uniqueId}
+              logoMap={logoMap} favoriteIds={favoriteIds}
+              groups={groups} nowNext={nowNext}
+              onSelect={selectChannel} onToggleFavorite={toggleFavorite}
+              focusRequest={listFocus} onLeave={() => { setShowList(false); containerRef.current?.focus() }}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

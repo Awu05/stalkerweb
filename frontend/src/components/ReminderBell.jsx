@@ -91,7 +91,7 @@ export function ReminderBell({ reminders = [], onRemove }) {
           : <Bell size={16} />
         }
         {count > 0 && (
-          <span className="absolute -top-1 -right-1 flex items-center justify-center h-4 min-w-4 px-0.5 rounded-full bg-[var(--color-primary)] text-white text-[9px] font-bold leading-none">
+          <span className="absolute -top-1 -right-1 flex items-center justify-center h-4 min-w-4 px-0.5 rounded-full bg-[var(--color-primary)] text-[var(--color-bg)] text-[9px] font-bold leading-none">
             {count > 9 ? '9+' : count}
           </span>
         )}

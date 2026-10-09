@@ -185,7 +185,7 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
                 onClose()
                 navigate(`/player?channel=${channel.uniqueId}&name=${encodeURIComponent(channel.name)}`)
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-success)] text-[#0b1a14] text-sm font-semibold hover:brightness-110 transition-[filter]"
             >
               <Play size={13} /> Watch
             </button>
