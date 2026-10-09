@@ -15,6 +15,9 @@ const { visibleVodCategories } = require('../lib/vodCategoryFilter');
 const { vodLayout } = require('../lib/seriesCategories');
 const { refuseIfGone } = require('./viewers');
 
+// The Series "All" added on portals without a series section (see below).
+const SERIES_ALL = 'series:all';
+
 const log = require('../logger');
 const TAG = 'vod';
 
@@ -38,14 +41,53 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       return res.json({ categories: own });
     }
     const layout = await vodLayout(vodManager);
-    const categories = type === 'series' ? layout.series : layout.movies;
-    res.json({
-      categories: visibleVodCategories(categories, {
-        hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
-        hiddenLanguages: appState.getHiddenLanguages?.() ?? new Set(),
-      }),
-    });
+    if (type === 'series') return res.json({ categories: await seriesCategories(layout) });
+    res.json({ categories: visible(layout.movies) });
   });
+
+  const visible = (categories) => visibleVodCategories(categories, {
+    hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
+    hiddenLanguages: appState.getHiddenLanguages?.() ?? new Set(),
+  });
+
+  // The Series categories. When they were picked out of the movie section by
+  // name (lib/seriesCategories.js) the portal has no "All" of its own for them,
+  // so one is added: every show of those categories, put together
+  // (SERIES_ALL in /listing).
+  async function seriesCategories(layout) {
+    const list = visible(layout.series);
+    return layout.byName && list.length > 1 ? [{ id: SERIES_ALL, title: 'All' }, ...list] : list;
+  }
+
+  // The Series "All" above: each of the viewer's series categories read in
+  // turn (the paced, cached getAllItems), every show listed once, in the order
+  // read — append-only, so clients can ask for what's new from `from` on.
+  const SERIES_ALL_TTL_MS = 60 * 60 * 1000;
+  const combined = new Map();   // `${type}|${ids}` → { done, seen, current, complete, partial, at }
+  function combinedListing(type, ids) {
+    const key = `${type}|${ids.join(',')}`;
+    const old = combined.get(key);
+    if (old && (!old.complete || Date.now() - old.at < SERIES_ALL_TTL_MS)) return old;
+    const c = { done: [], seen: new Set(), current: null, complete: false, partial: false, at: Date.now() };
+    combined.set(key, c);
+    (async () => {
+      for (const id of ids) {
+        c.current = id;
+        try {
+          const items = await appState.vodManager.getAllItems(type, id);
+          if (appState.vodManager.peekListing?.(type, id)?.complete === false) c.partial = true;
+          for (const item of items) if (!c.seen.has(item.id)) { c.seen.add(item.id); c.done.push(item); }
+        } catch (e) {
+          c.partial = true;
+          log.warn(TAG, `series all: ${type}/${id}: ${e.message}`);
+        }
+      }
+      c.current = null;
+      c.complete = true;
+      c.at = Date.now();
+    })();
+    return c;
+  }
 
   // GET /api/vod/items?type=vod|series&category=X&page=1&search=&fav=0&sort=added|name
   router.get('/items', guard, async (req, res) => {
@@ -94,6 +136,16 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       ...item,
       screenshotUrl: item.screenshotUri ? vodManager.resolveScreenshot(item.screenshotUri) : null,
     }));
+
+    if (category === SERIES_ALL) {
+      const ids = (await seriesCategories(await vodLayout(vodManager))).map((c) => c.id).filter((id) => id !== SERIES_ALL);
+      const c = combinedListing(type, ids);
+      // What's read so far: the categories done, then the one being read.
+      const reading = c.current ? (vodManager.listingProgress(type, c.current)?.items ?? []).filter((i) => !c.seen.has(i.id)) : [];
+      const items = [...c.done, ...reading];
+      appState.touchActivity?.();
+      return res.json({ items: withImages(items.slice(from)), loaded: items.length, total: c.complete ? items.length : 0, complete: c.complete, partial: c.complete && c.partial });
+    }
 
     const done = vodManager.peekListing(type, category);
     if (done) {
