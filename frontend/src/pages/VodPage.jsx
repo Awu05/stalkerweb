@@ -66,9 +66,9 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
               <button
                 onClick={() => onRemove(e.id)}
                 aria-label={`Remove ${e.title} from Recently watched`}
-                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/80 hover:text-white transition-all"
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/80 hover:text-white transition-all"
               >
-                <X size={12} />
+                <X size={16} />
               </button>
             </div>
           )
@@ -197,7 +197,7 @@ function VodCard({ item, onClick, onDownload }) {
     >
       <div className="relative">
         <Thumb src={item.screenshotUrl} name={item.name} isHD={item.isHD} />
-        <MyListButton item={item} overlay className="absolute top-1 left-1" />
+        <MyListButton item={item} overlay className="absolute top-1.5 left-1.5" />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <Play size={32} className="text-white opacity-0 group-hover:opacity-90 transition-opacity drop-shadow-lg" fill="currentColor" />
         </div>
@@ -208,9 +208,9 @@ function VodCard({ item, onClick, onDownload }) {
             title="Download to server"
             onClick={e => { e.stopPropagation(); onDownload(item) }}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onDownload(item) } }}
-            className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 hover:bg-black/80 hover:text-white transition-all"
+            className="absolute top-1.5 right-1.5 p-2 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/80 hover:text-white transition-all"
           >
-            <Download size={13} />
+            <Download size={18} />
           </div>
         )}
         {hasSeries && (
