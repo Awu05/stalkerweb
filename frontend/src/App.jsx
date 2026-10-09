@@ -200,7 +200,7 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
             </span>
           )}
 
-          <NavItem to="/settings" icon={Settings} label="Profiles" collapsed={collapsed} onNavigate={onCloseMobile} />
+          <NavItem to="/settings" icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
           {accessEnabled && (
             <button
               onClick={() => accessLogout().finally(() => window.location.reload())}
