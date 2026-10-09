@@ -377,7 +377,9 @@ function AppInner() {
 
   const ctxValue = useMemo(
     () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
-      viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true) }),
+      viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true),
+      // Keeps the current viewer in step with a filter just saved (no reload).
+      updateViewerFields: (fields) => setViewer((v) => (v ? { ...v, ...fields } : v)) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the functions only call setters
     [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers]
   )

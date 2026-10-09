@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { convertLanguages, vodCategoryList, titleKey, groupGenres } from './channelFilters'
+import { convertLanguages, vodCategoryList, titleKey, groupGenres, releaseLanguages } from './channelFilters'
 
 describe('convertLanguages', () => {
   it('turns each hidden "language" into the categories it matched', () => {
@@ -34,5 +34,24 @@ describe('groupGenres', () => {
   it('groups live categories by the part before the |, with ungrouped ones last', () => {
     const g = groupGenres([{ id: 1, name: 'CRICKET | REPLAYS' }, { id: 2, name: 'LOCAL' }, { id: 3, name: 'BEIN SPORTS | DAZN' }])
     expect(g.map(([k, list]) => [k, list.map((x) => x.id)])).toEqual([['BEIN SPORTS', [3]], ['CRICKET', [1]], ['Other', [2]]])
+  })
+})
+
+describe('releaseLanguages', () => {
+  const genres = ['HINDI | NEWS', 'HINDI | MOVIES', 'CRICKET | REPLAYS']
+  const vod = ['HINDI MOVIES', 'HINDI | 2026', 'KIDS MOVIES']
+
+  it('drops the old language and hides the rest of it one by one, so only what was asked for comes back', () => {
+    const r = releaseLanguages(['HINDI | NEWS'], new Set(['HINDI']), genres, vod)
+    expect(r).toEqual({ languages: [], hideGenres: ['HINDI | MOVIES'], hideVod: ['HINDI | 2026'] })
+  })
+
+  it('works from a movie category too, and leaves other old languages alone', () => {
+    const r = releaseLanguages(['HINDI | 2026'], new Set(['HINDI', 'BEIN SPORTS']), genres, vod)
+    expect(r).toEqual({ languages: ['BEIN SPORTS'], hideGenres: ['HINDI | NEWS', 'HINDI | MOVIES'], hideVod: [] })
+  })
+
+  it('does nothing when no old language hides what is shown', () => {
+    expect(releaseLanguages(['CRICKET | REPLAYS'], new Set(['HINDI']), genres, vod)).toBe(null)
   })
 })

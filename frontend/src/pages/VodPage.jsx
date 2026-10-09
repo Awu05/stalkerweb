@@ -322,7 +322,10 @@ function buildPlayerParams(item, extra = {}) {
 // ── Main VOD page ─────────────────────────────────────────────────────────
 export default function VodPage() {
   const navigate  = useNavigate()
-  const { showAdult } = useApp()
+  const { showAdult, viewer, disabledLanguages } = useApp()
+  // The viewer's hidden movie & series categories (Settings → My channels): a
+  // change while this page stays open behind Settings reloads the categories.
+  const vodFilterKey = JSON.stringify([viewer?.id, viewer?.disabledVodCategories ?? [], [...disabledLanguages].sort()])
 
   const [vodType, setVodType]         = useState('vod')
   const [categories, setCategories]   = useState([])
@@ -402,7 +405,7 @@ export default function VodPage() {
     loadItems(cat.id, '', 1, token)
   }, [loadItems])
 
-  // Load categories on type change
+  // Load categories on type change, or when the viewer's filters change
   useEffect(() => {
     itemsTokenRef.current++ // invalidate any in-flight item fetch from the previous type
     setCatsLoading(true)
@@ -426,7 +429,7 @@ export default function VodPage() {
         }
       })
       .catch(e => { setCatsError(e.message); setCatsLoading(false) })
-  }, [vodType, showAdult, selectCategory])
+  }, [vodType, showAdult, selectCategory, vodFilterKey])
 
   function handleSearchChange(q) {
     setSearch(q)
