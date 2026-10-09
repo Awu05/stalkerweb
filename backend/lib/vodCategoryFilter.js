@@ -12,6 +12,15 @@ const ALL_CATEGORIES_ID = '*';   // the portal's "everything" pseudo-category
 
 const titleKey = (title) => String(title ?? '').trim().toUpperCase();
 
+/**
+ * The portal's catch-all category: id "*" on most portals, but some give it an
+ * ordinary id and call it "All". The one rule for it — the catalog and the
+ * website's lists follow the same.
+ */
+function isAllCategory(c) {
+  return String(c?.id) === ALL_CATEGORIES_ID || titleKey(c?.title) === 'ALL';
+}
+
 /** A comparison-ready Set from a viewer's stored list. */
 function toCategorySet(list) {
   return new Set((Array.isArray(list) ? list : []).map(titleKey).filter(Boolean));
@@ -25,9 +34,9 @@ function toCategorySet(list) {
 function visibleVodCategories(categories, { hiddenCategories = new Set(), hiddenLanguages = new Set() } = {}) {
   if (hiddenCategories.size === 0 && hiddenLanguages.size === 0) return categories;
   return categories.filter((c) =>
-    String(c.id) !== ALL_CATEGORIES_ID &&
+    !isAllCategory(c) &&
     !hiddenCategories.has(titleKey(c.title)) &&
     !isLanguageDisabled(c.title, hiddenLanguages));
 }
 
-module.exports = { visibleVodCategories, toCategorySet, titleKey, ALL_CATEGORIES_ID };
+module.exports = { visibleVodCategories, toCategorySet, titleKey, isAllCategory, ALL_CATEGORIES_ID };

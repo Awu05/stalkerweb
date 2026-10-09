@@ -9,10 +9,9 @@
 const log = require('../logger');
 const { groupChannels } = require('../routes/m3u');
 const { isAdult } = require('./exportFilter');
-const { visibleVodCategories } = require('./vodCategoryFilter');
+const { visibleVodCategories, isAllCategory, ALL_CATEGORIES_ID } = require('./vodCategoryFilter');
 const TAG = 'catalog';
 
-const ALL_CATEGORIES_ID = '*';              // the portal's "everything" pseudo-category
 const SYNTHETIC_CATEGORY_BASE = 900000;     // live categories with no numeric portal id
 const SERIES_INFO_TTL_MS = 60 * 60 * 1000;
 const ALL_TITLES_WAIT_MS = 20 * 1000;       // see listTitles
@@ -91,7 +90,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
     const adult = showAdult();
     const all = await appState.vodManager.getCategories(type);
     const shown = visibleVodCategories(all, { hiddenCategories: hiddenVodCategories(), hiddenLanguages: hiddenLanguages() });
-    return shown.filter((c) => String(c.id) !== ALL_CATEGORIES_ID && (adult || !isAdult(c.title)));
+    return shown.filter((c) => !isAllCategory(c) && (adult || !isAdult(c.title)));
   }
 
   // Series live in the portal's "series" section when it has one; otherwise
