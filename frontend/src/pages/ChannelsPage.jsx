@@ -91,7 +91,7 @@ function FavoriteButton({ channel, isFavorite, onToggle, className, size }) {
   )
 }
 
-const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, onToggleFavorite, onClick, onSetLogo, compact, nowNext, health }) {
+const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, onToggleFavorite, onClick, onSetLogo, nowNext, health }) {
   const [imgError, setImgError] = useState(false)
   const logo = logoUrl || getProxiedLogoUrl(channel.iconPath) || ''
   const errors = health?.errors || 0
@@ -100,30 +100,6 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
     ? Math.min(100, Math.round(((Math.floor(Date.now() / 1000) - nowNext.now.startTime) /
         (nowNext.now.endTime - nowNext.now.startTime)) * 100))
     : 0
-
-  if (compact) {
-    return (
-      <button
-        onClick={() => onClick(channel)}
-        className="surface-card group relative flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] px-2.5 pb-2.5 pt-7 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer w-20 shrink-0"
-      >
-        {errors > 0 && (
-          <span className="absolute top-1 left-1 z-10 text-amber-400" title={healthTitle(errors)}>
-            <AlertTriangle size={14} fill="currentColor" className="drop-shadow" />
-          </span>
-        )}
-        {onToggleFavorite && <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-0.5 right-8" size={14} />}
-        {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-0.5 right-0.5" size={14} />}
-        <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
-          {logo && !imgError
-            ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-0.5" />
-            : <Tv2 size={18} className="text-[var(--color-muted)]" />}
-        </div>
-        {/* Always two lines tall (h-[2lh]), so one-line names don't make a shorter tile. */}
-        <p className="h-[2lh] text-[10px] font-medium text-[var(--color-text)] leading-tight text-center break-words line-clamp-2 w-full">{channel.name}</p>
-      </button>
-    )
-  }
 
   return (
     <button
@@ -472,6 +448,8 @@ export default function ChannelsPage() {
   const showGrid = !loading && !error && filtered.length > 0
   const columns  = Math.max(1, Math.floor((gridWidth + GRID_GAP) / (MIN_COL + GRID_GAP)))
   const rowCount = Math.ceil(filtered.length / columns)
+  // One grid column's width — Recently Watched tiles are this wide too.
+  const tileWidth = gridWidth > 0 ? (gridWidth - (columns - 1) * GRID_GAP) / columns : MIN_COL
 
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
@@ -609,9 +587,9 @@ export default function ChannelsPage() {
                 lift, the remove button (sits above the corner) and the hover glow.
                 Padding gives them room inside the clip box; the matching negative
                 margin keeps the strip aligned with the grid below. */}
-            <div className="flex gap-2 overflow-x-auto scrollbar-none pt-2 pb-3 px-2 -mx-2">
+            <div className="flex overflow-x-auto scrollbar-none pt-2 pb-3 px-2 -mx-2" style={{ gap: `${GRID_GAP}px` }}>
               {recentChannels.map(r => (
-                <div key={r.uniqueId} className="relative group/recent shrink-0">
+                <div key={r.uniqueId} className="relative group/recent shrink-0" style={{ width: `${tileWidth}px` }}>
                   <ChannelCard
                     channel={{ uniqueId: r.uniqueId, name: r.name, number: r.number }}
                     logoUrl={r.logoUrl}
@@ -619,7 +597,7 @@ export default function ChannelsPage() {
                     onToggleFavorite={handleToggleFavorite}
                     onClick={openChannel}
                     onSetLogo={handleSetLogo}
-                    compact
+                    nowNext={nowNext[String(r.uniqueId)]}
                     health={health[String(r.uniqueId)]}
                   />
                   <button
