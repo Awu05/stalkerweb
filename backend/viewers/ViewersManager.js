@@ -49,6 +49,7 @@ function blankViewer(name, color) {
     favorites: { channels: [], groups: [] },
     disabledGenres: [],
     disabledLanguages: [],
+    disabledVodCategories: [],
     showAdult: false,
   };
 }
@@ -235,7 +236,7 @@ class ViewersManager {
     this._save(d);
   }
 
-  setFilters(id, { disabledGenres, disabledLanguages, showAdult } = {}) {
+  setFilters(id, { disabledGenres, disabledLanguages, disabledVodCategories, showAdult } = {}) {
     const list = (value, label) => {
       if (!Array.isArray(value) || value.some((s) => typeof s !== 'string')) throw new ViewerError(400, `${label} must be a list of names.`);
       return [...new Set(value)];
@@ -243,9 +244,11 @@ class ViewersManager {
     if (showAdult !== undefined && typeof showAdult !== 'boolean') throw new ViewerError(400, 'showAdult must be true or false.');
     const genres    = disabledGenres    !== undefined ? list(disabledGenres, 'disabledGenres') : undefined;
     const languages = disabledLanguages !== undefined ? list(disabledLanguages, 'disabledLanguages') : undefined;
+    const vod       = disabledVodCategories !== undefined ? list(disabledVodCategories, 'disabledVodCategories') : undefined;
     return this._mutate(id, (v) => {
       if (genres) v.disabledGenres = genres;
       if (languages) v.disabledLanguages = languages;
+      if (vod) v.disabledVodCategories = vod;
       if (showAdult !== undefined) v.showAdult = showAdult;
     });
   }

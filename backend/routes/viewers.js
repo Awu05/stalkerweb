@@ -2,7 +2,7 @@
 // GET    /api/viewers              — { defaultViewerId, viewers: [{ id, name, color }] }
 // POST   /api/viewers              — { name, color? } create
 // GET    /api/viewers/me           — the viewer this request is for, with its filters
-// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, showAdult? }
+// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult? }
 // PUT    /api/viewers/:id          — { name?, color? }
 // DELETE /api/viewers/:id          — not the last one
 
@@ -28,6 +28,7 @@ module.exports = function viewersModule(viewers) {
     isDefault: v.id === viewers.getDefault()?.id,
     disabledGenres: v.disabledGenres ?? [],
     disabledLanguages: v.disabledLanguages ?? [],
+    disabledVodCategories: v.disabledVodCategories ?? [],
     showAdult: v.showAdult === true,
   });
 

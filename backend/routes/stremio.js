@@ -81,7 +81,9 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   const genreCache = new Map(); // `${portal}|${kind}|${filter key}` → { value, ts }
   async function genresFor(kind) {
     if (!connected()) return { list: [], required: false };
-    const key = `${cat.currentPortal()}|${kind}|${appState.getExportFilter?.().key ?? ''}`;
+    // Keyed by the viewer's filters, channels and movie & series categories both.
+    const hiddenVod = JSON.stringify([...(appState.getHiddenVodCategories?.() ?? [])].sort());
+    const key = `${cat.currentPortal()}|${kind}|${appState.getExportFilter?.().key ?? ''}|${hiddenVod}`;
     const hit = genreCache.get(key);
     if (hit && Date.now() - hit.ts < GENRES_TTL_MS) return hit.value;
 

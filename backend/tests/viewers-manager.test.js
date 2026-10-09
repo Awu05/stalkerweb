@@ -88,6 +88,14 @@ describe('viewers', () => {
     expect(viewers.findByName('Andy').id).toBe(b.id)
   })
 
+  it('saves hidden movie & series categories, validating them', () => {
+    const a = viewers.create({ name: 'Andy' })
+    expect(a.disabledVodCategories).toEqual([])
+    viewers.setFilters(a.id, { disabledVodCategories: ['KIDS MOVIES'] })
+    expect(viewers.get(a.id).disabledVodCategories).toEqual(['KIDS MOVIES'])
+    expect(statusOf(() => viewers.setFilters(a.id, { disabledVodCategories: 'KIDS' }))).toBe(400)
+  })
+
   it('only accepts palette colors', () => {
     const a = viewers.create({ name: 'Andy' })
     expect(statusOf(() => viewers.update(a.id, { color: 'red' }))).toBe(400)

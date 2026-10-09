@@ -22,7 +22,8 @@ export function chooseViewer(viewers, savedId) {
   return { id: null, needsPicker: true }
 }
 
-// Links for players outside the browser. The default viewer's links stay as
-// they always were, so links handed out before viewers existed keep working.
-export const viewerQuery = (viewer) => (viewer && !viewer.isDefault ? `?viewer=${encodeURIComponent(viewer.id)}` : '')
-export const viewerPath  = (viewer) => (viewer && !viewer.isDefault ? `/v/${encodeURIComponent(viewer.id)}` : '')
+// Links for players outside the browser, each naming its viewer — the default
+// one too. Links without a viewer (from before viewers) still work: the server
+// gives them the default viewer.
+export const viewerQuery = (viewer) => (viewer ? `?viewer=${encodeURIComponent(viewer.id)}` : '')
+export const viewerPath  = (viewer) => (viewer ? `/v/${encodeURIComponent(viewer.id)}` : '')
