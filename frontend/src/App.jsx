@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Tv2, Settings, Heart, RefreshCw, Timer, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
+import { Tv2, Settings, Heart, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
@@ -52,59 +52,30 @@ function NavItem({ to, icon: Icon, label, collapsed, onNavigate }) {
   )
 }
 
-// ── Keepalive badge ───────────────────────────────────────────────────────
-function KeepaliveBadge({ lastPingAt, collapsed }) {
-  const [label, setLabel] = useState('')
-
-  useEffect(() => {
-    if (!lastPingAt) return
-    function update() {
-      const diff = Math.floor((Date.now() - new Date(lastPingAt).getTime()) / 1000)
-      if (diff < 60) setLabel('just now')
-      else if (diff < 3600) setLabel(`${Math.floor(diff / 60)}m ago`)
-      else setLabel(`${Math.floor(diff / 3600)}h ago`)
-    }
-    update()
-    const id = setInterval(update, 30_000)
-    return () => clearInterval(id)
-  }, [lastPingAt])
-
-  if (!lastPingAt || collapsed) return null
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)] opacity-70 hover:opacity-100 transition-opacity" title={`Session keepalive last sent: ${new Date(lastPingAt).toLocaleTimeString()}`}>
-      <RefreshCw size={11} className="shrink-0" />
-      {label}
-    </span>
-  )
+// ── Connection status ─────────────────────────────────────────────────────
+// A dot and "Connected", with the details (keepalive, idle auto-disconnect)
+// in its tooltip rather than on lines of their own.
+const ago = (iso) => {
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (secs < 60) return 'just now'
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  return `${Math.floor(secs / 3600)}h ago`
 }
 
-// ── Idle countdown badge ──────────────────────────────────────────────────
-function IdleBadge({ idleInfo, collapsed }) {
-  const [label, setLabel] = useState('')
-
+function useStatusDetails(connected, lastPingAt, idleInfo) {
+  const [, setTick] = useState(0)
   useEffect(() => {
-    if (!idleInfo?.lastActivityAt || !idleInfo?.idleTimeoutMs) return
-    function update() {
-      const elapsed = Date.now() - new Date(idleInfo.lastActivityAt).getTime()
-      const remaining = Math.max(0, idleInfo.idleTimeoutMs - elapsed)
-      const mins = Math.ceil(remaining / 60000)
-      setLabel(remaining === 0 ? 'disconnecting…' : `idle · ${mins}m`)
-    }
-    update()
-    const id = setInterval(update, 30_000)
+    const id = setInterval(() => setTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [idleInfo])
-
-  // No timeout means auto-disconnect is off ("Never" in Settings) — the status
-  // poll still reports lastActivityAt, so this must check the timeout too, or
-  // the badge stays up showing whatever countdown it last computed.
-  if (!idleInfo?.lastActivityAt || !idleInfo?.idleTimeoutMs || collapsed) return null
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)] opacity-60 hover:opacity-100 transition-opacity" title="Auto-disconnect when idle">
-      <Timer size={11} className="shrink-0" />
-      {label}
-    </span>
-  )
+  }, [])
+  if (!connected) return 'Not connected to a portal'
+  const parts = ['Connected to the portal']
+  if (lastPingAt) parts.push(`keepalive sent ${ago(lastPingAt)}`)
+  if (idleInfo?.lastActivityAt && idleInfo?.idleTimeoutMs) {
+    const left = Math.max(0, idleInfo.idleTimeoutMs - (Date.now() - new Date(idleInfo.lastActivityAt).getTime()))
+    parts.push(left === 0 ? 'disconnecting (idle)' : `disconnects after ${Math.ceil(left / 60000)}m idle`)
+  }
+  return parts.join(' · ')
 }
 
 // ── Logo mark ─────────────────────────────────────────────────────────────
@@ -125,6 +96,7 @@ function LogoMark({ collapsed }) {
 // ── Sidebar ───────────────────────────────────────────────────────────────
 function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile }) {
   const { reminders, removeReminder } = useReminders()
+  const statusDetails = useStatusDetails(connected, lastPingAt, idleInfo)
 
   const navItems = connected && (
     <nav className="flex flex-col gap-1 px-3">
@@ -175,43 +147,39 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
           {navItems}
         </div>
 
-        <div className={cn('shrink-0 border-t border-[var(--color-border)] py-3 px-3 flex flex-col gap-2', collapsed && 'items-center')}>
-          {connected && <IdleBadge idleInfo={idleInfo} collapsed={collapsed} />}
-          {!collapsed && <KeepaliveBadge lastPingAt={lastPingAt} collapsed={collapsed} />}
-
-          <span
-            className={cn('flex items-center gap-1.5 text-xs text-[var(--color-muted)]', collapsed && 'justify-center')}
-            title={connected ? 'Connected' : 'Disconnected'}
-          >
-            <span
-              className={cn(
-                'inline-block h-2 w-2 rounded-full shrink-0',
-                connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-surface-3)]'
-              )}
-            />
-            {!collapsed && (connected ? 'Connected' : 'Disconnected')}
-          </span>
-
-          {version && !collapsed && (
-            <span className="text-[10px] text-[var(--color-muted)] opacity-50">
-              {/^v?\d/.test(version) ? (version.startsWith('v') ? version : `v${version}`) : version}
-            </span>
-          )}
-
+        <div className={cn('shrink-0 border-t border-[var(--color-border)] p-3 flex flex-col gap-1', collapsed && 'items-center')}>
           <NavItem to="/settings" icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
-          {accessEnabled && (
-            <button
-              onClick={() => accessLogout().finally(() => window.location.reload())}
-              title={collapsed ? 'Sign out' : undefined}
-              className={cn(
-                'flex items-center gap-3 rounded-[var(--radius-md)] text-sm font-medium h-10 text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)]/70 transition-all duration-150',
-                collapsed ? 'justify-center w-10 mx-auto' : 'px-3 w-full'
-              )}
-            >
-              <LogOut size={18} className="shrink-0" />
-              {!collapsed && <span className="truncate">Sign out</span>}
-            </button>
-          )}
+
+          {/* Status: connection (details on hover), version, sign out */}
+          <div className={cn('flex items-center text-xs text-[var(--color-muted)]', collapsed ? 'flex-col gap-2 pt-2' : 'gap-2 h-9 pl-3 pr-1')}>
+            <span className="flex items-center gap-2 min-w-0" title={statusDetails}>
+              <span
+                className={cn(
+                  'inline-block h-2 w-2 rounded-full shrink-0',
+                  connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-surface-3)]'
+                )}
+              />
+              {!collapsed && <span className="truncate">{connected ? 'Connected' : 'Disconnected'}</span>}
+            </span>
+            {version && !collapsed && (
+              <span className="ml-auto text-[11px] opacity-60 tabular-nums" title="StalkerWeb version">
+                {/^v?\d/.test(version) ? (version.startsWith('v') ? version : `v${version}`) : version}
+              </span>
+            )}
+            {accessEnabled && (
+              <button
+                onClick={() => accessLogout().finally(() => window.location.reload())}
+                title="Sign out"
+                aria-label="Sign out"
+                className={cn(
+                  'flex items-center justify-center h-7 w-7 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors',
+                  !collapsed && !version && 'ml-auto'
+                )}
+              >
+                <LogOut size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </aside>
     </>
