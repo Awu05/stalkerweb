@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
@@ -14,11 +14,9 @@ import { copyText } from '@/lib/clipboard'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
-  downloadStbEmuBackup, getChannels, getLogoMap, getProxiedLogoUrl, getGroups,
-  getLogoStripWords, addLogoStripWord, deleteLogoStripWord, getLanguages, saveMyFilters, getMyViewer,
+  downloadStbEmuBackup, getChannels, getLogoMap, getProxiedLogoUrl,
+  getLogoStripWords, addLogoStripWord, deleteLogoStripWord,
 } from '../stalkerApi'
-import { serialSaves } from '@/lib/serialSaves'
-import { showToast } from '@/lib/toast'
 import { invalidateChannelCache } from '../lib/channelCache'
 import { invalidateFavoritesCache } from '../lib/useFavorites'
 import { useApp } from '@/lib/appContext'
@@ -28,6 +26,7 @@ import {
   setActiveProfile, getActiveProfileId,
 } from '@/lib/profiles'
 import ViewersCard from '@/components/ViewersCard'
+import ChannelFilters from '@/components/ChannelFilters'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -35,15 +34,6 @@ import { viewerQuery, viewerPath } from '@/lib/viewer'
 // STBEmu device options — kept in sync with backend routes/settings.js
 const STB_MODELS    = ['MAG200', 'MAG250', 'MAG254', 'MAG256', 'MAG270', 'MAG322', 'MAG352', 'CUSTOM']
 const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic']
-
-// Portal genres are commonly named "LANGUAGE | CATEGORY" (e.g. "PUNJABI |
-// 24X7 MOVIES"). Group by the part before the pipe so a language with many
-// genres can be enabled/disabled in one click; genres without a "|" fall
-// into a shared "Other" bucket.
-function genreLanguage(name) {
-  const idx = String(name).indexOf('|')
-  return idx === -1 ? 'Other' : name.slice(0, idx).trim()
-}
 
 async function checkLogoName(name) {
   const r = await fetch(`/api/logos/check?name=${encodeURIComponent(name)}`)
@@ -488,9 +478,7 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onD
 
 export default function SetupPage() {
   const navigate = useNavigate()
-  const { connected, setConnected, setEpgEnabled, showAdult, setShowAdult,
-          disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
-          viewer, applyViewer } = useApp()
+  const { connected, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer } = useApp()
 
   // ── Profiles ────────────────────────────────────────────────────────────────
   const [profiles, setProfiles]     = useState([])
@@ -536,10 +524,6 @@ export default function SetupPage() {
   const [stripWords, setStripWords]       = useState([])
   const [newStripWord, setNewStripWord]   = useState('')
   const [stripApplying, setStripApplying] = useState(false)
-  const [allGenres, setAllGenres]     = useState([])
-  const [allLanguages, setAllLanguages] = useState([])
-  const [genresLoading, setGenresLoading] = useState(false)
-  const [collapsedGenreGroups, setCollapsedGenreGroups] = useState(() => new Set())
 
   // STBEmu export — the user picks ANY profile to export (connected or not).
   // Model/firmware/device come from the chosen profile.
@@ -612,20 +596,6 @@ export default function SetupPage() {
       setInitLoading(false)
     })()
   }, [])
-
-  useEffect(() => {
-    if (!connected) return
-    setGenresLoading(true)
-    getGroups()
-      .then(r => setAllGenres((r.groups ?? []).filter(g => g.name?.toLowerCase() !== 'all')))
-      .catch(() => {})
-      .finally(() => setGenresLoading(false))
-    // Union of channel genres and VOD categories, so a language that only
-    // appears in VOD (portals spell them inconsistently) is still togglable.
-    getLanguages()
-      .then(r => setAllLanguages(r.languages ?? []))
-      .catch(() => {})
-  }, [connected])
 
   useEffect(() => {
     if (!connected) return
@@ -816,19 +786,6 @@ export default function SetupPage() {
     setEpg(val); setEpgEnabled(val)
     try { await saveSettings({ epg_enabled: val }) } catch { /* non-critical */ }
   }
-  // My channels: each change is shown at once and saved in the order made
-  // (serialSaves), so a later toggle never loses to an earlier one. A save
-  // that fails puts back what the server has, and says so.
-  const saveFilters = useMemo(() => serialSaves(saveMyFilters), [])
-  function filterSaveFailed() {
-    showToast('Could not save your channel filters', 'error')
-    getMyViewer().then(applyViewer).catch(() => {})
-  }
-  function handleAdultToggle(val) {
-    setShowAdult(val)
-    invalidateChannelCache()
-    saveFilters({ showAdult: val }).catch(filterSaveFailed)
-  }
   async function handleSaveDownloadDir() {
     if (!downloadDir.trim()) return
     setDownloadDirSaving(true)
@@ -889,53 +846,6 @@ export default function SetupPage() {
   const idleParsed = parseInt(idleMinutes, 10)
   const idleValid  = /^\d+$/.test(idleMinutes.trim()) && idleParsed >= 1 && idleParsed <= 10080
 
-  // Genre filters belong to the current viewer. Update the app context
-  // immediately (optimistic), save on the server, and invalidate the channel
-  // cache so the channel/player pages re-filter on next visit.
-  function persistGenres(set) {
-    setDisabledGenres(set)
-    saveFilters({ disabledGenres: [...set] }).catch(filterSaveFailed)
-    invalidateChannelCache()
-  }
-  function handleToggleGenre(genreName) {
-    const next = new Set(disabledGenres)
-    next.has(genreName) ? next.delete(genreName) : next.add(genreName)
-    persistGenres(next)
-  }
-  function handleEnableAllGenres() {
-    persistGenres(new Set())
-  }
-  function handleDisableAllGenres() {
-    persistGenres(new Set(allGenres.map(g => g.name)))
-  }
-  // Languages are a separate, coarser filter than genres: they also drive the
-  // VOD category list, which genres cannot — VOD category names share the
-  // "LANGUAGE | SECTION" shape but never the section half.
-  function persistLanguages(set) {
-    setDisabledLanguages(set)
-    saveFilters({ disabledLanguages: [...set] }).catch(filterSaveFailed)
-    invalidateChannelCache()
-  }
-  function handleToggleLanguage(lang) {
-    const next = new Set(disabledLanguages)
-    next.has(lang) ? next.delete(lang) : next.add(lang)
-    persistLanguages(next)
-  }
-  function handleEnableAllLanguages() { persistLanguages(new Set()) }
-  function handleDisableAllLanguages() { persistLanguages(new Set(allLanguages)) }
-
-  function handleToggleGenreGroup(names, enable) {
-    const next = new Set(disabledGenres)
-    names.forEach(n => enable ? next.delete(n) : next.add(n))
-    persistGenres(next)
-  }
-  function toggleGenreGroupCollapse(lang) {
-    setCollapsedGenreGroups(prev => {
-      const next = new Set(prev)
-      next.has(lang) ? next.delete(lang) : next.add(lang)
-      return next
-    })
-  }
   async function handleStbEmuExport() {
     setStbEmuExporting(true); setStbEmuNotice(null)
     try {
@@ -979,22 +889,6 @@ export default function SetupPage() {
       setStbEmuNotice({ type: 'error', msg: err.message || 'Failed to import backup file.' })
     }
   }
-
-  // Group genres by language ("LANGUAGE | CATEGORY" → "LANGUAGE"), sorted
-  // alphabetically with the ungrouped "Other" bucket last.
-  const genreGroups = useMemo(() => {
-    const map = new Map()
-    for (const g of allGenres) {
-      const lang = genreLanguage(g.name)
-      if (!map.has(lang)) map.set(lang, [])
-      map.get(lang).push(g)
-    }
-    return [...map.entries()].sort(([a], [b]) => {
-      if (a === 'Other') return 1
-      if (b === 'Other') return -1
-      return a.localeCompare(b)
-    })
-  }, [allGenres])
 
   if (initLoading) {
     return (
@@ -1124,7 +1018,7 @@ export default function SetupPage() {
                   : 'Program guide in XMLTV format. Enable EPG below for this to return data.'}
               />
               <p className="text-xs text-[var(--color-muted)]">
-                These links show {viewer ? <><strong>{viewer.name}</strong>&apos;s</> : 'your'} channels: they leave out the genres and languages hidden under My channels, and adult content unless it is turned on there. Each viewer gets their own links. Add <code className="font-mono">{vq ? '&all=1' : '?all=1'}</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
+                These links show {viewer ? <><strong>{viewer.name}</strong>&apos;s</> : 'your'} channels: they leave out the categories hidden under My channels, and adult content unless it is turned on there. Each viewer gets their own links. Add <code className="font-mono">{vq ? '&all=1' : '?all=1'}</code> to the M3U, VLC or XMLTV link to include every channel; the Xtream server and Stremio addon always apply the filters.
               </p>
               {shareToken && (
                 <p className="text-xs text-[var(--color-muted)]">
@@ -1286,115 +1180,9 @@ export default function SetupPage() {
 
         <Card
           title={viewer ? `My channels (${viewer.name})` : 'My channels'}
-          description="Which channels you see: hide genres and languages, and choose whether adult content is shown. These belong to you — other viewers keep their own."
+          description="Which categories you see in Live TV and Movies & Series, and whether adult content is shown. These belong to you — other viewers keep their own."
         >
-          <div className="flex items-center justify-between pb-3 mb-1 border-b border-[var(--color-border)]">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">Show Adult Content</p>
-              <p className="text-xs text-[var(--color-muted)] mt-0.5">Parental lock for categories like &quot;FOR ADULTS&quot;.</p>
-            </div>
-            <Switch checked={showAdult} onCheckedChange={handleAdultToggle} />
-          </div>
-          {!connected ? (
-            <p className="text-sm text-[var(--color-muted)]">Connect to a portal to manage genre filters.</p>
-          ) : genresLoading ? (
-            <div className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
-              <Loader2 size={14} className="animate-spin" /> Loading genres…
-            </div>
-          ) : allGenres.length === 0 ? (
-            <p className="text-sm text-[var(--color-muted)]">No genres found on this portal.</p>
-          ) : (
-            <>
-              {allLanguages.length > 0 && (
-                <div className="pb-3 mb-1 border-b border-[var(--color-border)]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-[var(--color-text)]">Languages</span>
-                    <span className="text-[10px] text-[var(--color-muted)]">
-                      {allLanguages.length - disabledLanguages.size} of {allLanguages.length} enabled
-                    </span>
-                    <div className="flex-1" />
-                    <button type="button" onClick={handleEnableAllLanguages}
-                      className="text-[10px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">All</button>
-                    <span className="text-[10px] text-[var(--color-border)]">/</span>
-                    <button type="button" onClick={handleDisableAllLanguages}
-                      className="text-[10px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">None</button>
-                  </div>
-                  <p className="text-[11px] text-[var(--color-muted)] mt-1">
-                    Hides a language everywhere at once — channels, groups and On&nbsp;Demand.
-                    Portals sometimes spell the same language differently between the two, so
-                    each spelling is listed separately.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {allLanguages.map(lang => {
-                      const disabled = disabledLanguages.has(lang)
-                      return (
-                        <button key={lang} type="button" onClick={() => handleToggleLanguage(lang)}
-                          className={cn('px-3 py-1.5 rounded-full text-xs font-semibold transition-all border',
-                            disabled
-                              ? 'bg-[var(--color-surface-2)] text-[var(--color-muted)] border-[var(--color-border)] opacity-50 line-through'
-                              : 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] border-[var(--color-primary)]/30 hover:bg-[var(--color-primary)]/25'
-                          )}>
-                          {lang}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={handleEnableAllGenres} className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors">Enable all</button>
-                <button type="button" onClick={handleDisableAllGenres} className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors">Disable all</button>
-                <span className="text-xs text-[var(--color-muted)] ml-1">{allGenres.length - disabledGenres.size} of {allGenres.length} enabled</span>
-              </div>
-
-              <div className="flex flex-col gap-1 -mt-1">
-                {genreGroups.map(([lang, genres]) => {
-                  const names        = genres.map(g => g.name)
-                  const enabledCount = names.filter(n => !disabledGenres.has(n)).length
-                  const collapsed    = collapsedGenreGroups.has(lang)
-                  return (
-                    <div key={lang} className="border-b border-[var(--color-border)] last:border-b-0 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleGenreGroupCollapse(lang)}
-                          className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-text)] hover:text-[var(--color-primary-light)] transition-colors min-w-0"
-                        >
-                          {collapsed ? <ChevronDown size={13} className="shrink-0" /> : <ChevronUp size={13} className="shrink-0" />}
-                          <span className="truncate">{lang}</span>
-                        </button>
-                        <span className="text-[10px] text-[var(--color-muted)] shrink-0">{enabledCount}/{names.length}</span>
-                        <div className="flex-1" />
-                        <button type="button" onClick={() => handleToggleGenreGroup(names, true)}
-                          className="text-[10px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors shrink-0">All</button>
-                        <span className="text-[10px] text-[var(--color-border)]">/</span>
-                        <button type="button" onClick={() => handleToggleGenreGroup(names, false)}
-                          className="text-[10px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors shrink-0">None</button>
-                      </div>
-                      {!collapsed && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {genres.map(g => {
-                            const disabled = disabledGenres.has(g.name)
-                            return (
-                              <button key={g.id} type="button" onClick={() => handleToggleGenre(g.name)}
-                                className={cn('px-3 py-1.5 rounded-full text-xs font-semibold transition-all border',
-                                  disabled
-                                    ? 'bg-[var(--color-surface-2)] text-[var(--color-muted)] border-[var(--color-border)] opacity-50 line-through'
-                                    : 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] border-[var(--color-primary)]/30 hover:bg-[var(--color-primary)]/25'
-                                )}>
-                                {g.name}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
+          <ChannelFilters />
         </Card>
 
         {/* ── STBEmu Export / Import ──────────────────────────────────────── */}

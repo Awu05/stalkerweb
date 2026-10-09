@@ -184,6 +184,9 @@ export const removeVodProgressBackend = (key)   => _delete(`/vod/progress/${enco
 // ── VOD ───────────────────────────────────────────────────────────────────
 export const getVodCategories = (type = 'vod') =>
   _get(`/vod/categories?type=${type}`)
+// Every category, hidden ones included — for Settings → My channels.
+export const getAllVodCategories = (type = 'vod') =>
+  _get(`/vod/categories?type=${type}&all=1`)
 
 export const getVodItems = ({ type = 'vod', category, page = 1, search = '', fav = 0 }) => {
   const p = new URLSearchParams({ type, category: String(category), page: String(page) })
