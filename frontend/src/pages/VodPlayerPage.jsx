@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
@@ -26,6 +26,9 @@ function formatTime(secs) {
 export default function VodPlayerPage() {
   const [searchParams] = useSearchParams()
   const navigate        = useNavigate()
+  const location        = useLocation()
+  // Back to where the player was opened from; opened directly, to VOD.
+  const goBack = () => (location.key === 'default' ? navigate('/vod') : navigate(-1))
 
   const videoId      = searchParams.get('videoId') || ''
   const cmd          = searchParams.get('cmd') || ''
@@ -295,7 +298,7 @@ export default function VodPlayerPage() {
           showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
           <button
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className="flex items-center gap-1.5 text-white/80 hover:text-white transition-colors text-sm"
           >
             <ChevronLeft size={18} />
@@ -344,7 +347,7 @@ export default function VodPlayerPage() {
             <AlertCircle size={40} className="text-[var(--color-live)]" />
             <p className="text-sm text-white/80 max-w-xs text-center">{errorMsg}</p>
             <button
-              onClick={() => navigate(-1)}
+              onClick={goBack}
               className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-surface)] text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
             >
               Go back

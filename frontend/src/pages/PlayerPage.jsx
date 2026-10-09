@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { isLanguageDisabled } from '../lib/languages'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
 import mpegts from 'mpegts.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   List, Search, Loader2, AlertCircle, Tv2, Heart, ChevronDown,
-  PictureInPicture2,
+  PictureInPicture2, ChevronLeft,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
@@ -329,6 +329,12 @@ function savePlayerPrefs(patch) {
 // ── Player page ───────────────────────────────────────────────────────────
 export default function PlayerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  // Back to the page the player was opened from. Changing channels replaces
+  // the history entry (selectChannel), so one step back is always that page;
+  // opened directly (a bookmark, a reload), there is none — go to Channels.
+  const goBack = () => (location.key === 'default' ? navigate('/channels') : navigate(-1))
   const initChannelId   = searchParams.get('channel')
   const initChannelName = searchParams.get('name') ? decodeURIComponent(searchParams.get('name')) : ''
 
@@ -874,7 +880,7 @@ export default function PlayerPage() {
 
   function selectChannel(ch) {
     setActiveChannel(ch)
-    setSearchParams({ channel: ch.uniqueId, name: encodeURIComponent(ch.name) })
+    setSearchParams({ channel: ch.uniqueId, name: encodeURIComponent(ch.name) }, { replace: true })
     savePlayerPrefs({ lastChannelId: String(ch.uniqueId), lastChannelName: ch.name })
   }
   selectChannelRef.current = selectChannel
@@ -889,6 +895,24 @@ export default function PlayerPage() {
         onClick={togglePlayPause}
       >
         <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+
+        {/* Top bar: back to where the player was opened from. Shown with the controls. */}
+        <div
+          className={cn(
+            'absolute top-0 inset-x-0 z-20 flex items-center px-3 py-2 bg-black/45 backdrop-blur-sm transition-opacity duration-300',
+            showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
+          )}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            onClick={goBack}
+            className="flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-white/85 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Back"
+          >
+            <ChevronLeft size={18} />
+            Back
+          </button>
+        </div>
 
         {status === 'loading' && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
