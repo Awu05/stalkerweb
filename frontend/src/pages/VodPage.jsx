@@ -454,8 +454,13 @@ export default function VodPage() {
   const SHOW_STEP = 140
   const [filters, setFilters] = useState(NO_FILTERS)
   const [visibleCount, setVisibleCount] = useState(SHOW_STEP)
-  const isAllCategory = !!selectedCategory && (String(selectedCategory.id) === '*' || selectedCategory.title?.trim().toLowerCase() === 'all')
-  const filtering = filtersActive(filters) && !!selectedCategory && !isAllCategory
+  // The Series "All" StalkerWeb adds on portals without a series section is
+  // always read whole (backend routes/vod.js) — and can be filtered, unlike
+  // the portal's own "All", which is the whole catalog.
+  const isSeriesAll = selectedCategory?.id === 'series:all'
+  const isAllCategory = !!selectedCategory && !isSeriesAll && (String(selectedCategory.id) === '*' || selectedCategory.title?.trim().toLowerCase() === 'all')
+  // Whole-listing mode: a filter is on, or the Series "All".
+  const filtering = (filtersActive(filters) && !!selectedCategory && !isAllCategory) || isSeriesAll
   const listing = useCategoryListing(vodType, selectedCategory?.id, filtering)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- read again per category, and when filtering starts
   const watched = useMemo(() => getWatchedVodIds(), [filtering, selectedCategory?.id])
@@ -479,13 +484,15 @@ export default function VodPage() {
   }, [filtering]) // eslint-disable-line react-hooks/exhaustive-deps
   const moreToShow = filtering ? filtered.length > visibleCount : hasMore
 
+  // A new category keeps the search typed (searchRef: this callback stays
+  // stable). The Series "All" is read whole, not page by page.
+  const searchRef = useRef('')
   const selectCategory = useCallback((cat) => {
     setSelectedCategory(cat)
-    setSearch('')
     setItems([])
     setCurrentPage(1)
     const token = ++itemsTokenRef.current
-    loadItems(cat.id, '', 1, token)
+    if (cat.id !== 'series:all') loadItems(cat.id, searchRef.current, 1, token)
   }, [loadItems])
 
   // Load categories on type change, or when the viewer's filters change
@@ -516,6 +523,7 @@ export default function VodPage() {
 
   function handleSearchChange(q) {
     setSearch(q)
+    searchRef.current = q
     clearTimeout(searchTimer.current)
     if (filtering) return   // the whole listing is here: searched as it's typed
     searchTimer.current = setTimeout(() => {
@@ -723,7 +731,7 @@ export default function VodPage() {
 
         {/* Items grid */}
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
-          {!filtering && !search && (
+          {!filtersActive(filters) && !search && (
             <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
           )}
           {!selectedCategory && (
@@ -772,7 +780,7 @@ export default function VodPage() {
           {filtering && listing.complete && filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-[var(--color-muted)]">
               <Film size={32} className="opacity-20" />
-              <p className="text-sm">No titles match these filters.</p>
+              <p className="text-sm">{filtersActive(filters) || search ? 'No titles match.' : 'No titles in this category.'}</p>
             </div>
           )}
 
