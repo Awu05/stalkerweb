@@ -101,6 +101,10 @@ const viewersManager = new ViewersManager(config.dataDir);
   });
 }
 const viewerContext = require('./lib/viewerContext').createViewerContext(viewersManager);
+// What each viewer watched on the VOD page (viewers/WatchStore.js). On first
+// start the old shared Continue Watching list goes to the default viewer.
+const watchStore = new (require('./viewers/WatchStore'))(config.dataDir);
+watchStore.importLegacy(viewersManager.getDefault().id);
 
 // Filter applied to the exports, the Xtream API, the Stremio addon and the VOD
 // categories: the current viewer's hidden genres and languages, plus adult
@@ -303,7 +307,7 @@ function logStateSummary() {
 const _summaryTimer = setInterval(logStateSummary, 10_000);
 if (_summaryTimer.unref) _summaryTimer.unref();
 
-const vodRoutes    = require('./routes/vod')(appState, config);
+const vodRoutes    = require('./routes/vod')(appState, config, { watchStore });
 
 const DownloadManager = require('./downloads/DownloadManager');
 const downloadsCache = new (require('./cache/CacheManager'))(config.dataDir);

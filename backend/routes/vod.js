@@ -3,52 +3,22 @@
 // GET    /api/vod/items?type=vod|series&category=X&page=1&search=&fav=0
 // GET    /api/vod/seasons/:movieId
 // GET    /api/vod/stream?videoId=X&cmd=<encoded>&series=0
-// GET    /api/vod/progress        — list all "Continue Watching" entries
-// PUT    /api/vod/progress        — upsert an entry
-// DELETE /api/vod/progress/:key   — remove an entry
+// GET    /api/vod/listing?type&category&from — a whole category, as it is read
+// GET/PUT/DELETE /api/vod/watch…  — what the viewer watched (see below)
 
 'use strict';
 
-const fs      = require('fs');
-const path    = require('path');
 const express = require('express');
 const router  = express.Router();
 const sessionMiddleware = require('../middleware/session');
 const { visibleVodCategories } = require('../lib/vodCategoryFilter');
 const { vodLayout } = require('../lib/seriesCategories');
+const { refuseIfGone } = require('./viewers');
 
 const log = require('../logger');
 const TAG = 'vod';
 
-const VOD_PROGRESS_MAX = 20;
-
-class VodProgressStore {
-  constructor(dataDir) {
-    this._file = path.join(dataDir, 'vod-progress.json');
-  }
-
-  load() {
-    try {
-      const list = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      return Array.isArray(list) ? list : [];
-    } catch {
-      return [];
-    }
-  }
-
-  save(list) {
-    try {
-      const tmp = this._file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(list), 'utf8');
-      fs.renameSync(tmp, this._file);
-    } catch (e) {
-      log.error(TAG, `vod-progress save failed: ${e.message}`);
-    }
-  }
-}
-
-module.exports = function vodRoutes(appState, config) {
-  const progressStore = config?.dataDir ? new VodProgressStore(config.dataDir) : null;
+module.exports = function vodRoutes(appState, config, { watchStore = null } = {}) {
   const guard = sessionMiddleware(appState);
 
   // GET /api/vod/categories?type=vod|series[&all=1]
@@ -208,42 +178,28 @@ module.exports = function vodRoutes(appState, config) {
     res.json({ streamUrl: `/proxy/vod/stream${ext}?${p}`, videoId, isHls });
   });
 
-  // ── Continue Watching progress (no session guard — persists across disconnects) ──
-  // The store itself is one shared file (not per-portal), but each entry is
-  // tagged with the portal it was saved under so switching portals doesn't
-  // surface (or let a client accidentally merge in) another portal's videoIds
-  // — which are meaningless outside the catalog they came from.
-
-  // GET /api/vod/progress — scoped to the currently connected portal, if any.
-  // While disconnected there's no "current portal" to filter by, so this
-  // falls back to the full list (best-effort, matches prior behavior).
-  router.get('/progress', (req, res) => {
-    if (!progressStore) return res.json([]);
-    const list = progressStore.load();
-    const portal = appState.client?.getBasePath?.();
-    if (!portal) return res.json(list);
-    res.json(list.filter(e => !e.portal || e.portal === portal));
-  });
-
-  // PUT /api/vod/progress — upsert a single entry { key, ... }
-  router.put('/progress', (req, res) => {
-    if (!progressStore) return res.json({ ok: true });
-    const entry = req.body;
-    if (!entry?.key) return res.status(400).json({ error: 'key is required' });
-    const portal = appState.client?.getBasePath?.() || null;
-    const list = progressStore.load().filter(e => e.key !== entry.key);
-    const next = [{ ...entry, portal, updatedAt: entry.updatedAt ?? Date.now() }, ...list].slice(0, VOD_PROGRESS_MAX);
-    progressStore.save(next);
-    res.json({ ok: true });
-  });
-
-  // DELETE /api/vod/progress/:key
-  router.delete('/progress/:key', (req, res) => {
-    if (!progressStore) return res.json({ ok: true });
-    const key = req.params.key;
-    progressStore.save(progressStore.load().filter(e => e.key !== key));
-    res.json({ ok: true });
-  });
+  // ── What the viewer watched (viewers/WatchStore.js) ──────────────────────────
+  // Per viewer, so it follows them to any device, and per portal: ids mean
+  // nothing on another portal. No session guard — it outlives a disconnect.
+  //   GET    /api/vod/watch              — { progress, history, watched }
+  //   PUT    /api/vod/watch              — a position reached { key, title, … }
+  //   DELETE /api/vod/watch/history/:id  — a title out of Recently watched
+  //   DELETE /api/vod/watch/history      — Recently watched cleared
+  const portalOf = () => appState.client?.getBasePath?.() || '';
+  const watchAnswer = (fn) => (req, res) => {
+    if (!watchStore) return res.json({ progress: [], history: [], watched: [] });
+    try {
+      res.json(fn(req));
+    } catch (e) {
+      log.error(TAG, `watch: ${e.message}`);
+      res.status(500).json({ error: 'Could not save what you watched.' });
+    }
+  };
+  router.use('/watch', refuseIfGone);
+  router.get('/watch', watchAnswer((req) => watchStore.get(req.viewer.id, portalOf())));
+  router.put('/watch', watchAnswer((req) => watchStore.record(req.viewer.id, portalOf(), req.body ?? {})));
+  router.delete('/watch/history/:id', watchAnswer((req) => watchStore.removeTitle(req.viewer.id, portalOf(), req.params.id)));
+  router.delete('/watch/history', watchAnswer((req) => watchStore.clearHistory(req.viewer.id, portalOf())));
 
   return router;
 };
