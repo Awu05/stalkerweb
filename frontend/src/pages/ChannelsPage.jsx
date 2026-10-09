@@ -13,6 +13,7 @@ import { getRecentlyWatched, removeRecentlyWatched } from '@/lib/recentlyWatched
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { useFavorites } from '@/lib/useFavorites'
+import FavoritesView from '@/components/FavoritesView'
 
 // Channels with at least this many recent (unresolved) stream errors are "flaky".
 const FLAKY_THRESHOLD = 2
@@ -26,6 +27,15 @@ const ROW_ESTIMATE = 210  // px initial row-height guess; dynamic measurement re
 // Above this many genre pills, the row is collapsed to a single line by default
 // so it can't crowd out the channel grid below it.
 const GENRE_COLLAPSE_THRESHOLD = 12
+
+// Whether the Favorites section is open, remembered per browser.
+const FAVORITES_OPEN_KEY = 'channels.favoritesOpen'
+function readFavoritesOpen() {
+  try { return localStorage.getItem(FAVORITES_OPEN_KEY) !== '0' } catch { return true }
+}
+function writeFavoritesOpen(open) {
+  try { localStorage.setItem(FAVORITES_OPEN_KEY, open ? '1' : '0') } catch { /* not remembered */ }
+}
 
 function healthTitle(errors) {
   return `${errors} recent stream ${errors === 1 ? 'failure' : 'failures'} — may not play`
@@ -215,7 +225,8 @@ export default function ChannelsPage() {
   const [channels, setChannels]       = useState([])
   const [groups, setGroups]           = useState([])
   const [logoMap, setLogoMap]         = useState({})
-  const { favoriteIds, toggleFavorite } = useFavorites()
+  const { favoriteIds, setFavoriteIds, toggleFavorite } = useFavorites()
+  const [favoritesOpen, setFavoritesOpen] = useState(readFavoritesOpen)
   const [loading, setLoading]         = useState(true)  // true only before first data arrives
   const [error, setError]             = useState(null)
   const [backendLoading, setBackendLoading] = useState(false) // backend still paging in channels
@@ -433,6 +444,15 @@ export default function ChannelsPage() {
     [channels, health]
   )
 
+  function toggleFavoritesOpen() {
+    setFavoritesOpen(open => { writeFavoritesOpen(!open); return !open })
+  }
+
+  // A channel unfavorited in the Favorites section loses its heart in the grid.
+  const handleFavoriteRemoved = useCallback((ch) => {
+    setFavoriteIds(prev => { const s = new Set(prev); s.delete(String(ch.uniqueId)); return s })
+  }, [setFavoriteIds])
+
   function selectGroup(id) {
     setQuery('')
     if (id) setSearchParams({ group: id })
@@ -553,6 +573,30 @@ export default function ChannelsPage() {
       {/* Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
        <div ref={contentRef} className="flex flex-col gap-6">
+
+        {/* Favorites — on All, not while searching; collapses to its header */}
+        {!activeGroup && !query && (
+          <section aria-label="Favorites">
+            <button
+              type="button"
+              onClick={toggleFavoritesOpen}
+              aria-expanded={favoritesOpen}
+              className="flex items-center gap-2 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <Heart size={14} className="text-rose-400" />
+              <span className="text-xs font-medium uppercase tracking-wide">Favorites</span>
+              {favoriteIds.size > 0 && (
+                <span className="text-[10px] bg-[var(--color-surface-2)] px-1.5 py-0.5 rounded-full">{favoriteIds.size}</span>
+              )}
+              {favoritesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {favoritesOpen && (
+              <div className="mt-3">
+                <FavoritesView onRemoved={handleFavoriteRemoved} />
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Recently watched */}
         {recentChannels.length > 0 && !query && (
