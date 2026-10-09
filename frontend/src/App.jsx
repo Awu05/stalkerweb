@@ -53,8 +53,8 @@ function NavItem({ to, icon: Icon, label, collapsed, onNavigate }) {
 }
 
 // ── Connection status ─────────────────────────────────────────────────────
-// A dot and "Connected", with the details (keepalive, idle auto-disconnect)
-// in its tooltip rather than on lines of their own.
+// A dot, "Connected" and the idle auto-disconnect countdown; the full details
+// (keepalive, countdown) are in its tooltip.
 const ago = (iso) => {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   if (secs < 60) return 'just now'
@@ -68,14 +68,16 @@ function useStatusDetails(connected, lastPingAt, idleInfo) {
     const id = setInterval(() => setTick(t => t + 1), 30_000)
     return () => clearInterval(id)
   }, [])
-  if (!connected) return 'Not connected to a portal'
+  if (!connected) return { tooltip: 'Not connected to a portal', idle: null }
   const parts = ['Connected to the portal']
   if (lastPingAt) parts.push(`keepalive sent ${ago(lastPingAt)}`)
+  let idle = null
   if (idleInfo?.lastActivityAt && idleInfo?.idleTimeoutMs) {
     const left = Math.max(0, idleInfo.idleTimeoutMs - (Date.now() - new Date(idleInfo.lastActivityAt).getTime()))
+    idle = left === 0 ? 'disconnecting' : `idle ${Math.ceil(left / 60000)}m`
     parts.push(left === 0 ? 'disconnecting (idle)' : `disconnects after ${Math.ceil(left / 60000)}m idle`)
   }
-  return parts.join(' · ')
+  return { tooltip: parts.join(' · '), idle }
 }
 
 // ── Logo mark ─────────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ function LogoMark({ collapsed }) {
 // ── Sidebar ───────────────────────────────────────────────────────────────
 function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile }) {
   const { reminders, removeReminder } = useReminders()
-  const statusDetails = useStatusDetails(connected, lastPingAt, idleInfo)
+  const status = useStatusDetails(connected, lastPingAt, idleInfo)
 
   const navItems = connected && (
     <nav className="flex flex-col gap-1 px-3">
@@ -152,7 +154,7 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
 
           {/* Status: connection (details on hover), version, sign out */}
           <div className={cn('flex items-center text-xs text-[var(--color-muted)]', collapsed ? 'flex-col gap-2 pt-2' : 'gap-2 h-9 pl-3 pr-1')}>
-            <span className="flex items-center gap-2 min-w-0" title={statusDetails}>
+            <span className="flex items-center gap-2 min-w-0" title={status.tooltip}>
               <span
                 className={cn(
                   'inline-block h-2 w-2 rounded-full shrink-0',
@@ -160,6 +162,9 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
                 )}
               />
               {!collapsed && <span className="truncate">{connected ? 'Connected' : 'Disconnected'}</span>}
+              {!collapsed && status.idle && (
+                <span className="shrink-0 opacity-70 tabular-nums">· {status.idle}</span>
+              )}
             </span>
             {version && !collapsed && (
               <span className="ml-auto text-[11px] opacity-60 tabular-nums" title="StalkerWeb version">
