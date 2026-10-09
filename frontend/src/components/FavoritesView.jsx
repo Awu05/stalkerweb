@@ -55,7 +55,7 @@ function useDragReorder(items, setItems, onReorder) {
 function ChannelCard({ channel, logoUrl, onRemove, onClick, dragHandlers, isDragging }) {
   return (
     <div
-      draggable
+      draggable={!!dragHandlers}
       onDragStart={dragHandlers?.onDragStart}
       onDragOver={dragHandlers?.onDragOver}
       onDragEnd={dragHandlers?.onDragEnd}
@@ -65,12 +65,16 @@ function ChannelCard({ channel, logoUrl, onRemove, onClick, dragHandlers, isDrag
       )}
       onClick={() => onClick(channel)}
     >
-      <div className="absolute top-2 left-2 p-1 text-[var(--color-muted)] opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
-        <GripVertical size={12} />
-      </div>
+      {dragHandlers && (
+        <div className="absolute top-2 left-2 p-1 text-[var(--color-muted)] opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
+          <GripVertical size={12} />
+        </div>
+      )}
       <button
         onClick={e => { e.stopPropagation(); onRemove(channel) }}
-        className="absolute top-2 right-2 p-1 rounded-full text-[var(--color-live)] opacity-0 group-hover:opacity-100 hover:bg-[var(--color-live)]/10 transition-all"
+        title="Remove from favorites"
+        aria-label={`Remove ${channel.name} from favorites`}
+        className="absolute top-2 right-2 p-1 rounded-full text-[var(--color-live)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-live)]/10 transition-all"
       >
         <X size={13} />
       </button>
@@ -222,7 +226,7 @@ function GroupCard({ group, logoMap, onEdit, onDelete, onNavigate, dragHandlers,
 
   return (
     <div
-      draggable
+      draggable={!!dragHandlers}
       onDragStart={dragHandlers?.onDragStart}
       onDragOver={dragHandlers?.onDragOver}
       onDragEnd={dragHandlers?.onDragEnd}
@@ -230,7 +234,7 @@ function GroupCard({ group, logoMap, onEdit, onDelete, onNavigate, dragHandlers,
     >
       {/* Header row */}
       <div className="flex items-center gap-3">
-        <GripVertical size={14} className="text-[var(--color-muted)] opacity-40 hover:opacity-80 cursor-grab active:cursor-grabbing shrink-0" />
+        {dragHandlers && <GripVertical size={14} className="text-[var(--color-muted)] opacity-40 hover:opacity-80 cursor-grab active:cursor-grabbing shrink-0" />}
         <GroupPreview channels={group.channels} logoMap={logoMap} />
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm text-[var(--color-text)] truncate">{group.name}</p>
@@ -298,8 +302,12 @@ function SectionHeader({ icon: Icon, title, count, action }) {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────
-export default function FavoritesPage() {
+// ── Favorites view (the Favorites pill on the Channels page) ─────────────
+// `query`: the Channels page's search, applied to the favorite channels and
+// groups; reordering is off while it's in use, since only some are shown.
+// `onRemoved`: told when a channel is unfavorited here, so the hearts on the
+// Channels page agree.
+export default function FavoritesView({ query = '', onRemoved }) {
   const navigate = useNavigate()
   const { showAdult } = useApp()
 
@@ -358,6 +366,7 @@ export default function FavoritesPage() {
     // favorite status from the shared module-level cache, not this page's
     // own fetch, so it must be told this channel changed.
     invalidateFavoritesCache()
+    onRemoved?.(ch)
   }
 
   async function handleCreateGroup() {
@@ -388,6 +397,12 @@ export default function FavoritesPage() {
   const channelDrag = useDragReorder(channels, setChannels, reorderFavoriteChannels)
   const groupDrag   = useDragReorder(groups,   setGroups,   reorderFavoriteGroups)
 
+  // ── Search ────────────────────────────────────────────────────────────────
+  const q = query.trim().toLowerCase()
+  const matches = (name) => !!name?.toLowerCase().includes(q)
+  const shownChannels = q ? channels.filter(c => matches(c.name)) : channels
+  const shownGroups   = q ? groups.filter(g => matches(g.name) || g.channels.some(c => matches(c.name))) : groups
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -401,34 +416,33 @@ export default function FavoritesPage() {
   const empty = channels.length === 0 && groups.length === 0
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8 flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-[var(--color-text)]">Favorites</h1>
-        <p className="text-sm text-[var(--color-muted)] mt-1">Your saved channels and custom groups.</p>
-      </div>
-
+    <div className="flex flex-col gap-8">
       {empty && (
-        <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
           <Heart size={40} className="text-[var(--color-muted)]" />
           <p className="text-sm text-[var(--color-muted)]">No favorites yet.</p>
-          <p className="text-xs text-[var(--color-muted)]">Click the heart icon on any channel card to add it here.</p>
+          <p className="text-xs text-[var(--color-muted)]">Use the heart on any channel to add it here.</p>
         </div>
       )}
 
+      {q && !empty && shownChannels.length === 0 && shownGroups.length === 0 && (
+        <p className="text-sm text-[var(--color-muted)] py-8 text-center">No favorites match “{query.trim()}”.</p>
+      )}
+
       {/* ── Favorite Channels ── */}
-      {channels.length > 0 && (
+      {shownChannels.length > 0 && (
         <section>
-          <SectionHeader icon={Heart} title="Channels" count={channels.length} />
+          <SectionHeader icon={Heart} title="Channels" count={shownChannels.length} />
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
-            {channels.map((ch, i) => (
+            {shownChannels.map((ch, i) => (
               <ChannelCard
                 key={ch.uniqueId}
                 channel={ch}
                 logoUrl={logoMap[String(ch.uniqueId)]}
                 onRemove={handleRemoveChannel}
                 onClick={navigateToChannel}
-                isDragging={channelDrag.draggingIndex === i}
-                dragHandlers={{
+                isDragging={!q && channelDrag.draggingIndex === i}
+                dragHandlers={q ? undefined : {
                   onDragStart: () => channelDrag.onDragStart(i),
                   onDragOver:  (e) => channelDrag.onDragOver(e, i),
                   onDragEnd:   channelDrag.onDragEnd,
@@ -440,11 +454,12 @@ export default function FavoritesPage() {
       )}
 
       {/* ── Groups ── */}
+      {(!q || shownGroups.length > 0) && (
       <section>
         <SectionHeader
           icon={Layers}
           title="Groups"
-          count={groups.length}
+          count={shownGroups.length}
           action={
             <Button
               variant="outline"
@@ -481,7 +496,7 @@ export default function FavoritesPage() {
         )}
 
         <div className="flex flex-col gap-3">
-          {groups.map((group, i) =>
+          {shownGroups.map((group, i) =>
             editingGroupId === group.id ? (
               <GroupEditor
                 key={group.id}
@@ -500,8 +515,8 @@ export default function FavoritesPage() {
                 onEdit={() => openGroupEditor(group.id)}
                 onDelete={() => handleDeleteGroup(group.id)}
                 onNavigate={navigateToChannel}
-                isDragging={groupDrag.draggingIndex === i}
-                dragHandlers={{
+                isDragging={!q && groupDrag.draggingIndex === i}
+                dragHandlers={q ? undefined : {
                   onDragStart: () => groupDrag.onDragStart(i),
                   onDragOver:  (e) => groupDrag.onDragOver(e, i),
                   onDragEnd:   groupDrag.onDragEnd,
@@ -511,6 +526,7 @@ export default function FavoritesPage() {
           )}
         </div>
       </section>
+      )}
     </div>
   )
 }

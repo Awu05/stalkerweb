@@ -13,6 +13,7 @@ import { getRecentlyWatched, removeRecentlyWatched } from '@/lib/recentlyWatched
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { useFavorites } from '@/lib/useFavorites'
+import FavoritesView from '@/components/FavoritesView'
 
 // Channels with at least this many recent (unresolved) stream errors are "flaky".
 const FLAKY_THRESHOLD = 2
@@ -26,6 +27,9 @@ const ROW_ESTIMATE = 210  // px initial row-height guess; dynamic measurement re
 // Above this many genre pills, the row is collapsed to a single line by default
 // so it can't crowd out the channel grid below it.
 const GENRE_COLLAPSE_THRESHOLD = 12
+
+// selectGroup's id for the Favorites pill.
+const FAVORITES = 'favorites'
 
 function healthTitle(errors) {
   return `${errors} recent stream ${errors === 1 ? 'failure' : 'failures'} — may not play`
@@ -215,7 +219,7 @@ export default function ChannelsPage() {
   const [channels, setChannels]       = useState([])
   const [groups, setGroups]           = useState([])
   const [logoMap, setLogoMap]         = useState({})
-  const { favoriteIds, toggleFavorite } = useFavorites()
+  const { favoriteIds, setFavoriteIds, toggleFavorite } = useFavorites()
   const [loading, setLoading]         = useState(true)  // true only before first data arrives
   const [error, setError]             = useState(null)
   const [backendLoading, setBackendLoading] = useState(false) // backend still paging in channels
@@ -237,6 +241,8 @@ export default function ChannelsPage() {
   const jumpTimer                     = useRef(null)
 
   const activeGroup = searchParams.get('group') || ''
+  // The Favorites pill: the viewer's favorite channels and groups instead of the grid.
+  const favView = searchParams.get('view') === 'favorites'
   const [query, setQuery] = useState('')
   // Deferred so typing stays snappy: the (large) grid re-filters off the
   // deferred value while the input itself updates immediately.
@@ -435,9 +441,15 @@ export default function ChannelsPage() {
 
   function selectGroup(id) {
     setQuery('')
-    if (id) setSearchParams({ group: id })
+    if (id === FAVORITES) setSearchParams({ view: 'favorites' })
+    else if (id) setSearchParams({ group: id })
     else setSearchParams({})
   }
+
+  // A channel unfavorited in the Favorites view loses its heart everywhere else.
+  const handleFavoriteRemoved = useCallback((ch) => {
+    setFavoriteIds(prev => { const s = new Set(prev); s.delete(String(ch.uniqueId)); return s })
+  }, [setFavoriteIds])
 
   // Enrich recently watched with current logoMap
   const recentChannels = useMemo(() =>
@@ -449,7 +461,7 @@ export default function ChannelsPage() {
   )
 
   // ── Virtualized grid ──────────────────────────────────────────────────────
-  const showGrid = !loading && !error && filtered.length > 0
+  const showGrid = !favView && !loading && !error && filtered.length > 0
   const columns  = Math.max(1, Math.floor((gridWidth + GRID_GAP) / (MIN_COL + GRID_GAP)))
   const rowCount = Math.ceil(filtered.length / columns)
 
@@ -504,7 +516,7 @@ export default function ChannelsPage() {
             <Input placeholder="Search channels…" value={query} onChange={e => setQuery(e.target.value)} className="pl-9 py-5" />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {flakyCount > 0 && (
+            {!favView && flakyCount > 0 && (
               <button
                 onClick={() => setHideFlaky(v => !v)}
                 title={hideFlaky ? 'Show all channels' : `Hide ${flakyCount} channel${flakyCount === 1 ? '' : 's'} with recent stream failures`}
@@ -517,18 +529,29 @@ export default function ChannelsPage() {
                 {hideFlaky ? 'Flaky hidden' : `Hide flaky (${flakyCount})`}
               </button>
             )}
-            <span className="text-sm font-medium text-[var(--color-muted)] bg-[var(--color-surface-2)] px-3 py-1 rounded-md">
-              {filtered.length} {filtered.length === 1 ? 'channel' : 'channels'}
-            </span>
+            {!favView && (
+              <span className="text-sm font-medium text-[var(--color-muted)] bg-[var(--color-surface-2)] px-3 py-1 rounded-md">
+                {filtered.length} {filtered.length === 1 ? 'channel' : 'channels'}
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex items-start gap-2">
           <div className={cn('flex flex-wrap items-center gap-2 flex-1 min-w-0', !genresExpanded && 'max-h-9 overflow-hidden')}>
             <button
+              onClick={() => selectGroup(FAVORITES)}
+              aria-pressed={favView}
+              className={cn('flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all whitespace-nowrap',
+                favView ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+            >
+              <Heart size={13} fill={favView ? 'currentColor' : 'none'} className={favView ? '' : 'text-rose-400'} />
+              Favorites
+            </button>
+            <button
               onClick={() => selectGroup('')}
               className={cn('px-4 py-1.5 rounded-full text-sm font-semibold transition-all',
-                !activeGroup ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+                !activeGroup && !favView ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
             >All</button>
             {groups.map(g => (
               <button key={g.id} onClick={() => selectGroup(g.id)}
@@ -555,7 +578,7 @@ export default function ChannelsPage() {
        <div ref={contentRef} className="flex flex-col gap-6">
 
         {/* Recently watched */}
-        {recentChannels.length > 0 && !query && (
+        {recentChannels.length > 0 && !query && !favView && (
           <section>
             <div className="flex items-center gap-2 mb-1">
               <Clock size={14} className="text-[var(--color-muted)]" />
@@ -592,14 +615,14 @@ export default function ChannelsPage() {
         )}
 
         {/* Skeleton — only while waiting for the very first response */}
-        {loading && (
+        {loading && !favView && (
           <SkeletonGrid count={12} />
         )}
 
         {/* Progress bar — self-polls so its frequent ticks don't re-render the grid */}
-        {!loading && <ChannelLoadProgress active={backendLoading} onDone={handleLoadDone} />}
+        {!loading && !favView && <ChannelLoadProgress active={backendLoading} onDone={handleLoadDone} />}
 
-        {!loading && error && (
+        {!loading && !favView && error && (
           <div className="flex flex-col items-center justify-center gap-3 h-48 text-center">
             <AlertCircle size={32} className="text-[var(--color-live)]" />
             <p className="text-sm text-[var(--color-muted)]">{error}</p>
@@ -610,12 +633,14 @@ export default function ChannelsPage() {
         )}
 
         {/* Empty state — only shown when loading is truly complete with no results */}
-        {!loading && !backendLoading && !error && filtered.length === 0 && (
+        {!favView && !loading && !backendLoading && !error && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 h-48 text-center">
             <Tv2 size={32} className="text-[var(--color-muted)]" />
             <p className="text-sm text-[var(--color-muted)]">No channels found.</p>
           </div>
         )}
+
+        {favView && <FavoritesView query={deferredQuery} onRemoved={handleFavoriteRemoved} />}
 
         {/* Channel grid — virtualized: only the visible rows are mounted, so the
             DOM stays tiny no matter how many thousands of channels load. */}

@@ -11,7 +11,7 @@ Self-hosted IPTV web app that replicates [Kodi's pvr.stalker](https://github.com
 
 - 🔌 **Full Stalker Middleware protocol** — handshake, token auth, keep-alive watchdog, idle session timeout that auto-renews while playback is streaming.
 - 📺 **Dynamic Channel Grid** — with multi-line genre filtering, search, and keyboard number-jump.
-- ❤️ **Favorites** — star channels, organize into custom drag-and-drop groups, with inline group editor.
+- ❤️ **Favorites** — heart channels, organize them into custom drag-and-drop groups; all under the Favorites pill on the Channels page.
 - 📅 **EPG Guide** — with scrollable timeline, configurable lookahead (6h–48h), and built-in player integration.
 - 🔞 **Parental Lock** — toggleable filtering for adult content across all pages.
 - 📱 **Android & Android TV Apps** — companion Kotlin/Compose app, built for phones and for leanback TV, with auto-update and in-app crash reports (API 26+).

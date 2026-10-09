@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { Tv2, Settings, Heart, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
+import { Tv2, Settings, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
@@ -21,7 +21,6 @@ const SetupPage      = lazy(() => import('./pages/SetupPage'))
 const ChannelsPage   = lazy(() => import('./pages/ChannelsPage'))
 const PlayerPage     = lazy(() => import('./pages/PlayerPage'))
 const GuidePage      = lazy(() => import('./pages/GuidePage'))
-const FavoritesPage  = lazy(() => import('./pages/FavoritesPage'))
 const VodPage        = lazy(() => import('./pages/VodPage'))
 const VodPlayerPage  = lazy(() => import('./pages/VodPlayerPage'))
 const DownloadsPage  = lazy(() => import('./pages/DownloadsPage'))
@@ -113,7 +112,6 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
       <NavItem to="/channels"  icon={Tv2}         label="Channels"  collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/vod"       icon={Film}        label="VOD"       collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/downloads" icon={Download}    label="Downloads" collapsed={collapsed} onNavigate={onCloseMobile} />
-      <NavItem to="/favorites" icon={Heart}       label="Favorites" collapsed={collapsed} onNavigate={onCloseMobile} />
       {epgEnabled && <NavItem to="/guide"    icon={LayoutGrid}  label="Guide"    collapsed={collapsed} onNavigate={onCloseMobile} />}
     </nav>
   )
@@ -463,14 +461,8 @@ function AppInner() {
                 </RequireAuth>
               }
             />
-            <Route
-              path="/favorites"
-              element={
-                <RequireAuth connected={connected}>
-                  <FavoritesPage />
-                </RequireAuth>
-              }
-            />
+            {/* Favorites live on the Channels page now (its Favorites pill). */}
+            <Route path="/favorites" element={<Navigate to="/channels?view=favorites" replace />} />
             <Route
               path="/guide"
               element={
