@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check } from 'lucide-react'
+import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check, Bookmark, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
-import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds } from '@/lib/vodProgress'
+import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted } from '@/lib/vodProgress'
+import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
 import { NO_FILTERS, filtersActive, applyVodFilters, sortVodItems, filterOptions } from '@/lib/vodFilters'
@@ -77,6 +78,73 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
   )
 }
 
+// ── My List ───────────────────────────────────────────────────────────────
+const MY_LIST = { id: 'mylist', title: 'My List' }
+
+// The titles to watch, as a row under Recently watched.
+function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
+  if (!entries.length) return null
+  return (
+    <section className="mb-6" aria-label="My List">
+      <div className="flex items-baseline gap-3 mb-2">
+        <h2 className="text-sm font-semibold text-[var(--color-text)]">My List</h2>
+        <button type="button" onClick={onSeeAll} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">See all</button>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+        {entries.map((e) => (
+          <div key={e.id} className="shrink-0 w-36 sm:w-40">
+            <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// My List as a category: To watch, then Completed. Each title can move
+// between the two by hand.
+function MyListView({ toWatch, completed, empty, kind, onOpen, onDownload }) {
+  if (empty) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-[var(--color-muted)]">
+        <Bookmark size={32} className="opacity-30" />
+        <p className="text-sm">No {kind} on My List yet.</p>
+        <p className="text-xs">Use the bookmark on any title to save it for later.</p>
+      </div>
+    )
+  }
+  const grid = (entries, done) => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
+      {entries.map((e) => (
+        <div key={e.id} className="flex flex-col gap-1">
+          <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
+          <button
+            type="button"
+            onClick={() => setMyListCompleted(e.id, !done)}
+            className="self-start flex items-center gap-1 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+          >
+            {done ? <><RotateCcw size={11} /> Back to To watch</> : <><Check size={11} /> Mark completed</>}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+  return (
+    <div className="flex flex-col gap-8">
+      <section aria-label="To watch">
+        <h2 className="text-sm font-semibold text-[var(--color-text)] mb-3">To watch <span className="text-[var(--color-muted)] font-normal">{toWatch.length}</span></h2>
+        {toWatch.length ? grid(toWatch, false) : <p className="text-xs text-[var(--color-muted)]">Nothing here{completed.length ? ' — all watched.' : '.'}</p>}
+      </section>
+      {completed.length > 0 && (
+        <section aria-label="Completed">
+          <h2 className="text-sm font-semibold text-[var(--color-text)] mb-3">Completed <span className="text-[var(--color-muted)] font-normal">{completed.length}</span></h2>
+          {grid(completed, true)}
+        </section>
+      )}
+    </div>
+  )
+}
+
 // A history entry's title as a VOD item, rebuilt from the player link it was
 // saved with — to open a show's seasons again.
 function itemFromParams(params) {
@@ -129,6 +197,7 @@ function VodCard({ item, onClick, onDownload }) {
     >
       <div className="relative">
         <Thumb src={item.screenshotUrl} name={item.name} isHD={item.isHD} />
+        <MyListButton item={item} overlay className="absolute top-1 left-1" />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <Play size={32} className="text-white opacity-0 group-hover:opacity-90 transition-opacity drop-shadow-lg" fill="currentColor" />
         </div>
@@ -214,6 +283,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
               {selectedSeason ? selectedSeason.name : 'Select a season'}
             </p>
           </div>
+          <MyListButton item={item} />
           {selectedSeason && episodes?.length > 0 && (
             <button
               onClick={() => onDownloadSeason(item, selectedSeason, episodes)}
@@ -375,6 +445,7 @@ export default function VodPage() {
   const [search, setSearch]           = useState('')
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
+  const [myList, setMyList]   = useState(() => getMyList())     // My List
 
   const searchTimer = useRef(null)
   // Bumped on every category/search/type change so a slow, stale getVodItems()
@@ -393,7 +464,7 @@ export default function VodPage() {
   // Recently watched: fetched fresh when the page opens (this page remounts
   // when returning from the player) and kept in step with every change.
   useEffect(() => {
-    const stop = onWatchChange((w) => setHistory(w.history))
+    const stop = onWatchChange((w) => { setHistory(w.history); setMyList(w.list ?? []) })
     loadWatch()
     return stop
   }, [])
@@ -458,9 +529,21 @@ export default function VodPage() {
   // always read whole (backend routes/vod.js) — and can be filtered, unlike
   // the portal's own "All", which is the whole catalog.
   const isSeriesAll = selectedCategory?.id === 'series:all'
+  const isMyList = selectedCategory?.id === MY_LIST.id
   const isAllCategory = !!selectedCategory && !isSeriesAll && (String(selectedCategory.id) === '*' || selectedCategory.title?.trim().toLowerCase() === 'all')
   // Whole-listing mode: a filter is on, or the Series "All".
-  const filtering = (filtersActive(filters) && !!selectedCategory && !isAllCategory) || isSeriesAll
+  const filtering = ((filtersActive(filters) && !!selectedCategory && !isAllCategory) || isSeriesAll) && !isMyList
+  // My List for this tab (movies or shows): To watch and Completed, each
+  // searched, filtered and sorted like any category ('Newest' = added last).
+  const tabList = useMemo(() => myList.filter((e) => !!e.item.isSeries === (vodType === 'series')), [myList, vodType])
+  const listSection = (done) => {
+    const entries = tabList.filter((e) => !!e.completedAt === done)
+    const kept = new Set(applyVodFilters(entries.map((e) => e.item), filters, { watched, search }).map((i) => String(i.id)))
+    const shown = entries.filter((e) => kept.has(String(e.item.id)))
+    if (sort === 'added') return shown
+    const order = sortVodItems(shown.map((e) => e.item), 'name').map((i) => String(i.id))
+    return order.map((id) => shown.find((e) => String(e.item.id) === id))
+  }
   const listing = useCategoryListing(vodType, selectedCategory?.id, filtering)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- read again per category, and when filtering starts
   const watched = useMemo(() => getWatchedVodIds(), [filtering, selectedCategory?.id])
@@ -468,7 +551,7 @@ export default function VodPage() {
     () => (filtering ? sortVodItems(applyVodFilters(listing.items, filters, { watched, search }), sort) : []),
     [filtering, listing.items, filters, watched, search, sort],
   )
-  const options = useMemo(() => filterOptions(filtering ? listing.items : items), [filtering, listing.items, items])
+  const options = useMemo(() => filterOptions(isMyList ? tabList.map((e) => e.item) : filtering ? listing.items : items), [isMyList, tabList, filtering, listing.items, items])
   useEffect(() => { setVisibleCount(SHOW_STEP) }, [filters, selectedCategory?.id, sort, search])
   const shownItems = filtering ? filtered.slice(0, visibleCount) : items
   // Back from filtering: the page-by-page list catches up with any search
@@ -492,7 +575,7 @@ export default function VodPage() {
     setItems([])
     setCurrentPage(1)
     const token = ++itemsTokenRef.current
-    if (cat.id !== 'series:all') loadItems(cat.id, searchRef.current, 1, token)
+    if (cat.id !== 'series:all' && cat.id !== MY_LIST.id) loadItems(cat.id, searchRef.current, 1, token)
   }, [loadItems])
 
   // Load categories on type change, or when the viewer's filters change
@@ -661,6 +744,18 @@ export default function VodPage() {
           {!catsLoading && categories.length === 0 && !catsError && (
             <p className="px-3 py-4 text-xs text-[var(--color-muted)] text-center">No categories found.</p>
           )}
+          <button
+            onClick={() => selectCategory(MY_LIST)}
+            className={cn(
+              'w-full flex items-center gap-2 text-left px-3 py-2 text-xs transition-colors border-b border-[var(--color-border)]',
+              isMyList
+                ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
+                : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
+            )}
+          >
+            <Bookmark size={12} /> My List
+            <span className="ml-auto text-[10px] text-[var(--color-muted)]">{tabList.filter((e) => !e.completedAt).length || ''}</span>
+          </button>
           {categories.map(cat => (
             <button
               key={cat.id}
@@ -695,7 +790,9 @@ export default function VodPage() {
           </div>
           {selectedCategory && (
             <span className="text-xs text-[var(--color-muted)]">
-              {filtering
+              {isMyList
+                ? `${tabList.length.toLocaleString()} titles`
+                : filtering
                 ? `${filtered.length.toLocaleString()} of ${listing.loaded.toLocaleString()} titles`
                 : totalItems > 0 ? `${totalItems.toLocaleString()} titles` : ''}
             </span>
@@ -731,8 +828,22 @@ export default function VodPage() {
 
         {/* Items grid */}
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
-          {!filtersActive(filters) && !search && (
-            <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
+          {!filtersActive(filters) && !search && !isMyList && (
+            <>
+              <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
+              <MyListRow entries={myList.filter((e) => !e.completedAt)} onOpen={handleItemClick} onSeeAll={() => selectCategory(MY_LIST)} onDownload={downloadMovie} />
+            </>
+          )}
+
+          {isMyList && (
+            <MyListView
+              toWatch={listSection(false)}
+              completed={listSection(true)}
+              empty={tabList.length === 0}
+              kind={vodType === 'series' ? 'shows' : 'movies'}
+              onOpen={handleItemClick}
+              onDownload={downloadMovie}
+            />
           )}
           {!selectedCategory && (
             <>
@@ -747,7 +858,7 @@ export default function VodPage() {
             <p className="text-sm text-[var(--color-live)] text-center py-8">{itemsError}</p>
           )}
 
-          {shownItems.length > 0 && (
+          {!isMyList && shownItems.length > 0 && (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
                 {shownItems.map(item => (
@@ -791,14 +902,14 @@ export default function VodPage() {
             </div>
           )}
 
-          {!filtering && selectedCategory && !itemsLoading && items.length === 0 && !itemsError && (
+          {!filtering && !isMyList && selectedCategory && !itemsLoading && items.length === 0 && !itemsError && (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-[var(--color-muted)]">
               <Film size={32} className="opacity-20" />
               <p className="text-sm">{search ? `No results for "${search}"` : 'No titles in this category.'}</p>
             </div>
           )}
 
-          {!filtering && selectedCategory && itemsLoading && items.length === 0 && (
+          {!filtering && !isMyList && selectedCategory && itemsLoading && items.length === 0 && (
             <div className="flex items-center justify-center h-48">
               <Loader2 size={28} className="animate-spin text-[var(--color-primary-light)]" />
             </div>
