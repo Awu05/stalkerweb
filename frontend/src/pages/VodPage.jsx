@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download } from 'lucide-react'
+import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
-import { getVodProgressList, removeVodProgress, getWatchedVodIds } from '@/lib/vodProgress'
+import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds } from '@/lib/vodProgress'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
 import { NO_FILTERS, filtersActive, applyVodFilters, sortVodItems, filterOptions } from '@/lib/vodFilters'
@@ -15,23 +15,32 @@ import { showToast } from '@/lib/toast'
 
 // ── Continue Watching row ─────────────────────────────────────────────────
 // Horizontally-scrolling shelf of in-progress titles, restored from localStorage.
-function ContinueWatching({ entries, onResume, onRemove }) {
+// ── Recently watched ─────────────────────────────────────────────────────
+// The viewer's last titles, newest first (backend viewers/WatchStore.js): a
+// show once, with the episode played last. Unfinished ones show how far they
+// got and resume; finished ones are ticked — a movie plays again, a show
+// opens its seasons.
+function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
   if (!entries.length) return null
   return (
-    <div className="mb-6">
-      <h2 className="text-sm font-semibold text-[var(--color-text)] mb-2">Continue Watching</h2>
+    <section className="mb-6" aria-label="Recently watched">
+      <div className="flex items-baseline gap-3 mb-2">
+        <h2 className="text-sm font-semibold text-[var(--color-text)]">Recently watched</h2>
+        <button type="button" onClick={onClear} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">Clear</button>
+      </div>
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
         {entries.map(e => {
-          const pct = e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
+          const pct = !e.finished && e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
           return (
-            <div key={e.key} className="group relative shrink-0 w-40">
+            <div key={e.id} className="group relative shrink-0 w-36 sm:w-40">
               <button
-                onClick={() => onResume(e)}
-                className="block w-full text-left rounded-[var(--radius-sm)] overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary-light)]"
+                onClick={() => onOpen(e)}
+                aria-label={`${e.finished ? 'Watched' : 'Resume'}: ${e.title}${e.episodeTitle ? `, ${e.episodeTitle}` : ''}`}
+                className="block w-full text-left rounded-[var(--radius-sm)] overflow-hidden"
               >
-                <div className="relative w-full aspect-[2/3] bg-[var(--color-surface-2)] overflow-hidden">
+                <div className="relative w-full aspect-[2/3] bg-[var(--color-surface-2)] overflow-hidden rounded-[var(--radius-sm)]">
                   {e.screenshotUrl ? (
-                    <img src={e.screenshotUrl} alt={e.title} className="w-full h-full object-contain" loading="lazy" />
+                    <img src={e.screenshotUrl} alt="" className="w-full h-full object-contain" loading="lazy" />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <Film size={24} className="text-[var(--color-muted)] opacity-40" />
@@ -40,17 +49,23 @@ function ContinueWatching({ entries, onResume, onRemove }) {
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                     <Play size={28} className="text-white opacity-0 group-hover:opacity-90 transition-opacity drop-shadow-lg" fill="currentColor" />
                   </div>
-                  {/* Progress bar */}
-                  <div className="absolute bottom-0 inset-x-0 h-1 bg-black/50">
-                    <div className="h-full bg-[var(--color-primary-light)]" style={{ width: `${pct}%` }} />
-                  </div>
+                  {e.finished ? (
+                    <span className="absolute top-1 left-1 flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      <Check size={10} /> Watched
+                    </span>
+                  ) : pct > 0 && (
+                    <div className="absolute bottom-0 inset-x-0 h-1 bg-black/50">
+                      <div className="h-full bg-[var(--color-primary-light)]" style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs font-medium text-[var(--color-text)] truncate leading-tight mt-1">{e.title}</p>
+                {e.episodeTitle && <p className="text-[11px] text-[var(--color-muted)] truncate leading-tight">{e.episodeTitle}</p>}
               </button>
               <button
-                onClick={() => onRemove(e.key)}
-                aria-label="Remove from Continue Watching"
-                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 hover:bg-black/80 hover:text-white transition-all"
+                onClick={() => onRemove(e.id)}
+                aria-label={`Remove ${e.title} from Recently watched`}
+                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/80 hover:text-white transition-all"
               >
                 <X size={12} />
               </button>
@@ -58,8 +73,21 @@ function ContinueWatching({ entries, onResume, onRemove }) {
           )
         })}
       </div>
-    </div>
+    </section>
   )
+}
+
+// A history entry's title as a VOD item, rebuilt from the player link it was
+// saved with — to open a show's seasons again.
+function itemFromParams(params) {
+  const q = new URLSearchParams(params)
+  const dec = (k) => { const v = q.get(k); try { return v ? decodeURIComponent(v) : '' } catch { return v || '' } }
+  return {
+    id: q.get('videoId') || '', name: q.get('title') || '', cmd: q.get('cmd') || '',
+    year: q.get('year') || '', durationMin: parseInt(q.get('durationMin') || '0', 10) || 0, isHD: q.get('isHD') === 'true',
+    screenshotUrl: dec('screenshotUrl'), description: dec('description'), director: dec('director'),
+    isSeries: true, episodes: [],
+  }
 }
 
 // ── Thumbnail component ───────────────────────────────────────────────────
@@ -346,7 +374,7 @@ export default function VodPage() {
 
   const [search, setSearch]           = useState('')
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
-  const [continueList, setContinueList] = useState([]) // Continue Watching entries
+  const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
 
   const searchTimer = useRef(null)
   // Bumped on every category/search/type change so a slow, stale getVodItems()
@@ -362,16 +390,20 @@ export default function VodPage() {
   const gridScrollRef = useRef(null)
   const sentinelRef   = useRef(null)
 
-  // Load Continue Watching on mount (this page remounts when returning from the player).
-  useEffect(() => { setContinueList(getVodProgressList()) }, [])
+  // Recently watched: fetched fresh when the page opens (this page remounts
+  // when returning from the player) and kept in step with every change.
+  useEffect(() => {
+    const stop = onWatchChange((w) => setHistory(w.history))
+    loadWatch()
+    return stop
+  }, [])
 
-  function resumeEntry(entry) {
-    navigate(`/vod-player?${entry.params}`)
-  }
-
-  function removeEntry(key) {
-    removeVodProgress(key)
-    setContinueList(list => list.filter(e => e.key !== key))
+  // A title in Recently watched: unfinished ones resume; a finished show opens
+  // its seasons, a finished movie plays again.
+  function openHistoryEntry(entry) {
+    const isEpisode = /(?:^|&)(?:seasonId|episodeId)=/.test(entry.params)
+    if (entry.finished && isEpisode) setSeriesSheet(itemFromParams(entry.params))
+    else navigate(`/vod-player?${entry.params}`)
   }
 
   // Title order: A–Z (the default) or newest first, remembered on this device.
@@ -691,9 +723,11 @@ export default function VodPage() {
 
         {/* Items grid */}
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
+          {!filtering && !search && (
+            <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
+          )}
           {!selectedCategory && (
             <>
-              <ContinueWatching entries={continueList} onResume={resumeEntry} onRemove={removeEntry} />
               <div className="flex flex-col items-center justify-center gap-3 py-16 text-[var(--color-muted)]">
                 <Film size={48} className="opacity-20" />
                 <p className="text-sm">Select a category to browse {vodType === 'series' ? 'series' : 'movies'}</p>

@@ -71,11 +71,13 @@ export default function VodPlayerPage() {
   useEffect(() => {
     metaRef.current = {
       key:           progressKey,
-      title:         displayTitle,
+      // The movie or show, and the episode — Recently watched lists a show once.
+      title:         title,
+      episodeTitle:  episodeTitle,
       screenshotUrl: searchParams.get('screenshotUrl') ? decodeURIComponent(searchParams.get('screenshotUrl')) : '',
       params:        searchParams.toString(),
     }
-  }, [progressKey, displayTitle, searchParams])
+  }, [progressKey, title, episodeTitle, searchParams])
 
   // Write current position to the store (auto-prunes when finished/barely-started).
   const persist = useCallback(() => {

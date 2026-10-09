@@ -177,9 +177,11 @@ export const getStreamUrl = (channelId) => _get(`/stream/${channelId}`)
 export const streamKeepalive = () => _get('/stream/keepalive')
 
 // ── VOD progress (Continue Watching) ─────────────────────────────────────
-export const getVodProgressBackend    = ()      => _get('/vod/progress')
-export const saveVodProgressBackend   = (entry) => _put('/vod/progress', entry)
-export const removeVodProgressBackend = (key)   => _delete(`/vod/progress/${encodeURIComponent(key)}`)
+// What the current viewer watched (backend viewers/WatchStore.js).
+export const getWatch          = ()      => _get('/vod/watch')
+export const saveWatch         = (entry) => _put('/vod/watch', entry)
+export const removeWatchTitle  = (id)    => _delete(`/vod/watch/history/${encodeURIComponent(id)}`)
+export const clearWatchHistory = ()      => _delete('/vod/watch/history')
 
 // ── VOD ───────────────────────────────────────────────────────────────────
 export const getVodCategories = (type = 'vod') =>
