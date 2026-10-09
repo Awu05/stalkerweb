@@ -90,7 +90,7 @@ async function migrateLegacyLocalProfiles(profiles, activeProfileId) {
 
 // Fetches the profile list from the server, migrates any leftover
 // localStorage profiles in, and populates the in-memory mirror. Call once on
-// app startup before anything reads getActiveProfileId()/getProfileGenres().
+// app startup before anything reads getActiveProfileId().
 //
 // Memoized on an in-flight promise: React 18 StrictMode double-invokes
 // mount effects in dev, and App.jsx + SetupPage can both call this during
@@ -154,31 +154,4 @@ export async function deleteProfile(id) {
   _profiles = _profiles.filter(p => p.id !== id)
   if (_activeProfileId === id) _activeProfileId = null
   return _profiles
-}
-
-// ── Per-profile genre filters ────────────────────────────────────────────────
-
-export function getProfileGenres(id) {
-  const p = _profiles.find(x => x.id === id)
-  return Array.isArray(p?.disabledGenres) ? p.disabledGenres : []
-}
-
-// Writes the disabledGenres array onto a profile and persists it to the
-// backend. Returns the updated in-memory profiles array.
-export async function setProfileGenres(id, genres) {
-  return updateProfile(id, { disabledGenres: genres })
-}
-
-// ── Per-profile language filters ─────────────────────────────────────────────
-// Coarser than genres and applied to VOD as well, which genres cannot be:
-// VOD category names share the "LANGUAGE | SECTION" shape but never the
-// section half, so only the language matches across the two.
-
-export function getProfileLanguages(id) {
-  const p = _profiles.find(x => x.id === id)
-  return Array.isArray(p?.disabledLanguages) ? p.disabledLanguages : []
-}
-
-export async function setProfileLanguages(id, languages) {
-  return updateProfile(id, { disabledLanguages: languages })
 }

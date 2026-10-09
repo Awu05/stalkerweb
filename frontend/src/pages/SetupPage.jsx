@@ -15,8 +15,10 @@ import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
   downloadStbEmuBackup, getChannels, getLogoMap, getProxiedLogoUrl, getGroups,
-  getLogoStripWords, addLogoStripWord, deleteLogoStripWord, getLanguages, saveMyFilters,
+  getLogoStripWords, addLogoStripWord, deleteLogoStripWord, getLanguages, saveMyFilters, getMyViewer,
 } from '../stalkerApi'
+import { serialSaves } from '@/lib/serialSaves'
+import { showToast } from '@/lib/toast'
 import { invalidateChannelCache } from '../lib/channelCache'
 import { invalidateFavoritesCache } from '../lib/useFavorites'
 import { useApp } from '@/lib/appContext'
@@ -814,10 +816,18 @@ export default function SetupPage() {
     setEpg(val); setEpgEnabled(val)
     try { await saveSettings({ epg_enabled: val }) } catch { /* non-critical */ }
   }
-  async function handleAdultToggle(val) {
+  // My channels: each change is shown at once and saved in the order made
+  // (serialSaves), so a later toggle never loses to an earlier one. A save
+  // that fails puts back what the server has, and says so.
+  const saveFilters = useMemo(() => serialSaves(saveMyFilters), [])
+  function filterSaveFailed() {
+    showToast('Could not save your channel filters', 'error')
+    getMyViewer().then(applyViewer).catch(() => {})
+  }
+  function handleAdultToggle(val) {
     setShowAdult(val)
     invalidateChannelCache()
-    try { applyViewer(await saveMyFilters({ showAdult: val })) } catch { setShowAdult(!val) }
+    saveFilters({ showAdult: val }).catch(filterSaveFailed)
   }
   async function handleSaveDownloadDir() {
     if (!downloadDir.trim()) return
@@ -884,7 +894,7 @@ export default function SetupPage() {
   // cache so the channel/player pages re-filter on next visit.
   function persistGenres(set) {
     setDisabledGenres(set)
-    saveMyFilters({ disabledGenres: [...set] }).catch(() => {})
+    saveFilters({ disabledGenres: [...set] }).catch(filterSaveFailed)
     invalidateChannelCache()
   }
   function handleToggleGenre(genreName) {
@@ -903,7 +913,7 @@ export default function SetupPage() {
   // "LANGUAGE | SECTION" shape but never the section half.
   function persistLanguages(set) {
     setDisabledLanguages(set)
-    saveMyFilters({ disabledLanguages: [...set] }).catch(() => {})
+    saveFilters({ disabledLanguages: [...set] }).catch(filterSaveFailed)
     invalidateChannelCache()
   }
   function handleToggleLanguage(lang) {

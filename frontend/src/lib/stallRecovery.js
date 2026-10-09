@@ -40,3 +40,21 @@ export function rangesOf(timeRanges) {
   for (let i = 0; i < (timeRanges?.length ?? 0); i++) out.push([timeRanges.start(i), timeRanges.end(i)])
   return out
 }
+
+// One tick of the player's stall watchdog. `state` is { lastTime, lastAdvance,
+// jumped }; returns the next state and what to do: null, { jumpTo } (seek past a
+// hole, once per freeze) or 'reconnect' (12 s frozen). A jump is not playback:
+// the clock keeps counting from when the freeze began, so a jump that doesn't
+// help never delays the reconnect.
+export function watchdogTick(state, { now, currentTime, idle, buffered }) {
+  if (idle || currentTime > state.lastTime + 0.25) {
+    return { state: { lastTime: currentTime, lastAdvance: now, jumped: false }, action: null }
+  }
+  const frozenFor = now - state.lastAdvance
+  if (!state.jumped && frozenFor >= 3000) {
+    const to = jumpTarget(buffered, currentTime)
+    if (to !== null) return { state: { ...state, lastTime: to, jumped: true }, action: { jumpTo: to } }
+    state = { ...state, jumped: true }
+  }
+  return { state, action: frozenFor > 12000 ? 'reconnect' : null }
+}

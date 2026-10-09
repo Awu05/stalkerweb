@@ -43,7 +43,10 @@ module.exports = function profilesModule(profilesManager) {
   });
 
   router.put('/:id', (req, res) => {
-    const updated = profilesManager.update(req.params.id, req.body || {});
+    // The filters GET shows are the viewer's (above); the profile keeps its own
+    // pre-viewer ones untouched, so going back to an older version still works.
+    const { disabledGenres: _g, disabledLanguages: _l, ...patch } = req.body || {};
+    const updated = profilesManager.update(req.params.id, patch);
     if (!updated) return res.status(404).json({ error: 'profile not found' });
     res.json(updated);
   });
