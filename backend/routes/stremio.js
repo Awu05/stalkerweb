@@ -144,11 +144,12 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
     // a new version — and refreshes its stored genre lists — when they change.
     const [major = '1', minor = '0'] = String(version).split('.');
     const patch = parseInt(hash(JSON.stringify([portalTag(), g])).slice(0, 7), 16);
-    // Each viewer installs their own copy (their own channel filters) from a
-    // /v/<id>/ link, which gets an id of its own; the plain link keeps the
-    // original id so existing installs carry on. The id follows the link, not
-    // which viewer is the default, so deleting the default viewer never hands
-    // its id to someone else's installed addon.
+    // Each viewer installs their own copy (their own channel filters) from the
+    // /v/<id>/ link Settings shows them — the default viewer too — which gets
+    // an id of its own. A plain link (installed before viewers existed) keeps
+    // the original id and the default viewer's channels, so those installs
+    // carry on. The id follows the link, not which viewer is the default, so
+    // deleting the default viewer never hands its id to another addon.
     const viewer = req.viewer;
     const own = req.viewerInPath === true && !!viewer;
     res.set('Cache-Control', 'no-cache');
