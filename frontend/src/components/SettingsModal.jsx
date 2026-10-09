@@ -64,7 +64,7 @@ export default function SettingsModal({ onClose, children }) {
         // min-w-0: as a flex item it would otherwise widen to its longest link.
         // Inline outline: the panel takes focus on open, and the global focus
         // ring (index.css, unlayered) would beat an outline-none utility.
-        className="relative w-full min-w-0 sm:max-w-3xl h-full sm:h-[min(90dvh,1000px)] overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--color-bg)] sm:rounded-[var(--radius-lg)] sm:border border-[var(--color-border)] shadow-2xl"
+        className="relative w-full min-w-0 sm:max-w-5xl h-full sm:h-[min(90dvh,1000px)] overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--color-bg)] sm:rounded-[var(--radius-lg)] sm:border border-[var(--color-border)] shadow-2xl"
         style={{ outline: 'none' }}
       >
         {onClose && (

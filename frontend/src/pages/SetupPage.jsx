@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle,
   Trash2, RefreshCw, Image, Download, Upload, Plus, Pencil, Plug, PlugZap,
@@ -27,6 +27,8 @@ import {
 } from '@/lib/profiles'
 import ViewersCard from '@/components/ViewersCard'
 import ChannelFilters from '@/components/ChannelFilters'
+import SettingsTabs from '@/components/SettingsTabs'
+import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -478,6 +480,8 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onD
 
 export default function SetupPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { connected, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer } = useApp()
 
   // ── Profiles ────────────────────────────────────────────────────────────────
@@ -890,6 +894,16 @@ export default function SetupPage() {
     }
   }
 
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  const tab = chooseTab(searchParams.get('tab'), rememberedTab(), connected)
+  function openTab(id) {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', id)
+    setSearchParams(next, { replace: true, state: location.state })
+    rememberTab(id)
+    document.getElementById('settings-panel')?.closest('[role="dialog"]')?.scrollTo({ top: 0 })
+  }
+
   if (initLoading) {
     return (
       <div className="flex h-48 items-center justify-center">
@@ -900,7 +914,7 @@ export default function SetupPage() {
 
   return (
     <>
-      <div className="max-w-2xl mx-auto px-6 py-10 flex flex-col gap-6">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 pt-6 sm:pt-8 pb-10 flex flex-col gap-6">
 
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -920,6 +934,11 @@ export default function SetupPage() {
 
         <Notice notice={notice} />
 
+        <SettingsTabs tab={tab} onChange={openTab} />
+
+        <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="flex flex-col gap-6">
+        {tab === 'viewers' && (
+          <>
         {/* ── Viewers ─────────────────────────────────────────────────────── */}
         <Card title="Viewers" description="Everyone who watches here. Each viewer has their own favorites and channel filters; every other setting on this page is shared.">
           <ViewersCard />
@@ -931,7 +950,11 @@ export default function SetupPage() {
         >
           <ChannelFilters />
         </Card>
+          </>
+        )}
 
+        {tab === 'connection' && (
+          <>
         {/* ── IPTV connections ────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-[var(--color-text)]">IPTV Connections</h2>
@@ -964,6 +987,85 @@ export default function SetupPage() {
           </button>
         </div>
 
+        {/* ── Device Profile ───────────────────────────────────────────────── */}
+        {deviceProfile && (
+          <Card title="Device Profile" description="STB identity sent to the Stalker portal on every request.">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              {[
+                ['STB Model', deviceProfile.stb_type], ['HW Version', deviceProfile.hw_version],
+                ['Image Version', deviceProfile.image_version], ['Firmware', deviceProfile.image_description],
+                ['Portal API', deviceProfile.portal_version], ['JS API Version', deviceProfile.js_api_version],
+                ['STB API Version', deviceProfile.stb_api_version], ['Player Engine', deviceProfile.player_engine_version],
+              ].map(([label, value]) => value && (
+                <div key={label} className="flex flex-col gap-0.5">
+                  <span className="text-xs text-[var(--color-muted)]">{label}</span>
+                  <span className="text-xs font-mono text-[var(--color-text)]">{value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-col gap-0.5 pt-1 border-t border-[var(--color-border)]">
+              <span className="text-xs text-[var(--color-muted)]">User-Agent</span>
+              <span className="text-xs font-mono text-[var(--color-text)] break-all">{deviceProfile.user_agent}</span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-[var(--color-muted)]">X-User-Agent</span>
+              <span className="text-xs font-mono text-[var(--color-text)]">{deviceProfile.x_user_agent}</span>
+            </div>
+          </Card>
+        )}
+        {/* ── STBEmu Export / Import ──────────────────────────────────────── */}
+        <Card title="STBEmu Backup" description="Export a connection as an STBEmu-compatible backup, or import a backup file (from STBEmu or from this app) as new connections.">
+          <div className="flex flex-col gap-4">
+            {stbEmuNotice && (
+              <div className={cn('flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-xs',
+                stbEmuNotice.type === 'success'
+                  ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] border border-[var(--color-success)]/25'
+                  : 'bg-[var(--color-live)]/10 text-[var(--color-live)] border border-[var(--color-live)]/25'
+              )}>
+                {stbEmuNotice.type === 'success' ? <CheckCircle2 size={13} className="shrink-0" /> : <XCircle size={13} className="shrink-0" />}
+                {stbEmuNotice.msg}
+              </div>
+            )}
+
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">Export</p>
+              <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-3">Pick which profile to export — the STB model, firmware, and profile name come from that profile.</p>
+              <Field label="Profile to Export" id="stb-export-profile">
+                <select id="stb-export-profile" value={exportProfileId}
+                  onChange={e => setExportProfileId(e.target.value)}
+                  className="flex h-9 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary-light)]">
+                  <option value="">Current / Connected Config</option>
+                  {profiles.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name || p.portal}{p.stb_model ? ` (${p.stb_model})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="flex items-center gap-3 pt-3">
+                <Button type="button" onClick={handleStbEmuExport} disabled={stbEmuExporting} className="h-9 px-4 text-sm gap-2">
+                  {stbEmuExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Download Backup
+                </Button>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-[var(--color-border)]">
+              <p className="text-sm font-medium text-[var(--color-text)]">Import</p>
+              <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-3">Restore an STBEmu backup JSON file as one or more new profiles. If the file contains multiple profiles, you&apos;ll be asked which to import.</p>
+              <input ref={stbImportInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleStbEmuImportFile} />
+              <Button type="button" variant="outline" onClick={() => stbImportInputRef.current?.click()} className="h-9 px-4 text-sm gap-2">
+                <Upload size={14} />
+                Choose Backup File
+              </Button>
+            </div>
+          </div>
+        </Card>
+          </>
+        )}
+
+        {tab === 'links' && (
+          <>
         {/* ── IPTV Links (M3U / XMLTV) ─────────────────────────────────────── */}
         {(() => {
           const origin = (typeof window !== 'undefined' && window.location?.origin) || ''
@@ -1045,9 +1147,13 @@ export default function SetupPage() {
             </Card>
           )
         })()}
+          </>
+        )}
 
+        {tab === 'playback' && (
+          <>
         {/* ── App Preferences ─────────────────────────────────────────────── */}
-        <Card title="App Preferences" description="Customize how StalkerWeb behaves.">
+        <Card title="Playback & Guide" description="How StalkerWeb plays, guides and downloads — shared by every viewer.">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-[var(--color-text)]">EPG / Program Guide</p>
@@ -1183,105 +1289,11 @@ export default function SetupPage() {
             )}
           </div>
         </Card>
+          </>
+        )}
 
-        {/* ── STBEmu Export / Import ──────────────────────────────────────── */}
-        <Card title="STBEmu Backup" description="Export a connection as an STBEmu-compatible backup, or import a backup file (from STBEmu or from this app) as new connections.">
-          <div className="flex flex-col gap-4">
-            {stbEmuNotice && (
-              <div className={cn('flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-xs',
-                stbEmuNotice.type === 'success'
-                  ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] border border-[var(--color-success)]/25'
-                  : 'bg-[var(--color-live)]/10 text-[var(--color-live)] border border-[var(--color-live)]/25'
-              )}>
-                {stbEmuNotice.type === 'success' ? <CheckCircle2 size={13} className="shrink-0" /> : <XCircle size={13} className="shrink-0" />}
-                {stbEmuNotice.msg}
-              </div>
-            )}
-
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">Export</p>
-              <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-3">Pick which profile to export — the STB model, firmware, and profile name come from that profile.</p>
-              <Field label="Profile to Export" id="stb-export-profile">
-                <select id="stb-export-profile" value={exportProfileId}
-                  onChange={e => setExportProfileId(e.target.value)}
-                  className="flex h-9 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary-light)]">
-                  <option value="">Current / Connected Config</option>
-                  {profiles.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name || p.portal}{p.stb_model ? ` (${p.stb_model})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div className="flex items-center gap-3 pt-3">
-                <Button type="button" onClick={handleStbEmuExport} disabled={stbEmuExporting} className="h-9 px-4 text-sm gap-2">
-                  {stbEmuExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Download Backup
-                </Button>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-[var(--color-border)]">
-              <p className="text-sm font-medium text-[var(--color-text)]">Import</p>
-              <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-3">Restore an STBEmu backup JSON file as one or more new profiles. If the file contains multiple profiles, you&apos;ll be asked which to import.</p>
-              <input ref={stbImportInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleStbEmuImportFile} />
-              <Button type="button" variant="outline" onClick={() => stbImportInputRef.current?.click()} className="h-9 px-4 text-sm gap-2">
-                <Upload size={14} />
-                Choose Backup File
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        {/* ── Logo Strip Words ─────────────────────────────────────────────── */}
-        <Card title="Logo Strip Words" description="Words removed from channel names before logo matching. Useful when your portal adds country or quality suffixes — e.g. add 'CANADA' so 'BBC CANADA' matches the 'BBC' logo.">
-
-          {/* Feedback notice shared with logo overrides section */}
-          {logoNotice && (
-            <div className={cn('flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-xs',
-              logoNotice.type === 'success'
-                ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] border border-[var(--color-success)]/25'
-                : 'bg-[var(--color-live)]/10 text-[var(--color-live)] border border-[var(--color-live)]/25'
-            )}>
-              {logoNotice.type === 'success' ? <CheckCircle2 size={13} className="shrink-0" /> : <XCircle size={13} className="shrink-0" />}
-              {logoNotice.msg}
-            </div>
-          )}
-
-          {/* Current strip words as dismissible pill chips */}
-          {stripWords.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {stripWords.map(w => (
-                <span key={w} className="flex items-center gap-1 rounded-full bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-3 pr-1.5 py-1 text-xs text-[var(--color-text)]">
-                  {w}
-                  <button type="button" onClick={() => handleDeleteStripWord(w)} disabled={stripApplying}
-                    className="text-[var(--color-muted)] hover:text-[var(--color-live)] transition-colors ml-0.5 disabled:opacity-40" title="Remove">
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {stripWords.length === 0 && !stripApplying && (
-            <p className="text-xs text-[var(--color-muted)]">No strip words configured yet.</p>
-          )}
-
-          <form onSubmit={handleAddStripWord} className="flex gap-2">
-            <Input placeholder="e.g. CANADA, USA, FHD…" value={newStripWord}
-              onChange={e => setNewStripWord(e.target.value)} className="text-xs flex-1"
-              disabled={stripApplying} />
-            <Button type="submit" disabled={!newStripWord.trim() || stripApplying} className="shrink-0 h-9 px-4 text-xs gap-1.5">
-              {stripApplying ? <Loader2 size={12} className="animate-spin" /> : null}
-              Add
-            </Button>
-          </form>
-          <p className="text-xs text-[var(--color-muted)]">
-            Whole-word, case-insensitive. After adding a word the logo match count updates automatically
-            and all channel pages refresh their logos on the next visit.
-          </p>
-        </Card>
-
+        {tab === 'logos' && (
+          <>
         {/* ── Channel Logos ─────────────────────────────────────────────────── */}
         <Card title="Channel Logos" description="Logos come from your Stalker portal by default. Optionally fetch the iptv-org database to fill in logos for channels the portal doesn't provide, and add manual overrides per channel.">
           {logoNotice && (
@@ -1395,32 +1407,57 @@ export default function SetupPage() {
           </form>
         </Card>
 
-        {/* ── Device Profile ───────────────────────────────────────────────── */}
-        {deviceProfile && (
-          <Card title="Device Profile" description="STB identity sent to the Stalker portal on every request.">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              {[
-                ['STB Model', deviceProfile.stb_type], ['HW Version', deviceProfile.hw_version],
-                ['Image Version', deviceProfile.image_version], ['Firmware', deviceProfile.image_description],
-                ['Portal API', deviceProfile.portal_version], ['JS API Version', deviceProfile.js_api_version],
-                ['STB API Version', deviceProfile.stb_api_version], ['Player Engine', deviceProfile.player_engine_version],
-              ].map(([label, value]) => value && (
-                <div key={label} className="flex flex-col gap-0.5">
-                  <span className="text-xs text-[var(--color-muted)]">{label}</span>
-                  <span className="text-xs font-mono text-[var(--color-text)]">{value}</span>
-                </div>
+        {/* ── Logo Strip Words ─────────────────────────────────────────────── */}
+        <Card title="Logo Strip Words" description="Words removed from channel names before logo matching. Useful when your portal adds country or quality suffixes — e.g. add 'CANADA' so 'BBC CANADA' matches the 'BBC' logo.">
+
+          {/* Feedback notice shared with logo overrides section */}
+          {logoNotice && (
+            <div className={cn('flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-xs',
+              logoNotice.type === 'success'
+                ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] border border-[var(--color-success)]/25'
+                : 'bg-[var(--color-live)]/10 text-[var(--color-live)] border border-[var(--color-live)]/25'
+            )}>
+              {logoNotice.type === 'success' ? <CheckCircle2 size={13} className="shrink-0" /> : <XCircle size={13} className="shrink-0" />}
+              {logoNotice.msg}
+            </div>
+          )}
+
+          {/* Current strip words as dismissible pill chips */}
+          {stripWords.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {stripWords.map(w => (
+                <span key={w} className="flex items-center gap-1 rounded-full bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-3 pr-1.5 py-1 text-xs text-[var(--color-text)]">
+                  {w}
+                  <button type="button" onClick={() => handleDeleteStripWord(w)} disabled={stripApplying}
+                    className="text-[var(--color-muted)] hover:text-[var(--color-live)] transition-colors ml-0.5 disabled:opacity-40" title="Remove">
+                    <X size={11} />
+                  </button>
+                </span>
               ))}
             </div>
-            <div className="flex flex-col gap-0.5 pt-1 border-t border-[var(--color-border)]">
-              <span className="text-xs text-[var(--color-muted)]">User-Agent</span>
-              <span className="text-xs font-mono text-[var(--color-text)] break-all">{deviceProfile.user_agent}</span>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-[var(--color-muted)]">X-User-Agent</span>
-              <span className="text-xs font-mono text-[var(--color-text)]">{deviceProfile.x_user_agent}</span>
-            </div>
-          </Card>
+          )}
+
+          {stripWords.length === 0 && !stripApplying && (
+            <p className="text-xs text-[var(--color-muted)]">No strip words configured yet.</p>
+          )}
+
+          <form onSubmit={handleAddStripWord} className="flex gap-2">
+            <Input placeholder="e.g. CANADA, USA, FHD…" value={newStripWord}
+              onChange={e => setNewStripWord(e.target.value)} className="text-xs flex-1"
+              disabled={stripApplying} />
+            <Button type="submit" disabled={!newStripWord.trim() || stripApplying} className="shrink-0 h-9 px-4 text-xs gap-1.5">
+              {stripApplying ? <Loader2 size={12} className="animate-spin" /> : null}
+              Add
+            </Button>
+          </form>
+          <p className="text-xs text-[var(--color-muted)]">
+            Whole-word, case-insensitive. After adding a word the logo match count updates automatically
+            and all channel pages refresh their logos on the next visit.
+          </p>
+        </Card>
+          </>
         )}
+        </div>
       </div>
 
       {/* ── Profile sheet (add / edit) ───────────────────────────────────── */}
