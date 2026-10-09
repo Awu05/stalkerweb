@@ -101,6 +101,17 @@ describe('Stremio addon', () => {
     expect(genreOf('movie').isRequired).toBe(false)
   })
 
+  it("never hands one viewer the movie categories another viewer hid", async () => {
+    const movieGenres = (m) => m.catalogs.find((c) => c.type === 'movie').extra.find((e) => e.name === 'genre').options
+    expect(movieGenres(await get('/manifest.json'))).toContain('Action')
+    appState.getHiddenVodCategories = () => new Set(['ACTION'])
+    try {
+      expect(movieGenres(await get('/manifest.json'))).not.toContain('Action')
+    } finally {
+      delete appState.getHiddenVodCategories
+    }
+  })
+
   it("gives each viewer's link its own addon id and name, so several can be installed", async () => {
     const viaLink = async (id) => (await fetch(`${base}/v/${id}/stremio/manifest.json`)).json()
     expect(await viaLink('view_andy')).toMatchObject({ id: 'com.stalkerweb.addon.view_andy', name: 'StalkerWeb (Andy)' })

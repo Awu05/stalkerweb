@@ -5,7 +5,7 @@ import { installViewerFilters } from '../lib/viewerFilters.js'
 
 const all = [
   { id: 'view_def', name: 'Default', disabledGenres: [], disabledLanguages: [], showAdult: false },
-  { id: 'view_andy', name: 'Andy', disabledGenres: ['Sports'], disabledLanguages: ['FR'], showAdult: true },
+  { id: 'view_andy', name: 'Andy', disabledGenres: ['Sports'], disabledLanguages: ['FR'], disabledVodCategories: ['Kids Movies'], showAdult: true },
 ]
 const viewers = {
   get: (id) => all.find((v) => v.id === id) ?? null,
@@ -33,6 +33,7 @@ describe('viewer filters', () => {
         names: channels.filter(appState.getExportFilter().keep).map((c) => c.name),
         adult: appState.getShowAdult(),
         languages: [...appState.getHiddenLanguages()],
+        vod: [...appState.getHiddenVodCategories()],
         isDefault: appState.isDefaultViewer(appState.currentViewer()),
       })
     })
@@ -43,7 +44,7 @@ describe('viewer filters', () => {
 
   it('uses the default viewer\'s filters when no viewer is named', async () => {
     const r = await (await fetch(`${base}/shown`)).json()
-    expect(r).toEqual({ names: ['ESPN', 'TF1', 'CNN'], adult: false, languages: [], isDefault: true })
+    expect(r).toEqual({ names: ['ESPN', 'TF1', 'CNN'], adult: false, languages: [], vod: [], isDefault: true })
   })
 
   it('uses the named viewer\'s filters', async () => {
@@ -51,6 +52,7 @@ describe('viewer filters', () => {
     expect(r.names).toEqual(['Hot', 'CNN'])
     expect(r.adult).toBe(true)
     expect(r.languages.length).toBe(1)
+    expect(r.vod).toEqual(['KIDS MOVIES'])
     expect(r.isDefault).toBe(false)
   })
 

@@ -14,10 +14,8 @@ const path    = require('path');
 const express = require('express');
 const router  = express.Router();
 const sessionMiddleware = require('../middleware/session');
-const { isLanguageDisabled } = require('../lib/languages');
+const { visibleVodCategories } = require('../lib/vodCategoryFilter');
 
-// The portal's "show everything" pseudo-category.
-const ALL_CATEGORIES_ID = '*';
 const log = require('../logger');
 const TAG = 'vod';
 
@@ -52,28 +50,24 @@ module.exports = function vodRoutes(appState, config) {
   const progressStore = config?.dataDir ? new VodProgressStore(config.dataDir) : null;
   const guard = sessionMiddleware(appState);
 
-  // GET /api/vod/categories?type=vod|series
+  // GET /api/vod/categories?type=vod|series[&all=1]
   //
-  // Filtered by the current viewer's hidden languages. Done here rather than in
-  // each client because every client would otherwise need the same mapping, and
-  // because the portal's own catch-all category has to be dropped alongside it
-  // (see below) — a decision better made once.
+  // Filtered by the current viewer's hidden movie & series categories (and an
+  // old hidden-languages list), dropping the portal's "All" pseudo-category
+  // whenever anything is hidden (lib/vodCategoryFilter.js). Done here rather
+  // than in each client, so every client gets the same answer. ?all=1 lists
+  // every category, for the Settings list where they are hidden.
   router.get('/categories', guard, async (req, res) => {
     const { vodManager } = appState;
     const type = req.query.type === 'series' ? 'series' : 'vod';
     const categories = await vodManager.getCategories(type);
-
-    const hidden = appState.getHiddenLanguages?.() ?? new Set();
-    if (hidden.size === 0) return res.json({ categories });
-
-    // VOD items carry no category, so items fetched through the portal's "All"
-    // pseudo-category (id "*") can't be filtered individually — leaving it in
-    // would let every hidden language straight back in through one tap. Drop it
-    // whenever a language is hidden.
-    const visible = categories.filter(c =>
-      String(c.id) !== ALL_CATEGORIES_ID && !isLanguageDisabled(c.title, hidden)
-    );
-    res.json({ categories: visible });
+    if (req.query.all === '1') return res.json({ categories });
+    res.json({
+      categories: visibleVodCategories(categories, {
+        hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
+        hiddenLanguages: appState.getHiddenLanguages?.() ?? new Set(),
+      }),
+    });
   });
 
   // GET /api/vod/items?type=vod|series&category=X&page=1&search=&fav=0

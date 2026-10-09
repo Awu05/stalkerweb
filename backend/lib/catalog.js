@@ -9,7 +9,7 @@
 const log = require('../logger');
 const { groupChannels } = require('../routes/m3u');
 const { isAdult } = require('./exportFilter');
-const { isLanguageDisabled } = require('./languages');
+const { visibleVodCategories } = require('./vodCategoryFilter');
 const TAG = 'catalog';
 
 const ALL_CATEGORIES_ID = '*';              // the portal's "everything" pseudo-category
@@ -60,6 +60,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
 
   const showAdult = () => appState.getShowAdult?.() === true;
   const hiddenLanguages = () => appState.getHiddenLanguages?.() ?? new Set();
+  const hiddenVodCategories = () => appState.getHiddenVodCategories?.() ?? new Set();
 
   const logoFor = (ch) => (logoManager ? logoManager.resolveOverride(ch.name) : '')
     || ch.iconPath
@@ -87,13 +88,10 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   // ── Movie / series categories ──────────────────────────────────────────────
 
   async function visibleCategories(type) {
-    const hidden = hiddenLanguages();
     const adult = showAdult();
     const all = await appState.vodManager.getCategories(type);
-    return all.filter((c) =>
-      String(c.id) !== ALL_CATEGORIES_ID &&
-      !isLanguageDisabled(c.title, hidden) &&
-      (adult || !isAdult(c.title)));
+    const shown = visibleVodCategories(all, { hiddenCategories: hiddenVodCategories(), hiddenLanguages: hiddenLanguages() });
+    return shown.filter((c) => String(c.id) !== ALL_CATEGORIES_ID && (adult || !isAdult(c.title)));
   }
 
   // Series live in the portal's "series" section when it has one; otherwise

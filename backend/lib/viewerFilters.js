@@ -8,6 +8,7 @@
 
 const { buildExportFilter } = require('./exportFilter');
 const { toLanguageSet } = require('./languages');
+const { toCategorySet } = require('./vodCategoryFilter');
 
 function installViewerFilters(appState, { viewers, context }) {
   const current = () => context.current() ?? viewers.getDefault();
@@ -19,6 +20,7 @@ function installViewerFilters(appState, { viewers, context }) {
   };
   appState.getShowAdult       = () => current()?.showAdult === true;
   appState.getHiddenLanguages = () => toLanguageSet(current()?.disabledLanguages);
+  appState.getHiddenVodCategories = () => toCategorySet(current()?.disabledVodCategories);
 }
 
 module.exports = { installViewerFilters };
