@@ -17,6 +17,7 @@ import { getStreamUrl, streamKeepalive, getProxiedLogoUrl, getNowNext, getChanne
 import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
+import { showToast } from '@/lib/toast'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
 
@@ -24,7 +25,7 @@ import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
 function Controls({
   playing, muted, volume, isFullscreen, isPiP, channelName, jumpDigits,
   audioTracks, activeAudio, subtitleTracks, activeSub,
-  showGuide, onToggleGuide,
+  showGuide, onToggleGuide, isFavorite, onToggleFavorite,
   onPlayPause, onMute, onVolume, onFullscreen, onToggleList, onTogglePiP,
   onAudioTrack, onSubtitleTrack,
 }) {
@@ -53,7 +54,7 @@ function Controls({
         </div>
       ) : (
         <div className="flex items-center gap-1 text-xs text-white/50 mr-2 hidden sm:block">
-          OK·F·M·P·G·↑↓·←→·0-9
+          OK·F·M·P·G·S·↑↓·←→·0-9
         </div>
       )}
       <div className="flex items-center gap-1">
@@ -93,6 +94,17 @@ function Controls({
             title="Picture-in-Picture (P)"
           >
             <PictureInPicture2 size={18} />
+          </button>
+        )}
+        {onToggleFavorite && (
+          <button
+            onClick={onToggleFavorite}
+            className={cn('p-1.5 rounded transition-colors', isFavorite ? 'text-[var(--color-live)] bg-white/10' : 'text-white/80 hover:text-white hover:bg-white/10')}
+            aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            aria-pressed={isFavorite}
+            title={isFavorite ? 'Remove from favorites (S)' : 'Add to favorites (S)'}
+          >
+            <Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} />
           </button>
         )}
         <button
@@ -505,6 +517,17 @@ export default function PlayerPage() {
   const [nowNext, setNowNext]         = useState({})
   const { showAdult, disabledGenres, disabledLanguages }  = useApp()
   const { favoriteIds, toggleFavorite } = useFavorites()
+  // The playing channel in or out of favorites, with a word of confirmation —
+  // on a TV the heart alone is easy to miss.
+  const toggleActiveFavorite = useCallback(() => {
+    const ch = activeChannelRef.current
+    if (!ch) return
+    const adding = !favoriteIds.has(String(ch.uniqueId))
+    toggleFavorite(ch)
+    showToast(adding ? `Added ${ch.name} to favorites` : `Removed ${ch.name} from favorites`)
+  }, [favoriteIds, toggleFavorite])
+  const toggleActiveFavoriteRef = useRef(toggleActiveFavorite)
+  useEffect(() => { toggleActiveFavoriteRef.current = toggleActiveFavorite }, [toggleActiveFavorite])
 
   const prefs = useMemo(() => loadPlayerPrefs(), [])
 
@@ -1029,6 +1052,10 @@ export default function PlayerPage() {
           e.preventDefault()
           setShowGuide(v => !v)
           break
+        case 'KeyS':
+          e.preventDefault()
+          toggleActiveFavoriteRef.current()
+          break
         case 'ArrowUp':
         case 'ArrowDown': {
           e.preventDefault()
@@ -1186,6 +1213,8 @@ export default function PlayerPage() {
           )}
           <Controls
             showGuide={showGuide} onToggleGuide={() => setShowGuide(v => !v)}
+            isFavorite={!!activeChannel && favoriteIds.has(String(activeChannel.uniqueId))}
+            onToggleFavorite={activeChannel ? toggleActiveFavorite : null}
             playing={playing} muted={muted} volume={volume} isFullscreen={isFullscreen} isPiP={isPiP}
             channelName={activeChannel?.name || initChannelName || 'No channel selected'}
             jumpDigits={jumpDigits}
