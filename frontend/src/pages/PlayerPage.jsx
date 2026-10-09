@@ -6,14 +6,14 @@ import mpegts from 'mpegts.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   List, Search, Loader2, AlertCircle, Tv2, Heart, ChevronDown,
-  PictureInPicture2, ChevronLeft,
+  PictureInPicture2, ChevronLeft, CalendarClock,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
-import { getStreamUrl, streamKeepalive, getProxiedLogoUrl, getNowNext } from '../stalkerApi'
+import { getStreamUrl, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
 import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
@@ -23,6 +23,7 @@ import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCach
 function Controls({
   playing, muted, volume, isFullscreen, isPiP, channelName, jumpDigits,
   audioTracks, activeAudio, subtitleTracks, activeSub,
+  showGuide, onToggleGuide,
   onPlayPause, onMute, onVolume, onFullscreen, onToggleList, onTogglePiP,
   onAudioTrack, onSubtitleTrack,
 }) {
@@ -51,7 +52,7 @@ function Controls({
         </div>
       ) : (
         <div className="flex items-center gap-1 text-xs text-white/50 mr-2 hidden sm:block">
-          OK·F·M·P·↑↓·←→·0-9
+          OK·F·M·P·G·↑↓·←→·0-9
         </div>
       )}
       <div className="flex items-center gap-1">
@@ -93,6 +94,15 @@ function Controls({
             <PictureInPicture2 size={18} />
           </button>
         )}
+        <button
+          onClick={onToggleGuide}
+          className={cn('p-1.5 rounded transition-colors', showGuide ? 'text-[var(--color-primary-light)] bg-white/10' : 'text-white/80 hover:text-white hover:bg-white/10')}
+          aria-label={showGuide ? 'Hide programme guide' : 'Show programme guide'}
+          aria-pressed={showGuide}
+          title="Programme guide (G)"
+        >
+          <CalendarClock size={18} />
+        </button>
         <button onClick={onToggleList} className="text-white/80 hover:text-white transition-colors p-1.5 rounded hover:bg-white/10" aria-label="Toggle channel list">
           <List size={18} />
         </button>
@@ -100,6 +110,73 @@ function Controls({
           {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── Now playing guide ─────────────────────────────────────────────────────
+// What's on the playing channel: the programme now (with its description and
+// progress) and the next two. Its guide is loaded for the next 6 hours when
+// the channel changes, and again every 10 minutes.
+const clock = (secs) => new Date(secs * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+function NowPlayingGuide({ channelId }) {
+  const [events, setEvents] = useState(null)
+  const [now, setNow] = useState(() => Date.now() / 1000)
+
+  useEffect(() => {
+    if (!channelId) return
+    let cancelled = false
+    setEvents(null)
+    const load = () => getChannelEpg(channelId, 6)
+      .then(d => { if (!cancelled) setEvents(d?.events || []) })
+      .catch(() => { if (!cancelled) setEvents([]) })
+    load()
+    const id = setInterval(load, 10 * 60 * 1000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [channelId])
+
+  // Ticks for the progress bar, and to move on when a programme ends.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now() / 1000), 15_000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!events) return null
+  const idx = events.findIndex(e => e.startTime <= now && now < e.endTime)
+  const cur = idx >= 0 ? events[idx] : null
+  const later = (idx >= 0 ? events.slice(idx + 1) : events.filter(e => e.startTime > now)).slice(0, 2)
+  if (!cur && !later.length) {
+    return <p className="mx-4 mb-1 text-xs text-white/50">No guide information for this channel.</p>
+  }
+  const pct = cur ? Math.min(100, Math.max(0, ((now - cur.startTime) / (cur.endTime - cur.startTime)) * 100)) : 0
+
+  return (
+    <div className="mx-3 sm:mx-4 mb-1 flex flex-col sm:flex-row gap-2 sm:gap-4 rounded-[var(--radius-md)] bg-black/55 backdrop-blur-sm px-3 py-2.5 text-white">
+      {cur && (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-live)]">Now</span>
+            <span className="text-xs text-white/60 whitespace-nowrap">{clock(cur.startTime)} – {clock(cur.endTime)}</span>
+          </div>
+          <p className="text-sm font-semibold truncate">{cur.title || 'Untitled'}</p>
+          {cur.description && <p className="text-xs text-white/70 line-clamp-2 mt-0.5">{cur.description}</p>}
+          <div className="h-1 mt-1.5 rounded-full bg-white/15 overflow-hidden">
+            <div className="h-full rounded-full bg-[var(--color-primary-light)]" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+      {later.length > 0 && (
+        <div className="sm:w-60 shrink-0 flex flex-col gap-1 sm:border-l sm:border-white/15 sm:pl-4">
+          {later.map((e, i) => (
+            <div key={e.startTime} className="min-w-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50 mr-2">{i === 0 ? 'Next' : 'Later'}</span>
+              <span className="text-xs text-white/60">{clock(e.startTime)}</span>
+              <p className="text-xs font-medium truncate">{e.title || 'Untitled'}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -457,6 +534,7 @@ export default function PlayerPage() {
   // Starts closed on a phone, where it covers the video; elsewhere as last left.
   const [showList, setShowList]     = useState(() => (isNarrowNow() ? false : (prefs.showList ?? true)))
   const [listFocus, setListFocus]   = useState(0)   // bump to put the highlight in the list
+  const [showGuide, setShowGuide]   = useState(prefs.showGuide ?? true)
   const lastPointer = useRef('mouse')
   const [playing, setPlaying]       = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -478,6 +556,7 @@ export default function PlayerPage() {
 
   // Persist sidebar visibility
   useEffect(() => { if (!isNarrowNow()) savePlayerPrefs({ showList }) }, [showList])
+  useEffect(() => { savePlayerPrefs({ showGuide }) }, [showGuide])
 
   // Fetch now/next EPG and refresh it periodically so the sidebar's "now
   // playing" titles and progress bars don't freeze during a long session.
@@ -903,6 +982,10 @@ export default function PlayerPage() {
           e.preventDefault()
           togglePiP()
           break
+        case 'KeyG':
+          e.preventDefault()
+          setShowGuide(v => !v)
+          break
         case 'ArrowUp':
         case 'ArrowDown': {
           e.preventDefault()
@@ -1055,7 +1138,11 @@ export default function PlayerPage() {
           className={cn('absolute bottom-0 inset-x-0 transition-opacity duration-300', showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none')}
           onClick={e => e.stopPropagation()}
         >
+          {showGuide && activeChannel && (status === 'playing' || status === 'paused') && (
+            <NowPlayingGuide channelId={activeChannel.uniqueId} />
+          )}
           <Controls
+            showGuide={showGuide} onToggleGuide={() => setShowGuide(v => !v)}
             playing={playing} muted={muted} volume={volume} isFullscreen={isFullscreen} isPiP={isPiP}
             channelName={activeChannel?.name || initChannelName || 'No channel selected'}
             jumpDigits={jumpDigits}
