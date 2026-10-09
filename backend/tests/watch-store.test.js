@@ -38,7 +38,7 @@ describe('WatchStore', () => {
 
   it('ignores a title only just started', () => {
     const w = play('300', 5)
-    expect(w).toEqual({ progress: [], history: [], watched: [] })
+    expect(w).toEqual({ progress: [], history: [], watched: [], list: [] })
   })
 
   it('keeps the newest 20 in the history', () => {
@@ -77,5 +77,44 @@ describe('WatchStore', () => {
   it('survives a restart', () => {
     play('100', 600)
     expect(new WatchStore(dir).get('view_a', P).history[0].id).toBe('100')
+  })
+})
+
+describe('My List', () => {
+  const heat = { id: '100', name: 'Heat', year: '1995', isSeries: false }
+  const show = { id: '200', name: 'Bluey', isSeries: true }
+
+  it('adds a title once, newest first, and removes it', () => {
+    store.addToList('view_a', P, heat)
+    store.addToList('view_a', P, show)
+    const w = store.addToList('view_a', P, heat)
+    expect(w.list.map((e) => e.id)).toEqual(['200', '100'])
+    expect(w.list[1]).toMatchObject({ id: '100', item: { name: 'Heat', year: '1995' }, completedAt: null })
+    expect(store.removeFromList('view_a', P, '200').list.map((e) => e.id)).toEqual(['100'])
+  })
+
+  it('moves a movie to Completed when it is finished, and keeps it', () => {
+    store.addToList('view_a', P, heat)
+    play('100', 600)
+    expect(store.get('view_a', P).list[0].completedAt).toBe(null)
+    const w = play('100', 5900)
+    expect(w.list[0].completedAt).toEqual(expect.any(Number))
+  })
+
+  it('moves a show to Completed only after its last episode', () => {
+    store.addToList('view_a', P, show)
+    expect(play('200:s1:e1', 5900).list[0].completedAt).toBe(null)
+    expect(play('200:s2:e9', 5900, 6000, { lastEpisode: true }).list[0].completedAt).toEqual(expect.any(Number))
+  })
+
+  it('can be moved between To watch and Completed by hand', () => {
+    store.addToList('view_a', P, heat)
+    expect(store.setListCompleted('view_a', P, '100', true).list[0].completedAt).toEqual(expect.any(Number))
+    expect(store.setListCompleted('view_a', P, '100', false).list[0].completedAt).toBe(null)
+  })
+
+  it('belongs to the viewer', () => {
+    store.addToList('view_a', P, heat)
+    expect(store.get('view_b', P).list).toEqual([])
   })
 })

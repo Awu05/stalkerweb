@@ -5,18 +5,18 @@
 // on a viewer switch, when the VOD page opens), and each save answers with the
 // viewer's lists, which replace it.
 
-import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory } from '../stalkerApi'
+import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory, addToWatchList, removeFromWatchList, setWatchListCompleted } from '../stalkerApi'
 
 // Mirrors backend viewers/WatchStore.js.
 export const VOD_RESUME_MIN_SECS = 30     // less is "only just started"
 export const VOD_DONE_FRACTION   = 0.95   // more is finished
 
-let watch = { progress: [], history: [], watched: [] }
+let watch = { progress: [], history: [], watched: [], list: [] }
 const listeners = new Set()
 
 function set(next) {
   if (!next || !Array.isArray(next.progress)) return
-  watch = next
+  watch = { list: [], ...next }
   listeners.forEach((fn) => fn(watch))
 }
 
@@ -69,4 +69,34 @@ export function getWatchedVodIds() {
   for (const e of watch.history) ids.add(String(e.id))
   for (const e of watch.progress) ids.add(String(e.key).split(':')[0])
   return ids
+}
+
+// ── My List ───────────────────────────────────────────────────────────────
+// Titles saved to watch later: [{ id, item, addedAt, completedAt }], newest
+// first. A title moves to Completed when finished (the server decides) or by
+// hand. Changes show at once; the server's answer then replaces them.
+
+export function getMyList() {
+  return watch.list
+}
+
+export function isInMyList(id) {
+  return watch.list.some((e) => e.id === String(id))
+}
+
+/** On the list → off it; off it → on it. `item` is the VOD title. */
+export function toggleMyList(item) {
+  const id = String(item.id)
+  if (isInMyList(id)) {
+    set({ ...watch, list: watch.list.filter((e) => e.id !== id) })
+    removeFromWatchList(id).then(set).catch(() => loadWatch())
+  } else {
+    set({ ...watch, list: [{ id, item, addedAt: Date.now(), completedAt: null }, ...watch.list] })
+    addToWatchList(item).then(set).catch(() => loadWatch())
+  }
+}
+
+export function setMyListCompleted(id, completed) {
+  set({ ...watch, list: watch.list.map((e) => (e.id === String(id) ? { ...e, completedAt: completed ? Date.now() : null } : e)) })
+  setWatchListCompleted(id, completed).then(set).catch(() => loadWatch())
 }

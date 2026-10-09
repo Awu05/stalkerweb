@@ -44,6 +44,15 @@ describe('/api/vod/watch', () => {
     expect(cleared.body).toMatchObject({ history: [], watched: ['200'] })
   })
 
+  it('keeps My List per viewer: add, complete, move back, remove', async () => {
+    const added = await call('PUT', '/list', { id: '300', name: 'Arrival', year: '2016', isSeries: false }, andy)
+    expect(added.body.list[0]).toMatchObject({ id: '300', item: { name: 'Arrival' }, completedAt: null })
+    expect((await call('GET', '')).body.list).toEqual([])
+    expect((await call('PUT', '/list/300/completed', { completed: true }, andy)).body.list[0].completedAt).toEqual(expect.any(Number))
+    expect((await call('PUT', '/list/300/completed', { completed: false }, andy)).body.list[0].completedAt).toBe(null)
+    expect((await call('DELETE', '/list/300', null, andy)).body.list).toEqual([])
+  })
+
   it('refuses a deleted viewer rather than writing to the default one', async () => {
     expect((await call('PUT', '', { key: '1', position: 600, duration: 6000 }, 'view_gone')).status).toBe(409)
   })

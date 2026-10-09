@@ -182,6 +182,10 @@ export const getWatch          = ()      => _get('/vod/watch')
 export const saveWatch         = (entry) => _put('/vod/watch', entry)
 export const removeWatchTitle  = (id)    => _delete(`/vod/watch/history/${encodeURIComponent(id)}`)
 export const clearWatchHistory = ()      => _delete('/vod/watch/history')
+// My List (watch later), per viewer.
+export const addToWatchList        = (item)          => _put('/vod/watch/list', item)
+export const removeFromWatchList   = (id)            => _delete(`/vod/watch/list/${encodeURIComponent(id)}`)
+export const setWatchListCompleted = (id, completed) => _put(`/vod/watch/list/${encodeURIComponent(id)}/completed`, { completed })
 
 // ── VOD ───────────────────────────────────────────────────────────────────
 export const getVodCategories = (type = 'vod') =>

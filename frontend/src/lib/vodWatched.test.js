@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // The server's answers, as the backend WatchStore would give them.
 let server
 vi.mock('../stalkerApi', () => ({
+  addToWatchList: vi.fn(() => new Promise(() => {})),
+  removeFromWatchList: vi.fn(() => new Promise(() => {})),
+  setWatchListCompleted: vi.fn(() => new Promise(() => {})),
   getWatch: vi.fn(async () => server),
   saveWatch: vi.fn(async () => server),
   removeWatchTitle: vi.fn(async () => server),
@@ -46,5 +49,28 @@ describe('what the viewer watched', () => {
     vod.removeFromVodHistory('200')
     expect(vod.getVodHistory().map((e) => e.id)).toEqual(['100'])
     expect(vod.getVodProgress('200:s1:e2')).toBe(null)
+  })
+})
+
+describe('My List', () => {
+  beforeEach(async () => {
+    server = { progress: [], history: [], watched: [], list: [] }
+    await vod.loadWatch()
+  })
+
+  it('adds and removes a title at once, then takes the server answer', async () => {
+    vod.toggleMyList({ id: '100', name: 'Heat' })
+    expect(vod.isInMyList('100')).toBe(true)
+    expect(vod.getMyList()[0]).toMatchObject({ id: '100', completedAt: null })
+    vod.toggleMyList({ id: '100', name: 'Heat' })
+    expect(vod.isInMyList('100')).toBe(false)
+  })
+
+  it('moves a title to Completed and back', () => {
+    vod.toggleMyList({ id: '100', name: 'Heat' })
+    vod.setMyListCompleted('100', true)
+    expect(vod.getMyList()[0].completedAt).toEqual(expect.any(Number))
+    vod.setMyListCompleted('100', false)
+    expect(vod.getMyList()[0].completedAt).toBe(null)
   })
 })

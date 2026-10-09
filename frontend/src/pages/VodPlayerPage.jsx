@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
 import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import EpisodePanel from '@/components/EpisodePanel'
+import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import {
   makeVodKey, getVodProgress, saveVodProgress,
@@ -43,6 +44,15 @@ export default function VodPlayerPage() {
   const episodeTitle = searchParams.get('episodeTitle') || ''
 
   const displayTitle = episodeTitle ? `${title} · ${episodeTitle}` : title
+
+  // This movie or show as a My List title, from the player link.
+  const decoded = (k) => { const v = searchParams.get(k); try { return v ? decodeURIComponent(v) : '' } catch { return v || '' } }
+  const myListItem = {
+    id: videoId, name: title, cmd, isSeries: !!(seasonId || episodeId),
+    year: searchParams.get('year') || '', isHD: searchParams.get('isHD') === 'true',
+    durationMin: parseInt(searchParams.get('durationMin') || '0', 10) || 0,
+    screenshotUrl: decoded('screenshotUrl'), description: decoded('description'), director: decoded('director'), actors: decoded('actors'),
+  }
 
   const videoRef     = useRef(null)
   const hlsRef       = useRef(null)
@@ -92,6 +102,9 @@ export default function VodPlayerPage() {
   useEffect(() => { if (seasons) { loadSeason(seasonId); loadSeason(panelSeason) } }, [seasons, seasonId, panelSeason, loadSeason])
 
   const neighbours = seasons ? episodeNeighbours(seasons, episodesBySeason, seasonId, episodeId) : { prev: null, next: null, needs: [] }
+  // The show's very last episode: finishing it moves the show to Completed on My List.
+  const lastEpisode = isEpisode && !!seasons && !!episodesBySeason[seasonId] && !neighbours.next && neighbours.needs.length === 0
+  useEffect(() => { metaRef.current = { ...metaRef.current, lastEpisode } })
   const needsKey = neighbours.needs.join(',')
   useEffect(() => { needsKey.split(',').filter(Boolean).forEach(loadSeason) }, [needsKey, loadSeason])
 
@@ -541,6 +554,8 @@ export default function VodPlayerPage() {
               <p className="text-sm text-[var(--color-primary-light)] mt-0.5">{episodeTitle}</p>
             )}
           </div>
+
+          <MyListButton item={myListItem} className="self-start" />
 
           {/* Meta chips */}
           <div className="flex flex-wrap gap-1.5">
