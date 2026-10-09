@@ -712,7 +712,7 @@ export default function SetupPage() {
       await setActiveProfile(profile.id).catch(() => {})
 
       setNotice({ type: 'success', msg: `Connected to ${profile.name || profile.portal}` })
-      setTimeout(() => navigate('/channels'), 900)
+      setTimeout(() => navigate('/channels', { replace: true }), 900)
     } catch (err) {
       setNotice({ type: 'error', msg: err.message })
     } finally {

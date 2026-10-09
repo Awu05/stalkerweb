@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Tv2, Settings, Heart, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import ViewerPicker, { ViewerAvatar } from '@/components/ViewerPicker'
 import { getViewerId, setViewerId, chooseViewer } from '@/lib/viewer'
 import { invalidateFavoritesCache } from '@/lib/useFavorites'
 import ErrorBoundary from '@/components/ErrorBoundary'
+import SettingsModal from '@/components/SettingsModal'
 import { ToastHost } from '@/components/ToastHost'
 import { ReminderBell } from '@/components/ReminderBell'
 import { useReminders } from '@/lib/useReminders'
@@ -26,10 +27,11 @@ const VodPlayerPage  = lazy(() => import('./pages/VodPlayerPage'))
 const DownloadsPage  = lazy(() => import('./pages/DownloadsPage'))
 
 // ── Sidebar nav link ──────────────────────────────────────────────────────
-function NavItem({ to, icon: Icon, label, collapsed, onNavigate }) {
+function NavItem({ to, icon: Icon, label, collapsed, onNavigate, state }) {
   return (
     <NavLink
       to={to}
+      state={state}
       onClick={onNavigate}
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
@@ -102,6 +104,9 @@ function LogoMark({ collapsed }) {
 function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
   const { reminders, removeReminder } = useReminders()
   const status = useStatusDetails(connected, lastPingAt, idleInfo)
+  // Settings opens as a window over the page you're on (see AppInner).
+  const location = useLocation()
+  const settingsState = location.pathname === '/settings' ? location.state : { background: location }
 
   const navItems = connected && (
     <nav className="flex flex-col gap-1 px-3">
@@ -167,7 +172,7 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
               {!collapsed && <span className="truncate">{viewer.name}</span>}
             </button>
           )}
-          <NavItem to="/settings" icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
+          <NavItem to="/settings" state={settingsState} icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
 
           {/* Status: connection (details on hover), version, sign out */}
           <div className={cn('flex items-center text-xs text-[var(--color-muted)]', collapsed ? 'flex-col gap-2 pt-2' : 'gap-2 h-9 pl-3 pr-1')}>
@@ -354,6 +359,22 @@ function AppInner() {
   // Memoize so consumers don't re-render just because AppInner re-rendered
   // (e.g. the 30s poll updating local idle/ping badges). Must run before any
   // early return to keep hook order stable.
+  // Settings is a window over a page (components/SettingsModal.jsx). Opened from
+  // the sidebar, the page behind is the one it was opened over — still mounted,
+  // so a playing channel keeps playing; opened directly (a refresh, a link), it
+  // is Channels. Before a portal is connected there is no page behind it and
+  // no way to close it.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const settingsOpen = location.pathname === '/settings'
+  const background = location.state?.background
+  const pageLocation = !settingsOpen
+    ? location
+    : background ?? (connected ? { ...location, pathname: '/channels', search: '', hash: '', state: null } : null)
+  const closeSettings = connected
+    ? () => (background ? navigate(-1) : navigate('/channels', { replace: true }))
+    : null
+
   const ctxValue = useMemo(
     () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
       viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true) }),
@@ -422,8 +443,8 @@ function AppInner() {
           )}
         >
           <Suspense fallback={<div className="flex h-48 items-center justify-center"><Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" /></div>}>
-          <Routes key={viewer?.id ?? 'none'}>
-            <Route path="/settings" element={<SetupPage />} />
+          {pageLocation && (
+          <Routes location={pageLocation} key={viewer?.id ?? 'none'}>
             <Route
               path="/channels"
               element={
@@ -487,8 +508,17 @@ function AppInner() {
               element={<Navigate to={connected ? '/channels' : '/settings'} replace />}
             />
           </Routes>
+          )}
           </Suspense>
         </main>
+
+        {settingsOpen && (
+          <SettingsModal onClose={closeSettings}>
+            <Suspense fallback={<div className="flex h-48 items-center justify-center"><Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" /></div>}>
+              <SetupPage />
+            </Suspense>
+          </SettingsModal>
+        )}
       </TooltipProvider>
     </AppContext.Provider>
   )
