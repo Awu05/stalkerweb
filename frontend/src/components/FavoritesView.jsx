@@ -66,17 +66,17 @@ function ChannelCard({ channel, logoUrl, onRemove, onClick, dragHandlers, isDrag
       onClick={() => onClick(channel)}
     >
       {dragHandlers && (
-        <div className="absolute top-2 left-2 p-1 text-[var(--color-muted)] opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
-          <GripVertical size={12} />
+        <div className="absolute top-1.5 left-1.5 p-1.5 text-[var(--color-muted)] opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
+          <GripVertical size={16} />
         </div>
       )}
       <button
         onClick={e => { e.stopPropagation(); onRemove(channel) }}
         title="Remove from favorites"
         aria-label={`Remove ${channel.name} from favorites`}
-        className="absolute top-2 right-2 p-1 rounded-full text-[var(--color-live)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-live)]/10 transition-all"
+        className="absolute top-1.5 right-1.5 p-1.5 rounded-full text-[var(--color-live)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-live)]/10 transition-all"
       >
-        <X size={13} />
+        <X size={18} />
       </button>
       <ChannelLogo src={logoUrl || getProxiedLogoUrl(channel.iconPath)} name={channel.name} />
       <div className="w-full text-center">

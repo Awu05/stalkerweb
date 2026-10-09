@@ -27,12 +27,12 @@ export default function MyListButton({ item, overlay = false, className }) {
         onClick={toggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(e) }}
         className={cn(
-          'p-1 rounded-full bg-black/60 hover:bg-black/80 transition-all',
+          'p-2 rounded-full bg-black/60 hover:bg-black/80 transition-all',
           saved ? 'text-[var(--color-primary-light)] opacity-100' : 'text-white/80 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
           className,
         )}
       >
-        <Bookmark size={13} fill={saved ? 'currentColor' : 'none'} />
+        <Bookmark size={18} fill={saved ? 'currentColor' : 'none'} />
       </span>
     )
   }

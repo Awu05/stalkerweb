@@ -61,7 +61,7 @@ function EditButton({ channel, onEdit, className, size }) {
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') edit(e) }}
       title="Edit channel"
       aria-label={`Edit ${channel.name}`}
-      className={cn('absolute z-10 p-1 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-colors', className)}
+      className={cn('absolute z-10 p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-colors', className)}
     >
       <Pencil size={size} />
     </span>
@@ -81,7 +81,7 @@ function FavoriteButton({ channel, isFavorite, onToggle, className, size }) {
       title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
       aria-label={isFavorite ? `Remove ${channel.name} from favorites` : `Add ${channel.name} to favorites`}
       aria-pressed={isFavorite}
-      className={cn('absolute z-10 p-1 rounded transition-colors', className,
+      className={cn('absolute z-10 p-1.5 rounded transition-colors', className,
         isFavorite
           ? 'text-rose-500'
           : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-rose-400')}
@@ -105,15 +105,15 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
     return (
       <button
         onClick={() => onClick(channel)}
-        className="surface-card group relative flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] p-2.5 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer w-20 shrink-0"
+        className="surface-card group relative flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] px-2.5 pb-2.5 pt-7 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer w-20 shrink-0"
       >
         {errors > 0 && (
           <span className="absolute top-1 left-1 z-10 text-amber-400" title={healthTitle(errors)}>
-            <AlertTriangle size={11} fill="currentColor" className="drop-shadow" />
+            <AlertTriangle size={14} fill="currentColor" className="drop-shadow" />
           </span>
         )}
-        {onToggleFavorite && <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-1 right-6" size={11} />}
-        {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-1 right-1" size={11} />}
+        {onToggleFavorite && <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-0.5 right-8" size={14} />}
+        {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-0.5 right-0.5" size={14} />}
         <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
           {logo && !imgError
             ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-0.5" />
@@ -128,19 +128,19 @@ const ChannelCard = memo(function ChannelCard({ channel, logoUrl, isFavorite, on
   return (
     <button
       onClick={() => onClick(channel)}
-      className="surface-card group relative flex flex-col items-center gap-2.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] p-4 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer"
+      className="surface-card group relative flex flex-col items-center gap-2.5 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] px-4 pb-4 pt-10 text-left hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] cursor-pointer"
     >
-      <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-2 right-9" size={14} />
+      <FavoriteButton channel={channel} isFavorite={isFavorite} onToggle={onToggleFavorite} className="top-1.5 right-11" size={18} />
       {errors > 0 && (
         <span
           className={cn('absolute top-2 left-2 flex items-center gap-1 text-[10px] font-medium',
             errors >= FLAKY_THRESHOLD ? 'text-amber-400' : 'text-amber-400/70')}
           title={healthTitle(errors)}
         >
-          <AlertTriangle size={12} fill="currentColor" />
+          <AlertTriangle size={16} fill="currentColor" />
         </span>
       )}
-      {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-2 right-2" size={14} />}
+      {onSetLogo && <EditButton channel={channel} onEdit={onSetLogo} className="top-1.5 right-1.5" size={18} />}
       <div className="flex h-16 w-16 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] overflow-hidden">
         {logo && !imgError
           ? <img src={logo} alt={channel.name} loading="lazy" onError={() => setImgError(true)} className="h-full w-full object-contain p-1" />
@@ -624,10 +624,10 @@ export default function ChannelsPage() {
                   />
                   <button
                     onClick={() => removeRecentChannel(r.uniqueId)}
-                    className="absolute -top-1.5 -left-1.5 z-20 flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-border)] text-[var(--color-muted)] opacity-0 group-hover/recent:opacity-100 hover:!opacity-100 hover:text-[var(--color-text)] transition-opacity"
+                    className="absolute -top-2 -left-2 z-20 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-border)] text-[var(--color-muted)] opacity-0 group-hover/recent:opacity-100 hover:!opacity-100 hover:text-[var(--color-text)] transition-opacity"
                     aria-label="Remove from recently watched"
                   >
-                    <X size={9} />
+                    <X size={13} />
                   </button>
                 </div>
               ))}
