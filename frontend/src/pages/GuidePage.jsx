@@ -129,7 +129,7 @@ export default function GuidePage() {
                 className={cn(
                   'px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
                   period === p.value
-                    ? 'bg-[var(--color-primary)] text-white'
+                    ? 'bg-[var(--color-primary)] text-[var(--color-bg)]'
                     : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]'
                 )}
               >

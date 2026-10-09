@@ -203,3 +203,11 @@ input[list]::-webkit-calendar-picker-indicator { display: none !important; }
   }
   .surface-card:hover { transform: none; }
 }
+
+/* Where the keyboard or a TV remote is: a clear ring on the focused control,
+   on every page. Mouse clicks don't show it (:focus-visible). Unlayered, so it
+   wins over utilities like outline-none. */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 2px;
+}
