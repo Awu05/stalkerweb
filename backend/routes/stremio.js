@@ -141,11 +141,15 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
     // a new version — and refreshes its stored genre lists — when they change.
     const [major = '1', minor = '0'] = String(version).split('.');
     const patch = parseInt(hash(JSON.stringify([portalTag(), g])).slice(0, 7), 16);
+    // Each viewer installs their own copy (their own channel filters); the
+    // default viewer keeps the original id so existing installs carry on.
+    const viewer = appState.currentViewer?.();
+    const own = viewer && appState.isDefaultViewer && !appState.isDefaultViewer(viewer);
     res.set('Cache-Control', 'no-cache');
     res.json({
-      id: 'com.stalkerweb.addon',
+      id: own ? `com.stalkerweb.addon.${viewer.id}` : 'com.stalkerweb.addon',
       version: `${major}.${minor}.${patch}`,
-      name: 'StalkerWeb',
+      name: own ? `StalkerWeb (${viewer.name})` : 'StalkerWeb',
       description: 'Live TV, movies and series from your Stalker portal, by category.',
       logo: `${baseUrl(req)}/favicon.svg`,
       resources: ['catalog', 'meta', 'stream'],

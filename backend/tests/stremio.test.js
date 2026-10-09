@@ -93,6 +93,19 @@ describe('Stremio addon', () => {
     expect(genreOf('movie').isRequired).toBe(false)
   })
 
+  it('gives a non-default viewer its own addon id and name, so both can be installed', async () => {
+    appState.currentViewer = () => ({ id: 'view_andy', name: 'Andy' })
+    appState.isDefaultViewer = () => false
+    try {
+      const m = await get('/manifest.json')
+      expect(m).toMatchObject({ id: 'com.stalkerweb.addon.view_andy', name: 'StalkerWeb (Andy)' })
+    } finally {
+      delete appState.currentViewer
+      delete appState.isDefaultViewer
+    }
+    expect((await get('/manifest.json')).id).toBe('com.stalkerweb.addon')
+  })
+
   it('changes the manifest version when the categories change', async () => {
     const a = (await get('/manifest.json')).version
     portal = `${portal}other/`

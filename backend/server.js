@@ -82,20 +82,30 @@ const favoritesManager = new FavoritesManager(config.dataDir);
 
 const ProfilesManager = require('./profiles/ProfilesManager');
 const profilesManager = new ProfilesManager(config.dataDir);
-// Exposed on appState so routes that filter by the active profile's hidden
-// languages (VOD categories) can reach it without a second constructor arg.
-appState.profilesManager = profilesManager;
 
-// Filter applied to the M3U / XMLTV / XSPF exports: the active profile's hidden
-// genres and languages, plus adult channels unless Show Adult Content is on.
-// Read per request, so a change in Settings applies to the next export.
-const { buildExportFilter } = require('./lib/exportFilter');
 const exportSettingsCache = new (require('./cache/CacheManager'))(config.dataDir);
-appState.getExportFilter = () => buildExportFilter({
-  profile:   profilesManager.getActive(),
-  showAdult: exportSettingsCache.load()?.show_adult === true,
-});
-appState.getShowAdult = () => exportSettingsCache.load()?.show_adult === true;
+
+// Viewers: each person's favorites and channel filters (viewers/ViewersManager.js).
+// On the first start after the upgrade, the Default viewer takes over what was
+// shared: the favorites, Show Adult, and the active profile's hidden genres and
+// languages. The old files and fields are left in place.
+const ViewersManager = require('./viewers/ViewersManager');
+const viewersManager = new ViewersManager(config.dataDir);
+{
+  const legacy = profilesManager.getActive();
+  viewersManager.ensureInitialized({
+    favorites:         favoritesManager.getRaw(),
+    showAdult:         exportSettingsCache.load()?.show_adult === true,
+    disabledGenres:    legacy?.disabledGenres,
+    disabledLanguages: legacy?.disabledLanguages,
+  });
+}
+const viewerContext = require('./lib/viewerContext').createViewerContext(viewersManager);
+
+// Filter applied to the exports, the Xtream API, the Stremio addon and the VOD
+// categories: the current viewer's hidden genres and languages, plus adult
+// channels unless that viewer shows them (lib/viewerFilters.js).
+require('./lib/viewerFilters').installViewerFilters(appState, { viewers: viewersManager, context: viewerContext });
 // Live delay buffer (routes/proxy.js, lib/liveBuffer.js): seconds held ahead of
 // players on live channels, 0 = off. Saved in Settings, else LIVE_BUFFER_SECONDS.
 appState.getLiveBufferSeconds = () => exportSettingsCache.load()?.live_buffer_seconds ?? config.liveBufferSeconds;
@@ -151,6 +161,9 @@ app.use((req, res, next) => {
 });
 
 app.use(access.stripPrefix);
+// Which viewer each request is for — after the access prefix (links look like
+// /k/<token>/v/<viewer>/…) and before the gate, which checks the stripped path.
+app.use(viewerContext.middleware);
 app.use('/api/access', access.routes());
 app.use(access.gate);
 
@@ -304,7 +317,8 @@ const m3uRoutes = require('./routes/m3u')(appState, logoManager);
 const xspfRoutes = require('./routes/xspf')(appState, logoManager);
 const xmltvRoutes = require('./routes/xmltv')(appState);
 const logosRoutes     = require('./routes/logos')(logoManager, appState);
-const favoritesRoutes = require('./routes/favorites')(favoritesManager, appState);
+const favoritesRoutes = require('./routes/favorites')(viewersManager, appState);
+const viewersRoutes   = require('./routes/viewers')(viewersManager);
 const profilesRoutes  = require('./routes/profiles')(profilesManager);
 const exportRoutes    = require('./routes/export')(config);
 const logsRoutes      = require('./routes/logs');
@@ -334,6 +348,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/logos', logosRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/profiles', profilesRoutes);
+app.use('/api/viewers', viewersRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/m3u', m3uRoutes);
 app.use('/api/xspf', xspfRoutes);
