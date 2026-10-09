@@ -229,8 +229,12 @@ class RestartSmoother {
       const e = st.kept.get(id);
       if (e && recent(e)) { if (firstCur < 0) firstCur = i; lastCur = i; }
     }
-    if (firstCur < 0 && st.lastBody && ids.every((id) => st.kept.has(id) || st.dropped.has(id))) {
-      // Only segments that had left the window: an older playlist.
+    // Only segments that had left the window: an older playlist. (A playlist
+    // of nothing but the repeats just left out is not one — that's the source
+    // still catching up, and it gets the last playlist below without counting
+    // towards starting over, which would serve those repeats after all.)
+    const older = (id) => st.kept.has(id) || (st.dropped.has(id) && !recent(st.dropped.get(id)));
+    if (firstCur < 0 && st.lastBody && ids.some((id) => st.kept.has(id)) && ids.every(older)) {
       st.gen--;
       st.staleRun++;
       return st.lastBody;
