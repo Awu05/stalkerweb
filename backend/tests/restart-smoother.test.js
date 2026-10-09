@@ -309,6 +309,23 @@ describe('RestartSmoother — review cases', () => {
     expect(lines.filter((l) => l.includes('renumbered'))).toEqual([expect.stringContaining('(+10)')])
   })
 
+  it('keeps holding back repeats while the playlist lists nothing else (no starting over)', async () => {
+    const lines = []
+    const sm = new RestartSmoother({ probe: namePts, logger: { info: (_t, m) => lines.push(m), warn: () => {} } })
+    await sm.rewrite('k', BASE, numbered(10, [name(60), name(66)]))                    // to 20:42:12
+    // The source restarts 4 s back, and for a while its window holds only that repeat.
+    const held = await sm.rewrite('k', BASE, numbered(12, [name(66), name(62)], { disc: [name(62)] }))
+    expect(urisOf(held)).toEqual([name(66)])
+    for (let i = 0; i < 5; i++) {
+      expect(await sm.rewrite('k', BASE, numbered(13, [name(62)], { disc: [name(62)] }))).toBe(held)
+    }
+    // It catches up: the next new segment follows on, numbered after 20:42:06.
+    const out = await sm.rewrite('k', BASE, numbered(13, [name(62), name(72)], { disc: [name(62)] }))
+    expect(urisOf(out)).toEqual([name(72)])
+    expect(seqOf(out)).toBe(12)
+    expect(lines.some((l) => l.includes('starting over'))).toBe(false)
+  })
+
   it('never moves the playlist back for an older playlist from an out-of-step server', async () => {
     const sm = new RestartSmoother({ probe: namePts, logger: quiet })
     await sm.rewrite('k', BASE, numbered(10, ['s10.ts', 's11.ts', 's12.ts']))
