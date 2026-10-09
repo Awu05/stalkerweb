@@ -2,7 +2,7 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NO_FILTERS, filtersActive } from '@/lib/vodFilters'
 
-// The VOD page's filter bar: genre, decade, rating, recently added, HD and not
+// The VOD page's filter bar: genre, year, rating, recently added, HD and not
 // watched yet. A filter with nothing to pick (no genres or ratings from this
 // portal) isn't shown. Native selects, so a TV remote can use them too.
 const selectCls = 'rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-primary-light)] disabled:opacity-40'
@@ -13,8 +13,9 @@ const toggleCls = (on) => cn(
 
 export default function VodFilters({ filters, onChange, options, disabled, note }) {
   const set = (patch) => onChange({ ...filters, ...patch })
-  const showGenre = options.genres.length > 0 || filters.genre
-  const showRating = options.hasRating || filters.minRating
+  // Booleans: a bare 0 here would be drawn on the page.
+  const showGenre = options.genres.length > 0 || !!filters.genre
+  const showRating = options.hasRating || filters.minRating > 0
 
   return (
     <div className="px-4 py-2 border-b border-[var(--color-border)] flex flex-wrap items-center gap-2">
@@ -24,9 +25,9 @@ export default function VodFilters({ filters, onChange, options, disabled, note 
           {[...new Set([...(filters.genre ? [filters.genre] : []), ...options.genres])].map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       )}
-      <select aria-label="Year" className={selectCls} disabled={disabled} value={filters.decade} onChange={(e) => set({ decade: e.target.value })}>
+      <select aria-label="Year" className={selectCls} disabled={disabled} value={filters.year} onChange={(e) => set({ year: e.target.value })}>
         <option value="">Any year</option>
-        {[...new Set([...(filters.decade ? [filters.decade] : []), ...options.decades])].map((d) => (
+        {[...new Set([...(filters.year ? [filters.year] : []), ...options.years])].map((d) => (
           <option key={d} value={d}>{d === 'Older' ? 'Before 1980' : d}</option>
         ))}
       </select>
