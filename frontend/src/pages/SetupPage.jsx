@@ -895,7 +895,11 @@ export default function SetupPage() {
   }
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
-  const tab = chooseTab(searchParams.get('tab'), rememberedTab(), connected)
+  // Without ?tab=, the tab picked when Settings opened stays put: a brief
+  // disconnect never throws you onto Connection mid-edit (and the remembered
+  // tab is read once, not on every keystroke).
+  const [startTab] = useState(() => chooseTab(null, rememberedTab(), connected))
+  const tab = chooseTab(searchParams.get('tab'), startTab, true)
   function openTab(id) {
     const next = new URLSearchParams(searchParams)
     next.set('tab', id)

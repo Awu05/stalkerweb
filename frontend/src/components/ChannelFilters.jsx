@@ -5,14 +5,21 @@ import { useApp } from '@/lib/appContext'
 import { Switch } from '@/components/ui/switch'
 import { getGroups, getAllVodCategories, getMyViewer, saveMyFilters } from '../stalkerApi'
 import { invalidateChannelCache } from '../lib/channelCache'
+import { getActiveProfileId } from '@/lib/profiles'
 import { serialSaves } from '@/lib/serialSaves'
 import { showToast } from '@/lib/toast'
-import { convertLanguages, groupGenres, titleKey, vodCategoryList } from '@/lib/channelFilters'
+import { languageOf, toLanguageSet } from '@/lib/languages'
+import { groupGenres, releaseLanguages, titleKey, vodCategoryList } from '@/lib/channelFilters'
 
 // Settings → My channels: what the current viewer sees. Show Adult, the Live TV
 // categories (grouped by the part before the "|") and the Movies & Series
 // categories, each hideable, with one search across both. Changes show at once
 // and are saved in the order made; a failed save puts back what the server has.
+//
+// An older filter hid whole "languages" (everything whose name starts with
+// one). It keeps working — categories the portal adds later in that language
+// stay hidden — and is listed here to remove; showing a category it covers
+// releases that language and hides the rest of it one by one.
 
 const chip = (hidden) => cn(
   'px-3 py-1.5 rounded-full text-xs font-semibold transition-all border text-left',
@@ -23,6 +30,25 @@ const chip = (hidden) => cn(
 const linkBtn = 'text-[10px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors shrink-0'
 
 const toHiddenMap = (list) => new Map((list ?? []).map((t) => [titleKey(t), t]))
+
+// The category lists, kept for the portal connection while Settings switches
+// tabs (each switch remounts this). An empty Live TV list is never kept: right
+// after connecting the groups may still be loading.
+const LISTS_TTL_MS = 5 * 60 * 1000
+let listsCache = null   // { profile, at, genres, vodTitles }
+
+async function loadLists() {
+  const profile = getActiveProfileId()
+  if (listsCache && listsCache.profile === profile && Date.now() - listsCache.at < LISTS_TTL_MS) return listsCache
+  const [g, m, s] = await Promise.all([
+    getGroups().then((r) => (r.groups ?? []).filter((x) => x.name && x.name.toLowerCase() !== 'all')),
+    getAllVodCategories('vod').then((r) => r.categories ?? []).catch(() => []),
+    getAllVodCategories('series').then((r) => r.categories ?? []).catch(() => []),
+  ])
+  const lists = { profile, at: Date.now(), genres: g, vodTitles: vodCategoryList(m, s) }
+  if (g.length) listsCache = lists
+  return lists
+}
 
 function AllNone({ onAll, onNone }) {
   return (
@@ -35,12 +61,15 @@ function AllNone({ onAll, onNone }) {
 }
 
 export default function ChannelFilters() {
-  const { connected, showAdult, setShowAdult, disabledGenres, setDisabledGenres, setDisabledLanguages, applyViewer } = useApp()
+  const {
+    connected, viewer, showAdult, setShowAdult, disabledGenres, setDisabledGenres,
+    disabledLanguages, setDisabledLanguages, applyViewer, updateViewerFields,
+  } = useApp()
   const [genres, setGenres]       = useState(null)   // live categories, null while loading
   const [vodTitles, setVodTitles] = useState(null)   // movie & series category names
   // Hidden movie & series categories, titleKey() → name. Names no longer on the
   // portal stay saved, in case they come back.
-  const [hiddenVod, setHiddenVod] = useState(() => new Map())
+  const [hiddenVod, setHiddenVod] = useState(() => toHiddenMap(viewer?.disabledVodCategories))
   const [query, setQuery]         = useState('')
   const [collapsed, setCollapsed] = useState(() => new Set())
 
@@ -50,56 +79,69 @@ export default function ChannelFilters() {
     getMyViewer().then((me) => { applyViewer(me); setHiddenVod(toHiddenMap(me.disabledVodCategories)) }).catch(() => {})
   }
 
-  // The lists, and this viewer's hidden movie & series categories. A viewer
-  // who hid "languages" before has them turned into the matching categories.
+  // This viewer's hidden movie & series categories — again when the viewer
+  // changes while Settings is open (switched, or deleted on the Viewers tab).
+  useEffect(() => { setHiddenVod(toHiddenMap(viewer?.disabledVodCategories)) }, [viewer?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The lists. While the portal is still loading its channel groups, try again.
   useEffect(() => {
     if (!connected) return
     let cancelled = false
-    const live = getGroups().then((r) => (r.groups ?? []).filter((g) => g.name && g.name.toLowerCase() !== 'all'))
-    const vod = Promise.all([getAllVodCategories('vod'), getAllVodCategories('series').catch(() => ({ categories: [] }))])
-      .then(([m, s]) => vodCategoryList(m.categories, s.categories))
-    Promise.all([live.catch(() => null), vod.catch(() => null), getMyViewer()]).then(([g, v, me]) => {
+    let timer = null
+    let tries = 0
+    const load = () => loadLists().then((l) => {
       if (cancelled) return
-      setGenres(g ?? [])
-      setVodTitles(v ?? [])
-      let vodHidden = me.disabledVodCategories ?? []
-      if (g && v && me.disabledLanguages?.length) {
-        const conv = convertLanguages(me.disabledLanguages, g.map((x) => x.name), v)
-        const genresHidden = [...new Set([...(me.disabledGenres ?? []), ...conv.genres])]
-        vodHidden = [...new Set([...vodHidden, ...conv.vodCategories])]
-        setDisabledGenres(new Set(genresHidden))
-        setDisabledLanguages(new Set())
-        saveFilters({ disabledGenres: genresHidden, disabledVodCategories: vodHidden, disabledLanguages: [] }).catch(saveFailed)
-        invalidateChannelCache()
-      }
-      setHiddenVod(toHiddenMap(vodHidden))
-    }).catch(() => { if (!cancelled) { setGenres([]); setVodTitles([]) } })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per connection
+      setGenres(l.genres)
+      setVodTitles(l.vodTitles)
+      if (!l.genres.length && ++tries < 10) timer = setTimeout(load, 3000)
+    }).catch(() => { if (!cancelled) { setGenres((g) => g ?? []); setVodTitles((v) => v ?? []) } })
+    load()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [connected])
+
+  // ── What's hidden ────────────────────────────────────────────────────────
+  const oldLanguages = useMemo(() => toLanguageSet([...disabledLanguages]), [disabledLanguages])
+  const liveHidden = (name) => disabledGenres.has(name) || oldLanguages.has(languageOf(name))
+  const vodHidden = (title) => hiddenVod.has(titleKey(title)) || oldLanguages.has(languageOf(title))
 
   // ── Changes ──────────────────────────────────────────────────────────────
   function toggleAdult(val) {
     setShowAdult(val)
     invalidateChannelCache()
     saveFilters({ showAdult: val }).catch(saveFailed)
+    updateViewerFields({ showAdult: val })
   }
-  function setLiveHidden(set) {
-    setDisabledGenres(set)
-    saveFilters({ disabledGenres: [...set] }).catch(saveFailed)
+
+  // One save for any change: what's hidden in each list, and the old languages.
+  function apply({ genres: g = disabledGenres, vod = hiddenVod, languages }) {
+    const body = {}
+    if (g !== disabledGenres) { setDisabledGenres(g); body.disabledGenres = [...g] }
+    if (vod !== hiddenVod) { setHiddenVod(vod); body.disabledVodCategories = [...vod.values()] }
+    if (languages) { setDisabledLanguages(new Set(languages)); body.disabledLanguages = languages }
+    saveFilters(body).catch(saveFailed)
+    updateViewerFields(body)
     invalidateChannelCache()
   }
-  function liveShow(names, show) {
-    const next = new Set(disabledGenres)
-    names.forEach((n) => (show ? next.delete(n) : next.add(n)))
-    setLiveHidden(next)
+
+  function show(liveNames, vodNames, visible) {
+    const g = new Set(disabledGenres)
+    const vod = new Map(hiddenVod)
+    liveNames.forEach((n) => (visible ? g.delete(n) : g.add(n)))
+    vodNames.forEach((t) => (visible ? vod.delete(titleKey(t)) : vod.set(titleKey(t), t)))
+    let languages
+    if (visible) {
+      const released = releaseLanguages([...liveNames, ...vodNames], oldLanguages, (genres ?? []).map((x) => x.name), vodTitles ?? [])
+      if (released) {
+        languages = released.languages
+        released.hideGenres.forEach((n) => g.add(n))
+        released.hideVod.forEach((t) => vod.set(titleKey(t), t))
+      }
+    }
+    apply({ genres: g, vod, languages })
   }
-  function vodShow(titles, show) {
-    const next = new Map(hiddenVod)
-    titles.forEach((t) => (show ? next.delete(titleKey(t)) : next.set(titleKey(t), t)))
-    setHiddenVod(next)
-    saveFilters({ disabledVodCategories: [...next.values()] }).catch(saveFailed)
-  }
+  const liveShow = (names, visible) => show(names, [], visible)
+  const vodShow = (titles, visible) => show([], titles, visible)
+  const forgetLanguage = (lang) => apply({ languages: [...oldLanguages].filter((l) => l !== lang) })
 
   // ── Search ───────────────────────────────────────────────────────────────
   const q = query.trim().toLowerCase()
@@ -108,9 +150,9 @@ export default function ChannelFilters() {
   const shownVod = useMemo(() => (vodTitles ?? []).filter((t) => !q || t.toLowerCase().includes(q)), [vodTitles, q])
 
   const liveTotal = genres?.length ?? 0
-  const liveShown = (genres ?? []).filter((g) => !disabledGenres.has(g.name)).length
+  const liveShownCount = (genres ?? []).filter((g) => !liveHidden(g.name)).length
   const vodTotal = vodTitles?.length ?? 0
-  const vodShownCount = (vodTitles ?? []).filter((t) => !hiddenVod.has(titleKey(t))).length
+  const vodShownCount = (vodTitles ?? []).filter((t) => !vodHidden(t)).length
 
   return (
     <>
@@ -148,21 +190,39 @@ export default function ChannelFilters() {
             )}
           </div>
 
+          {oldLanguages.size > 0 && (
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-2)]/50 px-3 py-2.5 flex flex-col gap-2">
+              <p className="text-xs text-[var(--color-muted)]">
+                Also hidden by an older filter — everything whose name starts with these, including categories added later.
+                Remove one to show its categories again, or show a single category below.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[...oldLanguages].sort().map((lang) => (
+                  <button key={lang} type="button" onClick={() => forgetLanguage(lang)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                    aria-label={`Stop hiding everything starting with ${lang}`}>
+                    {lang} <X size={11} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── Live TV ── */}
           <section className="flex flex-col gap-1">
             <div className="flex items-center gap-2 pt-2">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Live TV</h3>
-              <span className="text-xs text-[var(--color-muted)]">{liveShown} of {liveTotal} categories shown</span>
+              <span className="text-xs text-[var(--color-muted)]">{liveShownCount} of {liveTotal} categories shown</span>
               <div className="flex-1" />
               {shownGenres.length > 0 && <AllNone onAll={() => liveShow(shownGenres.map((g) => g.name), true)} onNone={() => liveShow(shownGenres.map((g) => g.name), false)} />}
             </div>
             {liveTotal === 0 ? (
-              <p className="text-xs text-[var(--color-muted)]">No live TV categories on this portal.</p>
+              <p className="text-xs text-[var(--color-muted)]">No live TV categories yet — the portal may still be loading its channels.</p>
             ) : groups.length === 0 ? (
               <p className="text-xs text-[var(--color-muted)]">No live TV categories match “{query.trim()}”.</p>
             ) : groups.map(([group, list]) => {
               const names = list.map((g) => g.name)
-              const shown = names.filter((n) => !disabledGenres.has(n)).length
+              const shown = names.filter((n) => !liveHidden(n)).length
               const open = q || !collapsed.has(group)   // a search shows every match
               return (
                 <div key={group} className="border-b border-[var(--color-border)] last:border-b-0 py-2.5">
@@ -179,12 +239,15 @@ export default function ChannelFilters() {
                   </div>
                   {open && (
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {list.map((g) => (
-                        <button key={g.id} type="button" onClick={() => liveShow([g.name], disabledGenres.has(g.name))}
-                          className={chip(disabledGenres.has(g.name))} aria-pressed={!disabledGenres.has(g.name)}>
-                          {g.name}
-                        </button>
-                      ))}
+                      {list.map((g) => {
+                        const hidden = liveHidden(g.name)
+                        return (
+                          <button key={g.id} type="button" onClick={() => liveShow([g.name], hidden)}
+                            className={chip(hidden)} aria-pressed={!hidden}>
+                            {g.name}
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -207,7 +270,7 @@ export default function ChannelFilters() {
             ) : (
               <div className="flex flex-wrap gap-2">
                 {shownVod.map((t) => {
-                  const hidden = hiddenVod.has(titleKey(t))
+                  const hidden = vodHidden(t)
                   return (
                     <button key={t} type="button" onClick={() => vodShow([t], hidden)} className={chip(hidden)} aria-pressed={!hidden}>
                       {t}
