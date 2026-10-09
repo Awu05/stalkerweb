@@ -22,6 +22,7 @@ const { baseUrl } = require('../lib/publicUrl');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
 const { StreamDiagnostics, firstTimestamps } = require('../lib/streamDiagnostics');
+const { LiveBuffer } = require('../lib/liveBuffer');
 const { RestartSmoother } = require('../lib/restartSmoother');
 const TAG = 'proxy';
 
@@ -287,6 +288,174 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     });
   };
 
+  // A segment's upstream response, asking again for one the server says it
+  // doesn't have. The server can list a segment it then says it doesn't have
+  // (measured on a Flussonic provider: files named seconds ahead of the clock,
+  // right after it restarted or renumbered — several servers behind one
+  // address, and the one asked isn't the one that listed it). Players take a
+  // failed segment badly — VLC stops the stream, Stremio retried one for a
+  // minute — so ask again first, each time over a fresh connection, which can
+  // reach another of those servers. `gone()`: the viewer left, stop asking.
+  async function fetchSegmentResponse(headers, realUrl, ch, gone = () => false) {
+    const name = realUrl.split('?')[0].split('/').slice(-2).join('/');
+    const startedAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetchStreamFromPortal(headers, realUrl, undefined, ch, { fresh: attempt > 0 });
+      if (response.status !== 404 || attempt >= segmentRetryMs.length || gone()) {
+        if (attempt > 0 && ch) {
+          const waited = ((Date.now() - startedAt) / 1000).toFixed(1);
+          if (response.status === 404) log.warn('stream-diag', `ch ${ch}: segment ${name} still missing after ${attempt + 1} tries over ${waited}s — the server listed it but doesn't have it`);
+          else log.info('stream-diag', `ch ${ch}: segment ${name} was missing, served on try ${attempt + 1} after ${waited}s`);
+        }
+        return response;
+      }
+      response.data.resume();   // read the (tiny) 404 off the connection so it stays usable
+      await new Promise((r) => setTimeout(r, segmentRetryMs[attempt]));
+    }
+  }
+
+  // ── Live delay buffer (Settings → Live buffer; lib/liveBuffer.js) ──────────
+  // While a player watches a live channel, a feeder polls the channel's media
+  // playlist itself, passes it through the restart smoother and downloads each
+  // new segment into memory; players get the buffer's playlist, released at
+  // real-time pace, and its segments from memory. Stops 45 s after the last
+  // player request.
+  const feeders = new Map();   // channel|host+path → feeder
+  const unbufferable = new Set();
+  const FEEDER_IDLE_MS = 45_000;
+  const SEGMENT_READ_MS = 30_000;
+
+  const feederKey = (channelId, url) => {
+    try { const u = new URL(url); return `${channelId}|${u.host}${u.pathname}`; } catch { return `${channelId}|${url}`; }
+  };
+
+  async function downloadSegment(url, ch) {
+    const headers = { ...getHeadersForUrl(url), 'Accept-Encoding': 'identity' };
+    const d = diag.segment(ch, url);
+    let response;
+    try {
+      response = await fetchSegmentResponse(headers, url, ch);
+    } catch (e) {
+      log.warn(TAG, `buffer: segment fetch failed: ${e.message}`);
+      return null;
+    }
+    if (response.status >= 400) {
+      response.data.resume();
+      if (response.status === 403) appState.channelManager?.recordStreamError(ch);
+      return null;
+    }
+    d.firstByte();
+    const chunks = [];
+    let size = 0;
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { response.data.destroy(); reject(new Error('timed out')); }, SEGMENT_READ_MS);
+        response.data.on('data', (c) => { chunks.push(c); size += c.length; d.data(c); });
+        response.data.once('end', () => { clearTimeout(timer); resolve(); });
+        response.data.once('error', (e) => { clearTimeout(timer); reject(e); });
+      });
+    } catch (e) {
+      log.warn(TAG, `buffer: segment read failed: ${e.message}`);
+      return null;
+    }
+    d.done(size);
+    return Buffer.concat(chunks);
+  }
+
+  function stopFeeder(f, why) {
+    if (f.stopped) return;
+    f.stopped = true;
+    clearTimeout(f.timer);
+    if (feeders.get(f.key) === f) feeders.delete(f.key);
+    log.info('live-buffer', `ch ${f.channelId}: stopped (${why})`);
+  }
+
+  async function pollFeeder(f) {
+    if (f.stopped) return;
+    if (Date.now() - f.lastAccess > FEEDER_IDLE_MS) return stopFeeder(f, 'no player for 45s');
+    const start = Date.now();
+    let response;
+    try {
+      response = await fetchFromPortal(null, getHeadersForUrl(f.url), f.url, 10_000, f.channelId);
+    } catch (e) {
+      if (++f.failures >= 5) stopFeeder(f, `playlist fetch failed 5 times: ${e.message}`);
+      return;
+    }
+    if (response.status === 403 || response.status === 404) {
+      // The link expired: players reconnect through the normal path for a new one.
+      appState.channelManager?.recordStreamError(f.channelId);
+      return stopFeeder(f, `the source answered ${response.status}`);
+    }
+    if (response.status >= 400) {
+      if (++f.failures >= 5) stopFeeder(f, `the source answered ${response.status} 5 times`);
+      return;
+    }
+    f.failures = 0;
+    const body = Buffer.from(response.data).toString('utf8');
+    if (!body.includes('#EXT-X-MEDIA-SEQUENCE')) {
+      unbufferable.add(f.key);
+      return stopFeeder(f, 'not a live media playlist');
+    }
+    diag.playlist(f.channelId, f.url, body, Date.now() - start);
+    const smoothed = await smoothPlaylist(f.channelId, f.url, body);
+    diag.served(f.channelId, f.url, smoothed);
+    f.buffer.feed(smoothed, f.url);
+    f.buffer.tick();
+    if (f.buffer.unsupported) {
+      unbufferable.add(f.key);
+      stopFeeder(f, 'encrypted or fMP4 stream — not buffered');
+    }
+  }
+
+  function scheduleFeeder(f) {
+    if (f.stopped) return;
+    const every = Math.min(3000, Math.max(1000, f.buffer.target * 500));
+    f.timer = setTimeout(async () => {
+      await pollFeeder(f).catch((e) => log.warn(TAG, `buffer poll failed: ${e.message}`));
+      scheduleFeeder(f);
+    }, every);
+    f.timer.unref?.();
+  }
+
+  // The running feeder for a live channel's media playlist, started if needed;
+  // null when this playlist can't be buffered.
+  async function liveFeeder(channelId, realUrl, seconds) {
+    const key = feederKey(channelId, realUrl);
+    if (unbufferable.has(key)) return null;
+    let f = feeders.get(key);
+    if (f && f.buffer.seconds !== seconds) { stopFeeder(f, 'buffer length changed'); f = null; }
+    if (!f) {
+      f = { key, channelId: String(channelId), url: realUrl, lastAccess: Date.now(), timer: null, failures: 0, stopped: false };
+      f.buffer = new LiveBuffer({ seconds, channel: f.channelId, download: (url) => downloadSegment(url, f.channelId) });
+      feeders.set(key, f);
+      log.info('live-buffer', `ch ${f.channelId}: buffering up to ${seconds}s`);
+      await pollFeeder(f);
+      scheduleFeeder(f);
+    }
+    f.lastAccess = Date.now();
+    f.url = realUrl;   // the newest link (tokens change on reconnect)
+    return f.stopped ? null : f;
+  }
+
+  // The buffer's playlist for a player, rewritten through the proxy; null to
+  // serve the source directly (buffer off, or this stream can't be buffered).
+  async function bufferedPlaylist(req, channelId, realUrl) {
+    const seconds = appState.getLiveBufferSeconds?.() || 0;
+    if (!seconds || !channelId) return null;
+    const f = await liveFeeder(channelId, realUrl, seconds);
+    if (!f || !(await f.buffer.ready(10_000))) return null;
+    return rewriteM3u8(f.buffer.playlist(), realUrl, baseUrl(req), proxySecret, channelId);
+  }
+
+  function heldSegment(ch, url) {
+    for (const f of feeders.values()) {
+      if (f.channelId !== String(ch)) continue;
+      const bytes = f.buffer.bytesFor(url);
+      if (bytes) return bytes;
+    }
+    return null;
+  }
+
   // Verify a client-supplied (realUrl, sig) pair was emitted by us. Constant-time.
   function verifyProxySig(realUrl, sig) {
     if (!sig) return false;
@@ -406,6 +575,15 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
         body = Buffer.concat(rest);
       }
       const proxyOrigin = baseUrl(req);
+      if (body.includes('#EXT-X-MEDIA-SEQUENCE')) {
+        const buffered = await bufferedPlaylist(req, channelId, realUrl);
+        if (buffered) {
+          res.set('Content-Type', 'application/vnd.apple.mpegurl');
+          res.set('Cache-Control', 'no-cache, no-store');
+          setCors();
+          return res.send(buffered);
+        }
+      }
       if (channelId) diag.playlist(channelId, realUrl, body.toString('utf8'), 0);
       const smoothed = await smoothPlaylist(channelId, realUrl, body.toString('utf8'));
       if (channelId) diag.served(channelId, realUrl, smoothed);
@@ -487,6 +665,14 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       log.warn(TAG, `blocked SSRF attempt to ${realUrl}`);
       setCors();
       return res.status(403).send('Forbidden');
+    }
+
+    const buffered = await bufferedPlaylist(req, channelId, realUrl);
+    if (buffered) {
+      res.set('Content-Type', 'application/vnd.apple.mpegurl');
+      res.set('Cache-Control', 'no-cache, no-store');
+      setCors();
+      return res.send(buffered);
     }
 
     let response;
@@ -820,12 +1006,20 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       return res.status(403).send('Forbidden');
     }
 
+    const ch = req.query.ch || null;
+    const held = ch ? heldSegment(ch, realUrl) : null;
+    if (held) {
+      res.set('Content-Type', 'video/mp2t');
+      res.set('Content-Length', String(held.length));
+      res.set('Access-Control-Allow-Origin', '*');
+      return res.end(held);
+    }
+
     const headers = getHeadersForUrl(realUrl);
     // STBemu requests media segments with Accept-Encoding: identity (it only
     // uses gzip for the playlists). Match that exactly for .ts/.aac/.m4s fetches.
     headers['Accept-Encoding'] = 'identity';
 
-    const ch = req.query.ch || null;
     const d = ch ? diag.segment(ch, realUrl) : null;
     let response;
     let gone = false;
@@ -835,32 +1029,11 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       gone = true;
       if (!res.writableEnded) response?.data?.destroy();
     });
-    // The server can list a segment it then says it doesn't have (measured
-    // on a Flussonic provider: files named seconds ahead of the clock, right
-    // after it restarted or renumbered — several servers behind one address,
-    // and the one asked isn't the one that listed it). Players take a failed
-    // segment badly — VLC stops the stream, Stremio retried one for a minute —
-    // so ask again first, each time over a fresh connection, which can reach
-    // another of those servers.
-    const name = realUrl.split('?')[0].split('/').slice(-2).join('/');
-    const startedAt = Date.now();
-    for (let attempt = 0; ; attempt++) {
-      try {
-        response = await fetchStreamFromPortal(headers, realUrl, undefined, ch, { fresh: attempt > 0 });
-      } catch (e) {
-        log.error(TAG, `segment fetch failed: ${e.message}`);
-        return res.status(502).send(`Fetch failed: ${e.message}`);
-      }
-      if (response.status !== 404 || attempt >= segmentRetryMs.length || gone) {
-        if (attempt > 0 && ch) {
-          const waited = ((Date.now() - startedAt) / 1000).toFixed(1);
-          if (response.status === 404) log.warn('stream-diag', `ch ${ch}: segment ${name} still missing after ${attempt + 1} tries over ${waited}s — the server listed it but doesn't have it`);
-          else log.info('stream-diag', `ch ${ch}: segment ${name} was missing, served on try ${attempt + 1} after ${waited}s`);
-        }
-        break;
-      }
-      response.data.resume();   // read the (tiny) 404 off the connection so it stays usable
-      await new Promise((r) => setTimeout(r, segmentRetryMs[attempt]));
+    try {
+      response = await fetchSegmentResponse(headers, realUrl, ch, () => gone);
+    } catch (e) {
+      log.error(TAG, `segment fetch failed: ${e.message}`);
+      return res.status(502).send(`Fetch failed: ${e.message}`);
     }
     d?.firstByte();   // the CDN's response has started
 

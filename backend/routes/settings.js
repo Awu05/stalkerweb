@@ -8,6 +8,7 @@ const express = require('express');
 const CacheManager = require('../cache/CacheManager');
 const { parseIdleMinutes, MAX_IDLE_MINUTES } = require('../lib/idleTimeout');
 
+const MAX_LIVE_BUFFER_S = 120;
 const STB_MODELS    = ['MAG200', 'MAG250', 'MAG254', 'MAG256', 'MAG270', 'MAG322', 'MAG352', 'CUSTOM'];
 const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic'];
 
@@ -44,6 +45,9 @@ module.exports = function settingsModule(config, appState = null, access = null)
       // Built-in HTTPS port (HTTPS_PORT), so the Setup page can offer an
       // https:// Stremio link while the UI itself is open over HTTP.
       https_port:              config.httpsPort || null,
+      // Live delay buffer, seconds (0 = off): saved, else LIVE_BUFFER_SECONDS.
+      live_buffer_seconds:     saved.live_buffer_seconds ?? config.liveBufferSeconds ?? 0,
+      live_buffer_default:     config.liveBufferSeconds ?? 0,
       // With ACCESS_KEY set: the token the Setup page puts in the links it
       // shows (playback only — see lib/access.js). Only full access reads this.
       access_enabled:          !!access?.enabled,
@@ -53,7 +57,7 @@ module.exports = function settingsModule(config, appState = null, access = null)
 
   router.post('/', (req, res) => {
     const existing = cache.load() || {};
-    const { epg_enabled, vod_enabled, show_adult, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir, idle_timeout_minutes } = req.body;
+    const { epg_enabled, vod_enabled, show_adult, disabled_genres, stbemu_profile_name, stbemu_stb_model, stbemu_custom_firmware, stbemu_firmware, download_dir, idle_timeout_minutes, live_buffer_seconds } = req.body;
     if (epg_enabled !== undefined)            existing.epg_enabled            = !!epg_enabled;
     if (vod_enabled !== undefined)            existing.vod_enabled            = !!vod_enabled;
     if (show_adult !== undefined)             existing.show_adult             = !!show_adult;
@@ -78,6 +82,13 @@ module.exports = function settingsModule(config, appState = null, access = null)
         return res.status(400).json({ error: `idle_timeout_minutes must be a whole number from 0 (never) to ${MAX_IDLE_MINUTES}` });
       }
       existing.idle_timeout_minutes = idleMinutes;
+    }
+    if (live_buffer_seconds !== undefined) {
+      const n = Number(live_buffer_seconds);
+      if (!Number.isInteger(n) || n < 0 || n > MAX_LIVE_BUFFER_S) {
+        return res.status(400).json({ error: `live_buffer_seconds must be a whole number from 0 (off) to ${MAX_LIVE_BUFFER_S}` });
+      }
+      existing.live_buffer_seconds = n;
     }
     cache.save(existing);
     if (idleMinutes !== null) appState?.setIdleTimeoutMinutes(idleMinutes);
