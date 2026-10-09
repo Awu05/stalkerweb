@@ -399,11 +399,14 @@ export default function VodPlayerPage() {
         )}
 
         {/* Video element */}
+        {/* The video is pinned to this area's edges: sized from its own width
+            instead, a 16:9 picture on an ultrawide screen in fullscreen came out
+            taller than the screen and lost its top and bottom. */}
         <div
-          className="flex-1 flex items-center justify-center cursor-pointer"
+          className="relative flex-1 min-h-0 cursor-pointer"
           onClick={togglePlayPause}
         >
-          <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+          <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
         </div>
 
         {/* Loading overlay */}

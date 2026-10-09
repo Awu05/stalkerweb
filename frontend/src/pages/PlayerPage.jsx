@@ -1142,7 +1142,8 @@ export default function PlayerPage() {
           togglePlayPause()
         }}
       >
-        <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+        {/* Pinned to the edges, so the whole picture fits any screen shape. */}
+        <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
