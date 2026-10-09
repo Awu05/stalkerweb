@@ -1011,8 +1011,8 @@ export default function SetupPage() {
 
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--color-text)]">Profiles</h1>
-            <p className="text-sm text-[var(--color-muted)] mt-1">Manage your portal connections.</p>
+            <h1 className="text-2xl font-semibold text-[var(--color-text)]">Settings</h1>
+            <p className="text-sm text-[var(--color-muted)] mt-1">Portal profiles, IPTV links and app preferences.</p>
           </div>
           {connected && (
             <button
@@ -1029,6 +1029,7 @@ export default function SetupPage() {
 
         {/* ── Profile list ────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Profiles</h2>
           {profiles.length === 0 && (
             <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
               <p className="text-sm text-[var(--color-muted)]">No profiles yet.</p>

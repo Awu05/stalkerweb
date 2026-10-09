@@ -175,7 +175,7 @@ function createAccess({ key = '', logToken = false, logger = log, now = Date.now
     if (!m) return next();
     const grant = check(req, decode(m[1]));
     if (grant === 'locked') return tooMany(req, res);
-    if (!grant) return res.status(401).type('text/plain').send('This link has the wrong access key. Copy a new one from the StalkerWeb Profiles page.');
+    if (!grant) return res.status(401).type('text/plain').send('This link has the wrong access key. Copy a new one from the StalkerWeb Settings page.');
     req.accessGrant = grant;
     // Links handed out carry the share token, whatever was presented: a link
     // that leaks (a cast device, a proxy log) never carries the key itself.

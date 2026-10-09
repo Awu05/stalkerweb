@@ -176,7 +176,7 @@ class MainActivity : ComponentActivity() {
                 val updateViewModel:  UpdateViewModel  = viewModel<UpdateViewModel>(factory = updateVmFactory)
                 val vodViewModel:     VodViewModel     = viewModel<VodViewModel>(factory = vodVmFactory)
 
-                // Whether the VOD section is enabled (controlled from the web Profiles page).
+                // Whether the VOD section is enabled (controlled from the web Settings page).
                 var vodEnabled by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
                     runCatching { repository.isVodEnabled() }.onSuccess { vodEnabled = it }

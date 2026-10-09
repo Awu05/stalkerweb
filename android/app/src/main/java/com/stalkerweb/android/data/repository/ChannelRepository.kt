@@ -287,7 +287,7 @@ class ChannelRepository(private val prefs: AppPrefs) {
 
     // ── Settings ──────────────────────────────────────────────────────────────
 
-    /** Whether the VOD section should be shown (controlled from the web Profiles page). */
+    /** Whether the VOD section should be shown (controlled from the web Settings page). */
     suspend fun isVodEnabled(): Boolean =
         runCatching {
             requireApi().getSettings().also { if (!prefs.accessKey.isNullOrBlank()) prefs.shareToken = it.accessShareToken }.vodEnabled
