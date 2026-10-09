@@ -4,7 +4,7 @@ import { Tv2, Settings, Heart, Loader2, Film, LayoutGrid, Download, PanelLeftClo
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
-import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, getViewers, createViewer, getMyViewer } from './stalkerApi'
+import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, VIEWER_GONE, getViewers, createViewer, getMyViewer } from './stalkerApi'
 import LoginPage from './pages/LoginPage'
 import { syncVodProgressFromBackend } from '@/lib/vodProgress'
 import { fetchProfiles } from '@/lib/profiles'
@@ -284,6 +284,19 @@ function AppInner() {
     const onRequired = () => setNeedsLogin(true)
     window.addEventListener(ACCESS_REQUIRED, onRequired)
     return () => window.removeEventListener(ACCESS_REQUIRED, onRequired)
+  }, [])
+
+  // This device's viewer was deleted on another device: forget it and ask again.
+  useEffect(() => {
+    const onGone = () => {
+      setViewerId(null)
+      invalidateFavoritesCache()
+      getViewers().then(l => setViewers(l.viewers)).catch(() => {})
+      setPickerRequired(true)
+      setPickerOpen(true)
+    }
+    window.addEventListener(VIEWER_GONE, onGone)
+    return () => window.removeEventListener(VIEWER_GONE, onGone)
   }, [])
 
   useEffect(() => {

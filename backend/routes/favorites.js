@@ -13,6 +13,7 @@
 const express = require('express');
 const sessionMiddleware = require('../middleware/session');
 const log = require('../logger');
+const { refuseIfGone } = require('./viewers');
 const TAG = 'favorites';
 
 // Enrich a list of uniqueId strings with channel objects from channelManager.
@@ -37,6 +38,8 @@ module.exports = function favoritesModule(viewers, appState) {
   const guard = sessionMiddleware(appState);
   // This request's viewer's favorites (lib/viewerContext.js sets req.viewer).
   const favs = (req) => viewers.favoritesOf(req.viewer.id);
+  // Never the default viewer's favorites in place of a deleted viewer's.
+  router.use(refuseIfGone);
 
   // uniqueId used to be a hash of name+number and is now the portal's own id,
   // so favorites saved by an older build hold ids the client will never match

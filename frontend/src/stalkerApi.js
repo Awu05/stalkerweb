@@ -5,6 +5,8 @@ import { getViewerId } from './lib/viewer'
 const BASE = '/api'
 const TIMEOUT_MS = 30_000
 export const ACCESS_REQUIRED = 'sw:access-required'
+// This device's viewer was deleted on another device: App shows the picker.
+export const VIEWER_GONE = 'sw:viewer-gone'
 
 async function _fetch(path, opts = {}) {
   const controller = new AbortController()
@@ -17,6 +19,7 @@ async function _fetch(path, opts = {}) {
       const e = await r.json().catch(() => ({ error: r.statusText }))
       // Signed out (ACCESS_KEY set, cookie missing or revoked): App shows the login.
       if (r.status === 401 && e.accessRequired) window.dispatchEvent(new Event(ACCESS_REQUIRED))
+      if (r.status === 409 && e.viewerGone) window.dispatchEvent(new Event(VIEWER_GONE))
       throw new Error(e.error || r.statusText)
     }
     return r.json()

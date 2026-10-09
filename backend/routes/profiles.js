@@ -12,8 +12,20 @@ const express = require('express');
 module.exports = function profilesModule(profilesManager) {
   const router = express.Router();
 
-  router.get('/', (_req, res) => {
-    res.json(profilesManager.list());
+  // Channel filters belong to viewers now (routes/viewers.js), but the Android
+  // app still reads them from the portal profile — so report the requesting
+  // viewer's (the default one, for a client that names none) in their place.
+  router.get('/', (req, res) => {
+    const list = profilesManager.list();
+    const v = req.viewer;
+    if (v) {
+      list.profiles = list.profiles.map((p) => ({
+        ...p,
+        disabledGenres: v.disabledGenres ?? [],
+        disabledLanguages: v.disabledLanguages ?? [],
+      }));
+    }
+    res.json(list);
   });
 
   router.post('/', (req, res) => {

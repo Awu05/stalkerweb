@@ -46,6 +46,11 @@ function createViewerContext(viewers) {
     }
     const viewer = pick(req, fromPath);
     req.viewer = viewer;
+    // The website names its viewer in X-Viewer; one that no longer exists was
+    // deleted on another device. Routes that would otherwise read or change the
+    // default viewer's data in its place refuse instead (VIEWER_GONE).
+    const named = req.get('x-viewer');
+    req.viewerGone = !!named && !viewers.get(String(named));
     als.run(viewer, () => next());
   }
 

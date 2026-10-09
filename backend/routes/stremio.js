@@ -76,11 +76,12 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
   // Category name → id for one kind, for its genre dropdown. Names are what
   // Stremio sends back, so they must be unique; a repeat gets its id appended.
   // Cached briefly per portal: every catalog page needs its own kind's list,
-  // and rebuilding it re-read settings and re-sorted every channel.
-  const genreCache = new Map(); // `${portal}|${kind}` → { value, ts }
+  // and rebuilding it re-read settings and re-sorted every channel. Keyed by
+  // the viewer's filters too, so one viewer never gets another's categories.
+  const genreCache = new Map(); // `${portal}|${kind}|${filter key}` → { value, ts }
   async function genresFor(kind) {
     if (!connected()) return { list: [], required: false };
-    const key = `${cat.currentPortal()}|${kind}`;
+    const key = `${cat.currentPortal()}|${kind}|${appState.getExportFilter?.().key ?? ''}`;
     const hit = genreCache.get(key);
     if (hit && Date.now() - hit.ts < GENRES_TTL_MS) return hit.value;
 

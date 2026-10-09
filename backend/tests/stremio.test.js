@@ -106,6 +106,18 @@ describe('Stremio addon', () => {
     expect((await get('/manifest.json')).id).toBe('com.stalkerweb.addon')
   })
 
+  it('never hands one viewer the genres another viewer\'s filters allow', async () => {
+    const tvGenres = (m) => m.catalogs.find((c) => c.type === 'tv').extra.find((e) => e.name === 'genre').options
+    const own = appState.getExportFilter
+    appState.getExportFilter = () => ({ keep: () => true, key: 'shows-everything' })
+    try {
+      expect(tvGenres(await get('/manifest.json'))).toContain('Adult')
+    } finally {
+      appState.getExportFilter = own
+    }
+    expect(tvGenres(await get('/manifest.json'))).not.toContain('Adult')
+  })
+
   it('changes the manifest version when the categories change', async () => {
     const a = (await get('/manifest.json')).version
     portal = `${portal}other/`

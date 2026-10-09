@@ -7,6 +7,8 @@ import ViewersManager from '../viewers/ViewersManager.js'
 import { createViewerContext } from '../lib/viewerContext.js'
 import viewersModule from '../routes/viewers.js'
 import favoritesModule from '../routes/favorites.js'
+import profilesModule from '../routes/profiles.js'
+import ProfilesManager from '../profiles/ProfilesManager.js'
 
 describe('viewers API and favorites', () => {
   let server, base, dir, viewers
@@ -31,6 +33,9 @@ describe('viewers API and favorites', () => {
     app.use(context.middleware)
     app.use('/api/viewers', viewersModule(viewers))
     app.use('/api/favorites', favoritesModule(viewers, appState))
+    const profiles = new ProfilesManager(dir)
+    profiles.create({ name: 'Portal', disabledGenres: ['Old'], disabledLanguages: ['DE'] })
+    app.use('/api/profiles', profilesModule(profiles))
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}`
   })
@@ -73,6 +78,25 @@ describe('viewers API and favorites', () => {
     expect(saved.body).toMatchObject({ id: sam.id, isDefault: false, disabledGenres: ['Sports'], showAdult: true })
     expect((await call('GET', '/api/viewers/me')).body.disabledGenres).toEqual([])
     expect((await call('PUT', '/api/viewers/me/filters', { showAdult: 'yes' }, sam.id)).status).toBe(400)
+  })
+
+  it('tells a device whose viewer was deleted, instead of using the default viewer\'s data', async () => {
+    const before = viewers.getDefault().favorites.channels.slice()
+    const me = await call('GET', '/api/viewers/me', null, 'view_deleted')
+    expect(me.status).toBe(409)
+    expect(me.body.viewerGone).toBe(true)
+    expect((await call('PUT', '/api/viewers/me/filters', { showAdult: true }, 'view_deleted')).status).toBe(409)
+    expect((await call('POST', '/api/favorites/channels', { uniqueId: '9' }, 'view_deleted')).status).toBe(409)
+    expect(viewers.getDefault().favorites.channels).toEqual(before)
+    expect(viewers.getDefault().showAdult).toBe(false)
+    // Naming no viewer is still fine (old clients, the Android app).
+    expect((await call('GET', '/api/viewers/me')).status).toBe(200)
+  })
+
+  it('reports the viewer\'s filters on portal profiles, for the Android app', async () => {
+    await call('PUT', '/api/viewers/me/filters', { disabledGenres: ['Sports'], disabledLanguages: [] })
+    const p = (await call('GET', '/api/profiles')).body.profiles[0]
+    expect(p).toMatchObject({ name: 'Portal', disabledGenres: ['Sports'], disabledLanguages: [] })
   })
 
   it('keeps favorites apart per viewer, and old clients get the default viewer\'s', async () => {

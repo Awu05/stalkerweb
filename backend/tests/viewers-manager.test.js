@@ -104,6 +104,31 @@ describe('viewers', () => {
   })
 })
 
+describe('an unreadable viewers.json', () => {
+  it('is never overwritten: a temporary Default is served and changes are refused', () => {
+    viewers.ensureInitialized({ favorites: { channels: ['1'] } })
+    const file = path.join(dir, 'viewers.json')
+    fs.writeFileSync(file, '{ "viewers": [ {"id": "view_a", ') // a hand edit gone wrong
+    const before = fs.readFileSync(file, 'utf8')
+
+    expect(viewers.list().viewers.length).toBe(1)
+    expect(viewers.getDefault()).toBeTruthy()
+    expect(statusOf(() => viewers.create({ name: 'Andy' }))).toBe(503)
+    expect(statusOf(() => viewers.favoritesOf(viewers.getDefault().id).addChannel('2'))).toBe(503)
+    expect(fs.readFileSync(file, 'utf8')).toBe(before)
+  })
+
+  it('recovers once the file is fixed', () => {
+    viewers.ensureInitialized({})
+    const file = path.join(dir, 'viewers.json')
+    const good = fs.readFileSync(file, 'utf8')
+    fs.writeFileSync(file, 'not json')
+    viewers.list()
+    fs.writeFileSync(file, good)
+    expect(viewers.create({ name: 'Andy' }).name).toBe('Andy')
+  })
+})
+
 describe('favorites per viewer', () => {
   beforeEach(() => viewers.ensureInitialized({}))
 

@@ -75,17 +75,34 @@ class ViewersManager {
   }
 
   _load() {
+    let raw;
     try {
-      const raw = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      const viewers = Array.isArray(raw.viewers) ? raw.viewers.filter((v) => v && typeof v.id === 'string') : [];
-      const defaultViewerId = viewers.some((v) => v.id === raw.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
-      return { defaultViewerId, viewers };
-    } catch {
-      return { defaultViewerId: null, viewers: [] };
+      raw = JSON.parse(fs.readFileSync(this._file, 'utf8'));
+    } catch (e) {
+      if (e.code === 'ENOENT') return { defaultViewerId: null, viewers: [] };
+      return this._unreadable(e);
     }
+    this._warned = false;
+    const viewers = Array.isArray(raw?.viewers) ? raw.viewers.filter((v) => v && typeof v.id === 'string') : [];
+    const defaultViewerId = viewers.some((v) => v.id === raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
+    return { defaultViewerId, viewers };
+  }
+
+  // A viewers.json that exists but can't be read or parsed (a hand edit gone
+  // wrong, a file locked by a backup tool) is never overwritten: requests get a
+  // temporary Default viewer, and every change is refused until it reads again.
+  _unreadable(e) {
+    if (!this._warned) {
+      log.error(TAG, `viewers.json could not be read (${e.message}) — using a temporary Default viewer and saving nothing until it is fixed`);
+      this._warned = true;
+    }
+    const v = blankViewer('Default', COLORS[0]);
+    v.id = 'view_unreadable';
+    return { unreadable: true, defaultViewerId: v.id, viewers: [v] };
   }
 
   _save(data) {
+    if (data.unreadable) throw new ViewerError(503, 'viewers.json could not be read, so nothing was saved. Fix or remove the file, then try again.');
     try {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
@@ -99,7 +116,7 @@ class ViewersManager {
   // The data, never without a viewer: a missing or emptied file gets a Default.
   _data() {
     const d = this._load();
-    if (d.viewers.length) return d;
+    if (d.viewers.length || d.unreadable) return d;
     const v = blankViewer('Default', COLORS[0]);
     const fresh = { defaultViewerId: v.id, viewers: [v] };
     this._save(fresh);
