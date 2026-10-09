@@ -223,7 +223,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
         {/* header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
           <h3 className="font-semibold text-[var(--color-text)]">
-            {initial?.id ? 'Edit Profile' : initial?.portal ? 'Duplicate Profile' : 'New Profile'}
+            {initial?.id ? 'Edit Connection' : initial?.portal ? 'Duplicate Connection' : 'New Connection'}
           </h3>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
             <X size={16} />
@@ -358,7 +358,7 @@ function StbImportPicker({ candidates, onImport, onClose }) {
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
-          <h3 className="font-semibold text-[var(--color-text)]">Select Profiles to Import</h3>
+          <h3 className="font-semibold text-[var(--color-text)]">Select Connections to Import</h3>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
             <X size={16} />
           </button>
@@ -458,7 +458,7 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onD
           onClick={() => onDuplicate(profile)}
           className="h-8 w-8 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
           title="Duplicate"
-          aria-label="Duplicate profile"
+          aria-label="Duplicate connection"
         >
           <Copy size={13} />
         </button>
@@ -905,7 +905,7 @@ export default function SetupPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-[var(--color-text)]">Settings</h1>
-            <p className="text-sm text-[var(--color-muted)] mt-1">Portal profiles, IPTV links and app preferences.</p>
+            <p className="text-sm text-[var(--color-muted)] mt-1">Viewers, IPTV connections, links and app preferences.</p>
           </div>
           {connected && (
             <button
@@ -920,13 +920,25 @@ export default function SetupPage() {
 
         <Notice notice={notice} />
 
-        {/* ── Profile list ────────────────────────────────────────────────── */}
+        {/* ── Viewers ─────────────────────────────────────────────────────── */}
+        <Card title="Viewers" description="Everyone who watches here. Each viewer has their own favorites and channel filters; every other setting on this page is shared.">
+          <ViewersCard />
+        </Card>
+
+        <Card
+          title={viewer ? `My channels (${viewer.name})` : 'My channels'}
+          description="Which categories you see in Live TV and Movies & Series, and whether adult content is shown. These belong to you — other viewers keep their own."
+        >
+          <ChannelFilters />
+        </Card>
+
+        {/* ── IPTV connections ────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">Profiles</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">IPTV Connections</h2>
           {profiles.length === 0 && (
             <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
-              <p className="text-sm text-[var(--color-muted)]">No profiles yet.</p>
-              <p className="text-xs text-[var(--color-muted)] mt-1">Add a profile to connect to a Stalker portal.</p>
+              <p className="text-sm text-[var(--color-muted)]">No IPTV connections yet.</p>
+              <p className="text-xs text-[var(--color-muted)] mt-1">Add your Stalker portal (its address and MAC) to start watching.</p>
             </div>
           )}
 
@@ -948,7 +960,7 @@ export default function SetupPage() {
             className="flex items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4 text-sm text-[var(--color-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-primary)]/5 transition-colors"
           >
             <Plus size={15} />
-            Add Profile
+            Add Connection
           </button>
         </div>
 
@@ -964,12 +976,12 @@ export default function SetupPage() {
           // With ACCESS_KEY set, players can't sign in — the links carry a
           // playback-only token in their path instead (backend lib/access.js).
           const k = shareToken ? `/k/${shareToken}` : ''
-          // The current viewer's channels (the default viewer's links are unchanged).
+          // The current viewer's links: each viewer has their own.
           const vq = viewerQuery(viewer)
           const vp = viewerPath(viewer)
-          const xtreamUser = viewer && !viewer.isDefault ? <>the username <strong>{viewer.name}</strong></> : 'any username'
+          const xtreamUser = viewer ? <>the username <strong>{viewer.name}</strong></> : 'any username'
           return (
-            <Card title="IPTV Links" description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs.">
+            <Card title={viewer ? `IPTV Links (${viewer.name})` : 'IPTV Links'} description="Add StalkerWeb to Jellyfin, Plex, Emby, Dispatcharr, or any IPTV client using these URLs. They are this viewer's: their channels and categories, and their own Stremio addon.">
               <LinkRow
                 label="Xtream Codes Server"
                 icon={Server}
@@ -1172,21 +1184,8 @@ export default function SetupPage() {
           </div>
         </Card>
 
-        {/* ── Genre Filters ────────────────────────────────────────────────── */}
-        {/* ── Viewers ─────────────────────────────────────────────────────── */}
-        <Card title="Viewers" description="Everyone who watches here. Each viewer has their own favorites and channel filters; every other setting on this page is shared.">
-          <ViewersCard />
-        </Card>
-
-        <Card
-          title={viewer ? `My channels (${viewer.name})` : 'My channels'}
-          description="Which categories you see in Live TV and Movies & Series, and whether adult content is shown. These belong to you — other viewers keep their own."
-        >
-          <ChannelFilters />
-        </Card>
-
         {/* ── STBEmu Export / Import ──────────────────────────────────────── */}
-        <Card title="STBEmu Backup" description="Export a profile as an STBEmu-compatible backup, or import a backup file (from STBEmu or from this app) as new profiles.">
+        <Card title="STBEmu Backup" description="Export a connection as an STBEmu-compatible backup, or import a backup file (from STBEmu or from this app) as new connections.">
           <div className="flex flex-col gap-4">
             {stbEmuNotice && (
               <div className={cn('flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-xs',

@@ -21,9 +21,9 @@ describe('chooseViewer', () => {
 })
 
 describe('viewer links', () => {
-  it('leaves the default viewer\'s links as they were', () => {
-    expect(viewerQuery({ id: 'view_a', isDefault: true })).toBe('')
-    expect(viewerPath({ id: 'view_a', isDefault: true })).toBe('')
+  it('gives the default viewer links of its own too', () => {
+    expect(viewerQuery({ id: 'view_a', isDefault: true })).toBe('?viewer=view_a')
+    expect(viewerPath({ id: 'view_a', isDefault: true })).toBe('/v/view_a')
     expect(viewerQuery(null)).toBe('')
   })
 
