@@ -74,12 +74,14 @@ describe('GET /api/vod on a portal without a series section', () => {
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}/api/vod`
   })
-  afterAll(() => server.close())
+  afterAll(() => { server.closeAllConnections(); server.close() })   // keep-alive sockets would outlive it and reach the next test's server on a reused port
 
   it('lists the show categories under Series and the rest under Movies', async () => {
     const series = (await (await fetch(`${base}/categories?type=series`)).json()).categories
     const movies = (await (await fetch(`${base}/categories?type=vod`)).json()).categories
-    expect(series.length).toBe(8)
+    expect(names(series)[0]).toBe('All')                 // all of them, put together
+    expect(series[0].id).toBe('series:all')
+    expect(series.length).toBe(9)
     expect(names(movies)).not.toContain('ENGLISH TV SHOWS')
   })
 
@@ -90,3 +92,4 @@ describe('GET /api/vod on a portal without a series section', () => {
     expect(calls[1]).toMatchObject({ type: 'vod', categoryId: '5', sort: 'added' })
   })
 })
+
