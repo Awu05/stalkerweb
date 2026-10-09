@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Tv2, BookOpen, Settings, Heart, RefreshCw, Timer, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
+import { Tv2, Settings, Heart, RefreshCw, Timer, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
@@ -20,7 +20,6 @@ const GuidePage      = lazy(() => import('./pages/GuidePage'))
 const FavoritesPage  = lazy(() => import('./pages/FavoritesPage'))
 const VodPage        = lazy(() => import('./pages/VodPage'))
 const VodPlayerPage  = lazy(() => import('./pages/VodPlayerPage'))
-const EpgGridPage    = lazy(() => import('./pages/EpgGridPage'))
 const DownloadsPage  = lazy(() => import('./pages/DownloadsPage'))
 
 // ── Sidebar nav link ──────────────────────────────────────────────────────
@@ -133,8 +132,7 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
       <NavItem to="/vod"       icon={Film}        label="VOD"       collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/downloads" icon={Download}    label="Downloads" collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/favorites" icon={Heart}       label="Favorites" collapsed={collapsed} onNavigate={onCloseMobile} />
-      {epgEnabled && <NavItem to="/guide"    icon={BookOpen}    label="Guide"    collapsed={collapsed} onNavigate={onCloseMobile} />}
-      {epgEnabled && <NavItem to="/epg-grid" icon={LayoutGrid}  label="EPG Grid" collapsed={collapsed} onNavigate={onCloseMobile} />}
+      {epgEnabled && <NavItem to="/guide"    icon={LayoutGrid}  label="Guide"    collapsed={collapsed} onNavigate={onCloseMobile} />}
     </nav>
   )
 
@@ -411,14 +409,8 @@ function AppInner() {
                 </RequireAuth>
               }
             />
-            <Route
-              path="/epg-grid"
-              element={
-                <RequireAuth connected={connected}>
-                  <EpgGridPage />
-                </RequireAuth>
-              }
-            />
+            {/* The grid used to be its own page; it's the Guide's default view now. */}
+            <Route path="/epg-grid" element={<Navigate to="/guide" replace />} />
             <Route
               path="/vod"
               element={

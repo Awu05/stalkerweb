@@ -1,206 +1,83 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Tv2, Loader2, AlertCircle, Play } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { LayoutGrid, List, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { isAdult } from '@/lib/adultFilter'
-import { useApp } from '@/lib/appContext'
-import { getChannelEpg } from '../stalkerApi'
-import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
+import EpgGridView from './EpgGridPage'
+import GuideListView from './GuideListView'
 
-const PERIODS = [
-  { label: '6h', value: 6 },
-  { label: '12h', value: 12 },
-  { label: '24h', value: 24 },
-  { label: '48h', value: 48 },
+// The programme guide: a grid of every channel against a timeline (the
+// default), or a list of one channel's programmes. The view is in the URL
+// (?view=list) and switching replaces the history entry, so Back still leaves
+// the page. The station search filters either view.
+const VIEWS = [
+  { id: 'grid', label: 'Grid', icon: LayoutGrid },
+  { id: 'list', label: 'List', icon: List },
 ]
 
-function formatTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts * 1000)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function isNow(startTime, endTime) {
-  const now = Date.now() / 1000
-  return startTime <= now && now < endTime
-}
-
 export default function GuidePage() {
-  const navigate = useNavigate()
-  const { showAdult } = useApp()
-  const [channels, setChannels] = useState([])
-  const [activeChannel, setActiveChannel] = useState(null)
-  const [epg, setEpg] = useState([])
-  const [period, setPeriod] = useState(24)
-  const [loadingChannels, setLoadingChannels] = useState(true)
-  const [loadingEpg, setLoadingEpg] = useState(false)
-  const [error, setError] = useState(null)
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'list' ? 'list' : 'grid'
+  const [query, setQuery] = useState('')
 
-  useEffect(() => {
-    let cancelled = false
-    const hasInit = { current: false }
-
-    function filterChannels(ch) {
-      if (showAdult) return ch
-      return ch.filter(c => !isAdult(c.genre) && !isAdult(c.name))
-    }
-
-    getCachedChannelData()
-      .then(({ channels: ch }) => {
-        if (cancelled) return
-        const filtered = filterChannels(ch)
-        setChannels(filtered)
-        if (filtered.length && !hasInit.current) { hasInit.current = true; setActiveChannel(filtered[0]) }
-        setLoadingChannels(false)
-      })
-      .catch(e => { if (!cancelled) { setError(e.message); setLoadingChannels(false) } })
-
-    // Subscribe so the sidebar populates automatically when loading completes
-    const unsub = subscribeChannelUpdates(({ channels: ch }) => {
-      if (cancelled) return
-      const filtered = filterChannels(ch)
-      setChannels(filtered)
-      if (filtered.length && !hasInit.current) { hasInit.current = true; setActiveChannel(filtered[0]) }
-      setLoadingChannels(false)
-    })
-
-    return () => { cancelled = true; unsub() }
-  }, [showAdult])
-
-  useEffect(() => {
-    if (!activeChannel?.uniqueId) return
-    let cancelled = false
-    setLoadingEpg(true)
-    setEpg([])
-    getChannelEpg(activeChannel.uniqueId, period)
-      .then(data => { if (!cancelled) setEpg(data?.events || []) })
-      .catch(() => { if (!cancelled) setEpg([]) })
-      .finally(() => { if (!cancelled) setLoadingEpg(false) })
-    return () => { cancelled = true }
-  }, [activeChannel?.uniqueId, period])
+  const setView = (id) => {
+    const next = new URLSearchParams(params)
+    if (id === 'grid') next.delete('view')
+    else next.set('view', id)
+    setParams(next, { replace: true })
+  }
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
-      {/* Channel sidebar */}
-      <div className="w-52 shrink-0 border-r border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
-        <div className="px-4 py-3 border-b border-[var(--color-border)]">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">Channels</p>
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-dvh">
+      <div className="flex items-center gap-3 px-3 sm:px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+        <h1 className="hidden sm:block text-sm font-semibold text-[var(--color-text)]">Guide</h1>
+
+        {/* Grid | List */}
+        <div role="tablist" aria-label="Guide view" className="flex rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] p-0.5">
+          {VIEWS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={view === id}
+              onClick={() => setView(id)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-[calc(var(--radius-sm)-2px)] text-xs font-medium transition-colors',
+                view === id
+                  ? 'bg-[var(--color-primary)] text-[var(--color-bg)]'
+                  : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+              )}
+            >
+              <Icon size={13} />
+              {label}
+            </button>
+          ))}
         </div>
-        {loadingChannels ? (
-          <div className="flex-1 flex items-center justify-center">
-            <Loader2 size={20} className="animate-spin text-[var(--color-primary-light)]" />
-          </div>
-        ) : (
-          <ScrollArea className="flex-1">
-            {channels.map(ch => (
-              <button
-                key={ch.id}
-                onClick={() => setActiveChannel(ch)}
-                className={cn(
-                  'w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors',
-                  ch.uniqueId === activeChannel?.uniqueId
-                    ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary-light)]'
-                    : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-                )}
-              >
-                <Tv2 size={13} className="shrink-0" />
-                <span className="text-xs truncate">{ch.name}</span>
-              </button>
-            ))}
-          </ScrollArea>
-        )}
+
+        {/* Station search */}
+        <div className="relative flex-1 max-w-xs ml-auto">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none" />
+          <input
+            type="search"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') setQuery('') }}
+            placeholder="Search stations…"
+            aria-label="Search stations by name or number"
+            className="w-full rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-7 pr-7 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] outline-none focus:border-[var(--color-primary-light)] [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* EPG panel */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center gap-4 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
-          <h2 className="font-semibold text-sm text-[var(--color-text)] truncate flex-1">
-            {activeChannel?.name || 'Select a channel'}
-          </h2>
-          <div className="flex items-center gap-1">
-            {PERIODS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                className={cn(
-                  'px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
-                  period === p.value
-                    ? 'bg-[var(--color-primary)] text-[var(--color-bg)]'
-                    : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]'
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {activeChannel && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => navigate(`/player?channel=${activeChannel.uniqueId}&name=${encodeURIComponent(activeChannel.name)}`)}
-            >
-              <Play size={13} /> Watch
-            </Button>
-          )}
-        </div>
-
-        {/* Programme list */}
-        <ScrollArea className="flex-1 px-6 py-4">
-          {loadingEpg && (
-            <div className="flex items-center justify-center h-32">
-              <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
-            </div>
-          )}
-
-          {!loadingEpg && error && (
-            <div className="flex items-center gap-2 text-sm text-[var(--color-live)] mt-4">
-              <AlertCircle size={16} /> {error}
-            </div>
-          )}
-
-          {!loadingEpg && !error && epg.length === 0 && (
-            <p className="text-sm text-[var(--color-muted)] mt-4">No EPG data available for this channel.</p>
-          )}
-
-          {!loadingEpg && epg.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              {epg.map((prog, i) => {
-                const live = isNow(prog.startTime, prog.endTime)
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      'flex gap-4 rounded-[var(--radius-sm)] px-4 py-3 transition-colors',
-                      live
-                        ? 'bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/30'
-                        : 'bg-[var(--color-surface)] border border-transparent hover:border-[var(--color-border)]'
-                    )}
-                  >
-                    <div className="shrink-0 w-24 text-xs text-[var(--color-muted)] pt-0.5">
-                      {formatTime(prog.startTime)}
-                      {prog.endTime && <span className="block">{formatTime(prog.endTime)}</span>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className={cn('text-sm font-medium truncate', live ? 'text-[var(--color-primary-light)]' : 'text-[var(--color-text)]')}>
-                          {prog.title || 'Untitled'}
-                        </p>
-                        {live && <Badge variant="live" className="shrink-0">NOW</Badge>}
-                      </div>
-                      {prog.description && (
-                        <p className="text-xs text-[var(--color-muted)] mt-0.5 line-clamp-2">{prog.description}</p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </ScrollArea>
+      <div className="flex-1 min-h-0">
+        {view === 'grid' ? <EpgGridView query={query} /> : <GuideListView query={query} />}
       </div>
     </div>
   )

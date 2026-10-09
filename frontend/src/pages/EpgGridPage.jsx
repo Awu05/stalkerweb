@@ -5,6 +5,7 @@ import { Play, X, Bell, BellOff, Tv2, Loader2, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { isLanguageDisabled } from '@/lib/languages'
+import { matchesStation } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { getChannelEpg, getProxiedLogoUrl } from '../stalkerApi'
@@ -217,7 +218,8 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function EpgGridPage() {
+// The Guide page's grid view: every channel against a timeline.
+export default function EpgGridView({ query = '' }) {
   const navigate = useNavigate()
   const { showAdult, disabledGenres, disabledLanguages } = useApp()
 
@@ -273,8 +275,8 @@ export default function EpgGridPage() {
     if (!showAdult) ch = ch.filter(c => !isAdult(c.genre) && !isAdult(c.name))
     if (disabledGenres.size > 0) ch = ch.filter(c => !c.genre || !disabledGenres.has(c.genre))
     if (disabledLanguages.size > 0) ch = ch.filter(c => !c.genre || !isLanguageDisabled(c.genre, disabledLanguages))
-    return ch
-  }, [allChannels, showAdult, disabledGenres, disabledLanguages])
+    return ch.filter(c => matchesStation(c, query))
+  }, [allChannels, showAdult, disabledGenres, disabledLanguages, query])
 
   // ── EPG data (fetched for the rows being rendered) ───────────────────────
   const [epgMap, setEpgMap]   = useState({})      // { [uniqueId]: { events } }
@@ -364,6 +366,11 @@ export default function EpgGridPage() {
   })
   const virtualRows = rowVirtualizer.getVirtualItems()
 
+  // A new search shows its matches from the top (keeping the time position).
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [query])
+
   // Fetch the guide for the rendered rows. The overscan rows are fetched too,
   // so a row's guide is usually there before it scrolls into view.
   const firstRow = virtualRows[0]?.index ?? 0
@@ -378,7 +385,7 @@ export default function EpgGridPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   if (loadingChannels) {
     return (
-      <div className="flex h-[calc(100dvh-3.5rem)] lg:h-dvh items-center justify-center">
+      <div className="flex h-full items-center justify-center">
         <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
       </div>
     )
@@ -386,19 +393,20 @@ export default function EpgGridPage() {
 
   if (channelError) {
     return (
-      <div className="flex h-[calc(100dvh-3.5rem)] lg:h-dvh items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
         <AlertCircle size={16} /> {channelError}
       </div>
     )
   }
 
   const rowsHeight = rowVirtualizer.getTotalSize()
+  const noMatch = channels.length === 0 && query.trim()
 
   return (
     <div
       ref={scrollRef}
       onScroll={publishScroll}
-      className="h-[calc(100dvh-3.5rem)] lg:h-dvh overflow-auto overscroll-contain bg-[var(--color-bg)]"
+      className="h-full overflow-auto overscroll-contain bg-[var(--color-bg)]"
       // Keyboard focus scrolls a block into view clear of the sticky column and header.
       style={{ scrollPaddingLeft: colWidth, scrollPaddingTop: HEADER_HEIGHT }}
     >
@@ -435,6 +443,10 @@ export default function EpgGridPage() {
             )}
           </div>
         </div>
+
+        {noMatch && (
+          <p className="sticky left-0 px-4 py-6 text-sm text-[var(--color-muted)]">No stations match “{query.trim()}”.</p>
+        )}
 
         {/* ── Channel rows (virtualized) ───────────────────────────────────── */}
         <div className="relative" style={{ height: rowsHeight }}>
