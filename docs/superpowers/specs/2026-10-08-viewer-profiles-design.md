@@ -97,8 +97,12 @@ Resolution order, first match wins:
 4. the Xtream `username` when it matches a viewer's name or id (case-insensitive),
 5. otherwise the default viewer.
 
-An unknown id falls back to the default viewer (never an error), so old links
-and the Android app keep working.
+A request naming no viewer gets the default one, so old links and the Android
+app keep working. A viewer that was deleted is never swapped for the default
+(that could show someone else's channels, adult ones included): a link naming
+it (`?viewer=`, `/v/`) is refused with 404, and the website's `X-Viewer` gets
+409 `viewerGone` from the viewer-data routes so it asks who is watching.
+(Revised after the code review, 2026-10-09.)
 
 What follows the viewer:
 
@@ -150,7 +154,8 @@ playback-only share token cannot reach them), like `/api/settings` and
 
 ## Error handling
 
-- Unknown viewer anywhere → default viewer, logged at debug level only.
+- A link naming a deleted viewer → 404; the website's deleted viewer → 409
+  `viewerGone` and the picker. No viewer named → the default viewer.
 - A viewer deleted while a device still has it saved → that device's next
   request gets the default viewer from the server; the website notices the
   saved id is no longer listed and shows the picker.

@@ -18,7 +18,7 @@ import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
-import { jumpTarget, resumePosition, rangesOf } from '@/lib/stallRecovery'
+import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -895,27 +895,20 @@ export default function PlayerPage() {
     if (status !== 'playing') return
     const video = videoRef.current
     if (!video) return
-    let lastTime = video.currentTime
-    let lastAdvance = Date.now()
-    let jumped = false
+    let state = { lastTime: video.currentTime, lastAdvance: Date.now(), jumped: false }
     const id = setInterval(() => {
-      if (document.hidden || video.paused || recoveringRef.current) {
-        lastTime = video.currentTime; lastAdvance = Date.now(); jumped = false; return
+      const { state: next, action } = watchdogTick(state, {
+        now: Date.now(),
+        currentTime: video.currentTime,
+        idle: document.hidden || video.paused || recoveringRef.current,
+        buffered: rangesOf(video.buffered),
+      })
+      state = next
+      if (action === 'reconnect') recoverStream()
+      else if (action?.jumpTo !== undefined) {
+        console.info(`[player] frozen at ${video.currentTime.toFixed(2)}s — jumping to ${action.jumpTo.toFixed(2)}s`)
+        video.currentTime = action.jumpTo
       }
-      if (video.currentTime > lastTime + 0.25) {
-        lastTime = video.currentTime; lastAdvance = Date.now(); jumped = false; return
-      }
-      const frozenFor = Date.now() - lastAdvance
-      if (!jumped && frozenFor >= 3000) {
-        jumped = true
-        const to = jumpTarget(rangesOf(video.buffered), video.currentTime)
-        if (to !== null) {
-          console.info(`[player] frozen at ${video.currentTime.toFixed(2)}s — jumping to ${to.toFixed(2)}s`)
-          video.currentTime = to
-          return
-        }
-      }
-      if (frozenFor > 12000) recoverStream()
     }, 2000)
     return () => clearInterval(id)
   }, [status, recoverStream])

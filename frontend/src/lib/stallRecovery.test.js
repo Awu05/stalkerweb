@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { jumpTarget, resumePosition, rangesOf } from './stallRecovery'
+import { jumpTarget, resumePosition, rangesOf, watchdogTick } from './stallRecovery'
 
 describe('jumpTarget', () => {
   it('jumps over a hole to the video loaded just ahead', () => {
@@ -52,5 +52,37 @@ describe('rangesOf', () => {
     const tr = { length: 2, start: i => [0, 31][i], end: i => [30, 60][i] }
     expect(rangesOf(tr)).toEqual([[0, 30], [31, 60]])
     expect(rangesOf(null)).toEqual([])
+  })
+})
+
+describe('watchdogTick', () => {
+  const start = { lastTime: 10, lastAdvance: 0, jumped: false }
+  const tick = (state, now, currentTime, buffered = [[0, 10], [10.5, 40]]) =>
+    watchdogTick(state, { now, currentTime, idle: false, buffered })
+
+  it('jumps over a hole after 3 s frozen', () => {
+    const r = tick(start, 3000, 10)
+    expect(r.action).toEqual({ jumpTo: expect.closeTo(10.6, 5) })
+  })
+
+  it('still reconnects 12 s after the freeze began when the jump did not help', () => {
+    let { state } = tick(start, 3000, 10)            // jumped to 10.6
+    let r = tick(state, 5000, 10.6)                   // the jump itself is not playback
+    expect(r.action).toBe(null)
+    r = tick(r.state, 12_500, 10.6)
+    expect(r.action).toBe('reconnect')
+  })
+
+  it('starts over once playback really moves', () => {
+    const { state } = tick(start, 3000, 10)
+    const r = tick(state, 5000, 12)
+    expect(r.state).toEqual({ lastTime: 12, lastAdvance: 5000, jumped: false })
+    expect(r.action).toBe(null)
+  })
+
+  it('does nothing while paused or hidden', () => {
+    const r = watchdogTick(start, { now: 20_000, currentTime: 10, idle: true, buffered: [] })
+    expect(r.action).toBe(null)
+    expect(r.state.lastAdvance).toBe(20_000)
   })
 })

@@ -27,7 +27,15 @@ export default function ViewerPicker({ viewers, onPick, onCreate, onClose }) {
 
   // Left/Right move between tiles, like a TV launcher.
   function onKeyDown(e) {
-    if (e.key === 'Escape' && onClose) { onClose(); return }
+    // Keys stay in the picker: the page behind (the player's shortcuts) never sees them.
+    e.stopPropagation()
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)
+    const back = e.key === 'Escape' || e.key === 'GoBack' || e.key === 'XF86Back' || e.keyCode === 461 || e.keyCode === 10009 ||
+      (e.key === 'Backspace' && !typing)
+    if (back) {
+      if (onClose) { e.preventDefault(); onClose() }
+      return
+    }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
     const tiles = [...e.currentTarget.querySelectorAll('[data-tile]')]
     const i = tiles.indexOf(document.activeElement)
