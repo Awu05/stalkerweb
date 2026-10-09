@@ -98,7 +98,7 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
         // Without a series section the "series" categories are the movie
         // ones, most holding no shows — so there is no sensible default for
         // the home board, and a category must be picked in Discover.
-        required = !src.all;
+        required = !(src.all || src.byName);
       }
     } catch (e) {
       log.warn(TAG, `${kind} categories: ${e.message}`);

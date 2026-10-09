@@ -97,6 +97,9 @@ describe('Xtream API', () => {
     seriesMode = 'none'
     seasonCalls = 0
     played.length = 0
+    // Each test is a fresh connection: the real app builds a new VodManager,
+    // forgetting that the last portal rejected type=series.
+    appState.vodManager._noSeriesUntil = 0
   })
 
   const api = async (query) => (await fetch(`${base}/player_api.php?username=u&password=p&${query}`)).json()
@@ -135,8 +138,10 @@ describe('Xtream API', () => {
   })
 
   it('lists movie categories without the "All" and adult ones, and movies without shows', async () => {
+    // "Shows" is named for shows, so on a portal without a series section it
+    // is a series category, not a movie one (lib/seriesCategories.js).
     const cats = await api('action=get_vod_categories')
-    expect(cats.map((c) => c.category_name)).toEqual(['Action', 'Shows'])
+    expect(cats.map((c) => c.category_name)).toEqual(['Action'])
 
     const movies = await api('action=get_vod_streams&category_id=5')
     expect(movies).toEqual([expect.objectContaining({
@@ -155,8 +160,8 @@ describe('Xtream API', () => {
     expect(all.map((m) => m.name)).toEqual(['Heat'])
   })
 
-  it('falls back to the movie categories for series when the portal has no series section', async () => {
-    expect((await api('action=get_series_categories')).map((c) => c.category_name)).toEqual(['Action', 'Shows'])
+  it('uses the movie categories named for shows as series when the portal has no series section', async () => {
+    expect((await api('action=get_series_categories')).map((c) => c.category_name)).toEqual(['Shows'])
     const shows = await api('action=get_series&category_id=6')
     expect(shows.map((s) => [s.name, s.series_id])).toEqual([['Bluey', 200], ['Old Show', 201]])
   })
@@ -164,7 +169,7 @@ describe('Xtream API', () => {
   it('also falls back when the portal rejects the series section', async () => {
     seriesMode = 'reject'
     const cats = await (await fetch(`${base}/player_api.php?action=get_series_categories`)).json()
-    expect(cats.map((c) => c.category_name)).toEqual(['Action', 'Shows'])
+    expect(cats.map((c) => c.category_name)).toEqual(['Shows'])
   })
 
   it('keeps a movie and a show with the same id apart', async () => {
