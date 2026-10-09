@@ -7,6 +7,20 @@
 const log = require('../logger');
 const TAG = 'VodManager';
 
+// Seasons and episodes from the first, whatever order the portal lists them in
+// (many list the newest first): by number, then — for any without one — by
+// name, counting digits as numbers ("Episode 3" before "Episode 11").
+function firstToLast(numberField) {
+  const num = (x) => { const n = parseInt(x[numberField], 10); return Number.isFinite(n) ? n : null; };
+  return (a, b) => {
+    const na = num(a), nb = num(b);
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null) return -1;
+    if (nb !== null) return 1;
+    return String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
+  };
+}
+
 // Resolved VOD links carry a long-lived token (valid for the whole movie), but
 // resolution is slow/fragile on some portals (multiple round-trips, occasional
 // timeouts). Cache the resolved URL briefly so player reloads/seeks/recovery
@@ -32,6 +46,7 @@ class VodManager {
     this._categoryCache = new Map(); // type → { value, ts } | { pending }
     this._listingCache = new Map();  // `${type}:${categoryId}` → { value, ts } | { pending }
     this._pageCache = new Map();     // `${type}:${categoryId}:${page}` → { value, ts } | { pending }
+    this._walks = new Map();         // `${type}:${categoryId}` → { items, total } while a listing is read
   }
 
   // Returns the cached value for `key`, or runs `fetch` once for every caller
@@ -144,6 +159,20 @@ class VodManager {
     return this._peek(this._listingCache, `${type}:${categoryId}`)?.items;
   }
 
+  /** A fresh cached listing as { items, complete }, else undefined. */
+  peekListing(type, categoryId) {
+    return this._peek(this._listingCache, `${type}:${categoryId}`);
+  }
+
+  /**
+   * How far the reading of a category's listing has got: { items (read so
+   * far, in order), total } while getAllItems is reading it, else null — so a
+   * client can show titles as they arrive instead of waiting for all of them.
+   */
+  listingProgress(type, categoryId) {
+    return this._walks.get(`${type}:${categoryId}`) ?? null;
+  }
+
   // One portal page of a category: { items, total, perPage }. Cached, and
   // shared by getAllItems and getRange so neither reads a page the other has.
   _getPage(type, categoryId, p) {
@@ -176,9 +205,21 @@ class VodManager {
   }
 
   async _fetchAllItems(type, categoryId) {
-    const items = [];
+    const key = `${type}:${categoryId}`;
+    const walk = { items: [], total: 0 };
+    this._walks.set(key, walk);
+    try {
+      return await this._walkAllItems(type, categoryId, walk);
+    } finally {
+      this._walks.delete(key);
+    }
+  }
+
+  async _walkAllItems(type, categoryId, walk) {
+    const items = walk.items;
     let complete = true;
     const first = await this._getPage(type, categoryId, 1);
+    walk.total = first.total;
     const pages = Math.max(1, Math.ceil(first.total / first.perPage));
     if (pages > LISTING_MAX_PAGES) {
       log.warn(TAG, `listing ${type}/${categoryId}: ${first.total} titles — reading the newest ${LISTING_MAX_PAGES * first.perPage}`);
@@ -254,7 +295,7 @@ class VodManager {
       name:          s.season_name || s.name || s.o_name || `Season ${s.season_number || s.id}`,
       seasonNumber:  s.season_number != null ? String(s.season_number) : '',
       screenshotUri: s.screenshot_uri || s.screenshot || null,
-    }));
+    })).sort(firstToLast('seasonNumber'));
   }
 
   async getEpisodes(showId, seasonId) {
@@ -273,7 +314,7 @@ class VodManager {
       seriesNumber:  e.series_number != null ? String(e.series_number) : '',
       name:          e.series_name || e.name || `Episode ${e.series_number || e.id}`,
       screenshotUri: e.screenshot_uri || e.screenshot || null,
-    }));
+    })).sort(firstToLast('seriesNumber'));
   }
 
   // Resolve a specific episode's concrete file record (id + direct url) via the
@@ -631,6 +672,9 @@ class VodManager {
       isHD:        !!item.hd,
       isFav:       !!(item.fav),
       isSeries:    !!Number(item.is_series),
+      // Not every portal fills these in; empty and 0 when it doesn't.
+      genres:      String(item.genres_str || '').split(',').map((g) => g.trim()).filter(Boolean),
+      rating:      parseFloat(item.rating_imdb) || 0,
       episodes:    Array.isArray(item.series) ? item.series : [],
       screenshotUri: item.screenshot_uri || item.screenshot || item.screenshot_url || null,
       cmd:          item.cmd || item.path || '',

@@ -189,6 +189,11 @@ export const getAllVodCategories = (type = 'vod') =>
   _get(`/vod/categories?type=${type}&all=1`)
 
 // sort: 'name' (A–Z) or 'added' (newest first) — the portal's own order.
+// A category's whole listing as it is read (backend routes/vod.js): titles from
+// `from` on, plus loaded / total / complete.
+export const getVodListing = ({ type = 'vod', category, from = 0 }) =>
+  _get(`/vod/listing?${new URLSearchParams({ type, category: String(category), from: String(from) })}`)
+
 export const getVodItems = ({ type = 'vod', category, page = 1, search = '', fav = 0, sort = 'added' }) => {
   const p = new URLSearchParams({ type, category: String(category), page: String(page), sort })
   if (search) p.set('search', search)

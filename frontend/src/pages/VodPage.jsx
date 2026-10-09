@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download } from 'lucide-react'
@@ -6,7 +6,10 @@ import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
-import { getVodProgressList, removeVodProgress } from '@/lib/vodProgress'
+import { getVodProgressList, removeVodProgress, getWatchedVodIds } from '@/lib/vodProgress'
+import VodFilters from '@/components/VodFilters'
+import { useCategoryListing } from '@/lib/useCategoryListing'
+import { NO_FILTERS, filtersActive, applyVodFilters, sortVodItems, filterOptions } from '@/lib/vodFilters'
 import { queueDownload } from '@/lib/downloads'
 import { showToast } from '@/lib/toast'
 
@@ -412,6 +415,38 @@ export default function VodPage() {
     loadItems(selectedCategory.id, search, 1, token)
   }
 
+  // ── Filters (genre, year, rating, added, HD, not watched) ───────────────
+  // The portal can't filter, so a filter reads the selected category's whole
+  // listing (useCategoryListing) and filters, searches and sorts it here,
+  // showing titles as they arrive. Not on "All": that is the whole catalog.
+  const SHOW_STEP = 140
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const [visibleCount, setVisibleCount] = useState(SHOW_STEP)
+  const isAllCategory = !!selectedCategory && (String(selectedCategory.id) === '*' || selectedCategory.title?.trim().toLowerCase() === 'all')
+  const filtering = filtersActive(filters) && !!selectedCategory && !isAllCategory
+  const listing = useCategoryListing(vodType, selectedCategory?.id, filtering)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- read again per category, and when filtering starts
+  const watched = useMemo(() => getWatchedVodIds(), [filtering, selectedCategory?.id])
+  const filtered = useMemo(
+    () => (filtering ? sortVodItems(applyVodFilters(listing.items, filters, { watched, search }), sort) : []),
+    [filtering, listing.items, filters, watched, search, sort],
+  )
+  const options = useMemo(() => filterOptions(filtering ? listing.items : items), [filtering, listing.items, items])
+  useEffect(() => { setVisibleCount(SHOW_STEP) }, [filters, selectedCategory?.id, sort, search])
+  const shownItems = filtering ? filtered.slice(0, visibleCount) : items
+  // Back from filtering: the page-by-page list catches up with any search
+  // typed meanwhile.
+  const wasFiltering = useRef(false)
+  useEffect(() => {
+    if (wasFiltering.current && !filtering && selectedCategory) {
+      const token = ++itemsTokenRef.current
+      setItems([])
+      loadItems(selectedCategory.id, search, 1, token)
+    }
+    wasFiltering.current = filtering
+  }, [filtering]) // eslint-disable-line react-hooks/exhaustive-deps
+  const moreToShow = filtering ? filtered.length > visibleCount : hasMore
+
   const selectCategory = useCallback((cat) => {
     setSelectedCategory(cat)
     setSearch('')
@@ -450,6 +485,7 @@ export default function VodPage() {
   function handleSearchChange(q) {
     setSearch(q)
     clearTimeout(searchTimer.current)
+    if (filtering) return   // the whole listing is here: searched as it's typed
     searchTimer.current = setTimeout(() => {
       if (selectedCategory) {
         setItems([])
@@ -461,6 +497,7 @@ export default function VodPage() {
   }
 
   function loadMore() {
+    if (filtering) { setVisibleCount((c) => c + SHOW_STEP); return }
     if (!selectedCategory || !hasMore || itemsLoadingRef.current) return
     loadItems(selectedCategory.id, search, currentPage + 1, itemsTokenRef.current)
   }
@@ -474,14 +511,14 @@ export default function VodPage() {
   useEffect(() => {
     const root = gridScrollRef.current
     const sentinel = sentinelRef.current
-    if (!root || !sentinel || !hasMore || itemsLoading || itemsError) return
+    if (!root || !sentinel || !moreToShow || (!filtering && (itemsLoading || itemsError))) return
     const observer = new IntersectionObserver(
       (entries) => { if (entries.some(e => e.isIntersecting)) loadMoreRef.current() },
       { root, rootMargin: '0px 0px 1200px 0px' },
     )
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [hasMore, itemsLoading, itemsError, items.length])
+  }, [moreToShow, filtering, itemsLoading, itemsError, shownItems.length])
 
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
@@ -618,7 +655,9 @@ export default function VodPage() {
           </div>
           {selectedCategory && (
             <span className="text-xs text-[var(--color-muted)]">
-              {totalItems > 0 ? `${totalItems.toLocaleString()} titles` : ''}
+              {filtering
+                ? `${filtered.length.toLocaleString()} of ${listing.loaded.toLocaleString()} titles`
+                : totalItems > 0 ? `${totalItems.toLocaleString()} titles` : ''}
             </span>
           )}
           <div role="group" aria-label="Sort titles" className="ml-auto flex shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] p-0.5">
@@ -639,6 +678,17 @@ export default function VodPage() {
           </div>
         </div>
 
+        <VodFilters
+          filters={filters}
+          onChange={setFilters}
+          options={options}
+          disabled={!selectedCategory || isAllCategory}
+          note={isAllCategory ? 'Pick a category to filter — "All" is the whole catalog.'
+            : listing.error ? listing.error
+            : listing.partial ? "Some titles couldn't be read — try again in a few minutes."
+            : null}
+        />
+
         {/* Items grid */}
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
           {!selectedCategory && (
@@ -655,10 +705,10 @@ export default function VodPage() {
             <p className="text-sm text-[var(--color-live)] text-center py-8">{itemsError}</p>
           )}
 
-          {items.length > 0 && (
+          {shownItems.length > 0 && (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
-                {items.map(item => (
+                {shownItems.map(item => (
                   <VodCard key={item.id} item={item} onClick={handleItemClick} onDownload={downloadMovie} />
                 ))}
               </div>
@@ -666,8 +716,11 @@ export default function VodPage() {
               {/* Infinite-scroll sentinel + status. The button stays as a
                   fallback (keyboard / TV remote, or after a failed load). */}
               <div ref={sentinelRef} className="flex items-center justify-center gap-3 mt-6 pb-2">
-                {itemsLoading && <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />}
-                {hasMore && !itemsLoading && (
+                {(filtering ? !listing.complete : itemsLoading) && <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />}
+                {filtering && !listing.complete && (
+                  <p className="text-xs text-[var(--color-muted)]">Reading titles… {listing.loaded.toLocaleString()}{listing.total ? ` of ${listing.total.toLocaleString()}` : ''}</p>
+                )}
+                {moreToShow && (filtering || !itemsLoading) && (
                   <button
                     onClick={loadMore}
                     className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-sm text-[var(--color-text)] hover:bg-[var(--color-primary)]/10 hover:border-[var(--color-primary-light)] transition-colors"
@@ -675,21 +728,35 @@ export default function VodPage() {
                     Load more
                   </button>
                 )}
-                {!hasMore && totalItems > 0 && (
+                {!filtering && !hasMore && totalItems > 0 && (
                   <p className="text-xs text-[var(--color-muted)]">All {totalItems.toLocaleString()} titles loaded</p>
                 )}
               </div>
             </>
           )}
 
-          {selectedCategory && !itemsLoading && items.length === 0 && !itemsError && (
+          {filtering && listing.complete && filtered.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-[var(--color-muted)]">
+              <Film size={32} className="opacity-20" />
+              <p className="text-sm">No titles match these filters.</p>
+            </div>
+          )}
+
+          {filtering && !listing.complete && filtered.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-[var(--color-muted)]">
+              <Loader2 size={28} className="animate-spin text-[var(--color-primary-light)]" />
+              <p className="text-xs">Reading titles… {listing.loaded.toLocaleString()}{listing.total ? ` of ${listing.total.toLocaleString()}` : ''}</p>
+            </div>
+          )}
+
+          {!filtering && selectedCategory && !itemsLoading && items.length === 0 && !itemsError && (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-[var(--color-muted)]">
               <Film size={32} className="opacity-20" />
               <p className="text-sm">{search ? `No results for "${search}"` : 'No titles in this category.'}</p>
             </div>
           )}
 
-          {selectedCategory && itemsLoading && items.length === 0 && (
+          {!filtering && selectedCategory && itemsLoading && items.length === 0 && (
             <div className="flex items-center justify-center h-48">
               <Loader2 size={28} className="animate-spin text-[var(--color-primary-light)]" />
             </div>

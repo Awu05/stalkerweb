@@ -106,6 +106,37 @@ module.exports = function vodRoutes(appState, config) {
     res.json(result);
   });
 
+  // GET /api/vod/listing?type=vod|series&category=X&from=N
+  //
+  // Every title of a category, for the VOD page's filters (year, genre,
+  // rating…), which the portal can't apply itself. The first call starts the
+  // paced read of the whole category (VodManager.getAllItems, cached for an
+  // hour); each call answers with what has been read so far from `from` on, so
+  // the page shows titles as they arrive and asks again until `complete`.
+  router.get('/listing', guard, async (req, res) => {
+    const { vodManager } = appState;
+    const { category } = req.query;
+    if (!category) return res.status(400).json({ error: 'category is required' });
+    let type = req.query.type === 'series' ? 'series' : 'vod';
+    if (type === 'series') type = (await vodLayout(vodManager)).seriesType;
+    const from = Math.max(0, parseInt(req.query.from, 10) || 0);
+    const withImages = (items) => items.map((item) => ({
+      ...item,
+      screenshotUrl: item.screenshotUri ? vodManager.resolveScreenshot(item.screenshotUri) : null,
+    }));
+
+    const done = vodManager.peekListing(type, category);
+    if (done) {
+      // partial: a page failed part-way; the rest is read again on a later visit.
+      return res.json({ items: withImages(done.items.slice(from)), loaded: done.items.length, total: done.items.length, complete: true, partial: !done.complete });
+    }
+    vodManager.getAllItems(type, category).catch((e) => log.warn(TAG, `listing ${type}/${category}: ${e.message}`));
+    const walk = vodManager.listingProgress(type, category);
+    const items = walk ? walk.items.slice(0) : [];
+    appState.touchActivity?.();
+    res.json({ items: withImages(items.slice(from)), loaded: items.length, total: walk?.total ?? 0, complete: false });
+  });
+
   // GET /api/vod/seasons/:movieId
   router.get('/seasons/:movieId', guard, async (req, res) => {
     const { vodManager } = appState;
