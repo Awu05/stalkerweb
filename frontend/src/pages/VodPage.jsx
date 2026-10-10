@@ -615,11 +615,14 @@ export default function VodPage() {
         setCategories(cats)
         setCatsLoading(false)
         // Default to the portal's "All" category so titles load immediately
-        // instead of requiring the user to pick a category first.
+        // instead of requiring the user to pick a category first. Not the
+        // Series "All" StalkerWeb adds: that reads every series category in
+        // full, so it waits to be picked; the first real category opens instead.
         if (cats.length > 0) {
-          const allCat = cats.find(c => c.id === '*') ||
-                         cats.find(c => c.title?.trim().toLowerCase() === 'all') ||
-                         cats[0]
+          const real = cats.filter(c => c.id !== SERIES_ALL_ID)
+          const allCat = real.find(c => c.id === '*') ||
+                         real.find(c => c.title?.trim().toLowerCase() === 'all') ||
+                         real[0] || cats[0]
           selectCategory(allCat)
         }
       })
