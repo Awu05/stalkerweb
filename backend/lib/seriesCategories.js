@@ -17,6 +17,11 @@ const SERIES_WORDS = /\b(?:SHOWS?|SERIES|SEASONS?)\b/i;
 const MOVIE_WORDS  = /\b(?:MOVIES?|FILMS?)\b/i;
 const NO_SERIES_RECHECK_MS = 30 * 60 * 1000;   // a portal that rejected type=series
 
+/** A show-named category whose name also says movies ("ANIME MOVIES/SERIES"): it holds both. */
+function isMixedCategory(c) {
+  return SERIES_WORDS.test(c?.title ?? '') && MOVIE_WORDS.test(c?.title ?? '');
+}
+
 /** { movies, series } from a movie section's categories, split by name. */
 function splitByName(categories) {
   const series = [];
@@ -34,7 +39,9 @@ function splitByName(categories) {
  * byName }. `seriesType` is the section series titles are read from ('series',
  * or 'vod' when the portal has none); `byName` says the series categories were
  * picked out of the movie ones by name. A portal that rejects type=series isn't
- * asked again for a while (remembered on the vodManager, one per connection).
+ * asked again for a while (remembered on the vodManager, one per connection) —
+ * unless it has answered with a series section before: then a failed or empty
+ * answer is a hiccup, and the last series categories it gave are used.
  */
 async function vodLayout(vodManager) {
   const movies = await vodManager.getCategories('vod');
@@ -43,9 +50,11 @@ async function vodLayout(vodManager) {
     try {
       series = await vodManager.getCategories('series');
     } catch {
-      vodManager._noSeriesUntil = Date.now() + NO_SERIES_RECHECK_MS;
+      if (!vodManager._lastSeries?.length) vodManager._noSeriesUntil = Date.now() + NO_SERIES_RECHECK_MS;
     }
   }
+  if (series.length) vodManager._lastSeries = series;
+  else if (vodManager._lastSeries?.length) series = vodManager._lastSeries;
   if (series.length) return { movies, series, seriesType: 'series', byName: false };
   const split = splitByName(movies);
   return split.series.length
@@ -53,4 +62,4 @@ async function vodLayout(vodManager) {
     : { movies, series: [], seriesType: 'vod', byName: false };
 }
 
-module.exports = { splitByName, vodLayout };
+module.exports = { splitByName, vodLayout, isMixedCategory };

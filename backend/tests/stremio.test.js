@@ -87,7 +87,7 @@ describe('Stremio addon', () => {
     reconnects = 0
     channelList = channels
     // A fresh connection each test (the real app builds a new VodManager).
-    if (appState) appState.vodManager._noSeriesUntil = 0
+    if (appState) { appState.vodManager._noSeriesUntil = 0; appState.vodManager._lastSeries = null }
   })
 
   const get = async (path) => (await fetch(`${base}/stremio${path}`)).json()

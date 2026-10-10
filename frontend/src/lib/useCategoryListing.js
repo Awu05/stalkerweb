@@ -20,7 +20,8 @@ export function useCategoryListing(type, categoryId, enabled) {
         const r = await getVodListing({ type, category: categoryId, from: items.length })
         if (cancelled) return
         items = items.concat(r.items ?? [])
-        setState({ items, loaded: r.loaded, total: r.total, complete: !!r.complete, partial: !!r.partial, error: '' })
+        // r.error: the category couldn't be read — said once, not polled for.
+        setState({ items, loaded: r.loaded, total: r.total, complete: !!r.complete, partial: !!r.partial, error: r.error ?? '' })
         if (!r.complete) timer = setTimeout(poll, POLL_MS)
       } catch (e) {
         if (!cancelled) setState((s) => ({ ...s, error: e.message }))

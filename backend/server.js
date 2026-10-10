@@ -104,7 +104,8 @@ const viewerContext = require('./lib/viewerContext').createViewerContext(viewers
 // What each viewer watched on the VOD page (viewers/WatchStore.js). On first
 // start the old shared Continue Watching list goes to the default viewer.
 const watchStore = new (require('./viewers/WatchStore'))(config.dataDir);
-watchStore.importLegacy(viewersManager.getDefault().id);
+// A data folder that can't be written isn't a reason not to start.
+try { watchStore.importLegacy(viewersManager.getDefault().id); } catch (e) { require('./logger').warn('server', `Continue Watching import skipped: ${e.message}`); }
 
 // Filter applied to the exports, the Xtream API, the Stremio addon and the VOD
 // categories: the current viewer's hidden genres and languages, plus adult

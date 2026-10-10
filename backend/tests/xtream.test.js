@@ -100,6 +100,7 @@ describe('Xtream API', () => {
     // Each test is a fresh connection: the real app builds a new VodManager,
     // forgetting that the last portal rejected type=series.
     appState.vodManager._noSeriesUntil = 0
+    appState.vodManager._lastSeries = null
   })
 
   const api = async (query) => (await fetch(`${base}/player_api.php?username=u&password=p&${query}`)).json()

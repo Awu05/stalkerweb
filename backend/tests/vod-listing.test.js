@@ -39,7 +39,7 @@ describe('GET /api/vod/listing', () => {
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}/api/vod/listing?type=vod&category=5`
   })
-  afterAll(() => server.close())
+  afterAll(() => { server.closeAllConnections(); server.close() })
 
   it('hands back the whole category as it is read, a part at a time, then all of it', async () => {
     const seen = []

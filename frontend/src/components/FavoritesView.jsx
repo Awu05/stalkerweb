@@ -1,21 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Heart, Layers, Pencil, Trash2, Plus, Check, X, Search, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import {
-  getFavorites, getChannels, getLogoMap,
-  removeFavoriteChannel,
+  getFavorites, getChannels,
   createFavoriteGroup, renameFavoriteGroup, deleteFavoriteGroup,
   addChannelToGroup, removeChannelFromGroup,
   reorderFavoriteChannels, reorderFavoriteGroups,
-  getProxiedLogoUrl,
 } from '../stalkerApi'
 import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
-import { invalidateFavoritesCache } from '@/lib/useFavorites'
+import { ChannelCard } from '@/components/ChannelCard'
 
 // ── Drag-and-drop helpers ─────────────────────────────────────────────────
 function useDragReorder(items, setItems, onReorder) {
@@ -49,42 +46,6 @@ function useDragReorder(items, setItems, onReorder) {
   }
 
   return { onDragStart, onDragOver, onDragEnd, draggingIndex }
-}
-
-// ── Favorited channel card ────────────────────────────────────────────────
-function ChannelCard({ channel, logoUrl, onRemove, onClick, dragHandlers, isDragging }) {
-  return (
-    <div
-      draggable={!!dragHandlers}
-      onDragStart={dragHandlers?.onDragStart}
-      onDragOver={dragHandlers?.onDragOver}
-      onDragEnd={dragHandlers?.onDragEnd}
-      className={cn(
-        'group relative rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] px-4 pb-4 pt-10 flex flex-col items-center gap-2.5 hover:border-[var(--color-primary)]/50 hover:bg-[var(--color-surface-2)] transition-all cursor-pointer select-none',
-        isDragging && 'opacity-40'
-      )}
-      onClick={() => onClick(channel)}
-    >
-      {dragHandlers && (
-        <div className="absolute top-1.5 left-1.5 p-1.5 text-[var(--color-muted)] opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
-          <GripVertical size={16} />
-        </div>
-      )}
-      <button
-        onClick={e => { e.stopPropagation(); onRemove(channel) }}
-        title="Remove from favorites"
-        aria-label={`Remove ${channel.name} from favorites`}
-        className="absolute top-1.5 right-1.5 p-1.5 rounded-full text-[var(--color-live)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-live)]/10 transition-all"
-      >
-        <X size={18} />
-      </button>
-      <ChannelLogo src={logoUrl || getProxiedLogoUrl(channel.iconPath)} name={channel.name} />
-      <div className="w-full text-center">
-        <p className="text-xs text-[var(--color-muted)] mb-0.5">Ch {channel.number}</p>
-        <p className="text-sm font-medium text-[var(--color-text)] leading-tight break-words">{channel.name}</p>
-      </div>
-    </div>
-  )
 }
 
 // ── Group logo preview (2×2 grid of first 4 channel logos) ───────────────
@@ -302,42 +263,56 @@ function SectionHeader({ icon: Icon, title, count, action }) {
   )
 }
 
-// ── Favorites view (the Favorites pill on the Channels page) ─────────────
-// `query`: the Channels page's search, applied to the favorite channels and
-// groups; reordering is off while it's in use, since only some are shown.
-// `onRemoved`: told when a channel is unfavorited here, so the hearts on the
-// Channels page agree.
-export default function FavoritesView({ query = '', onRemoved }) {
-  const navigate = useNavigate()
+// ── Favorites (the collapsible section on the Channels page) ─────────────
+// The favorite channels use the Channels page's own tile (components/
+// ChannelCard), in the grid's columns, so they look and size like the rest.
+// Which channels are favorites comes from the page (useFavorites): a heart
+// toggled anywhere on the page shows here at once — off, the tile goes; on,
+// the list is read again to get the new channel in its place.
+export default function FavoritesView({ favoriteIds, favoritesLoaded, favoritesSaved = 0, onToggleFavorite, onOpen, onSetLogo, logoMap = {}, nowNext = {}, health = {}, columns = 1, gap = 12 }) {
   const { showAdult } = useApp()
 
   const [channels, setChannels] = useState([])    // favorited channels (enriched), order matters
   const [groups, setGroups] = useState([])         // favorite groups (enriched), order matters
-  const [logoMap, setLogoMap] = useState({})
   const [allChannels, setAllChannels] = useState([]) // loaded lazily for group editor
   const [editingGroupId, setEditingGroupId] = useState(null)
   const [newGroupName, setNewGroupName] = useState('')
   const [showNewGroup, setShowNewGroup] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    Promise.all([getFavorites(), getLogoMap()])
-      .then(([fav, lm]) => {
+    let cancelled = false
+    getFavorites()
+      .then((fav) => {
+        if (cancelled) return
         let chList = fav.channels || []
         let gList  = fav.groups   || []
-
         if (!showAdult) {
           chList = chList.filter(c => !isAdult(c.genre) && !isAdult(c.name))
           gList  = gList.filter(g => !isAdult(g.name))
         }
-
         setChannels(chList)
         setGroups(gList)
-        setLogoMap(lm || {})
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [showAdult])
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [showAdult, reload])
+
+  // Follow the page's hearts: drop channels unfavorited at once; read the list
+  // again for one favorited that isn't here yet, once the server has it.
+  const favKey = favoritesLoaded ? [...favoriteIds].sort().join(',') : null
+  const haveKey = channels.map(c => String(c.uniqueId)).sort().join(',')
+  useEffect(() => {
+    if (favKey === null || loading) return
+    const here = new Set(haveKey.split(',').filter(Boolean))
+    const wanted = favKey.split(',').filter(Boolean)
+    if (here.size > wanted.length || [...here].some(id => !favoriteIds.has(id))) {
+      setChannels(prev => prev.filter(c => favoriteIds.has(String(c.uniqueId))))
+    }
+    if (wanted.some(id => !here.has(id))) setReload(n => n + 1)
+  }, [favKey, favoritesSaved]) // eslint-disable-line react-hooks/exhaustive-deps -- only when the favorites change
 
   // Load all channels lazily when a group editor is opened
   async function ensureAllChannels() {
@@ -359,16 +334,6 @@ export default function FavoritesView({ query = '', onRemoved }) {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  async function handleRemoveChannel(ch) {
-    await removeFavoriteChannel(ch.uniqueId)
-    setChannels(prev => prev.filter(c => String(c.uniqueId) !== String(ch.uniqueId)))
-    // Keep the heart icon on Channels/Player pages in sync — they read
-    // favorite status from the shared module-level cache, not this page's
-    // own fetch, so it must be told this channel changed.
-    invalidateFavoritesCache()
-    onRemoved?.(ch)
-  }
-
   async function handleCreateGroup() {
     if (!newGroupName.trim()) return
     const { group } = await createFavoriteGroup(newGroupName.trim())
@@ -389,19 +354,9 @@ export default function FavoritesView({ query = '', onRemoved }) {
     setEditingGroupId(null)
   }
 
-  function navigateToChannel(ch) {
-    navigate(`/player?channel=${ch.uniqueId}&name=${encodeURIComponent(ch.name)}`)
-  }
-
   // ── Drag-and-drop reordering ──────────────────────────────────────────────
   const channelDrag = useDragReorder(channels, setChannels, reorderFavoriteChannels)
   const groupDrag   = useDragReorder(groups,   setGroups,   reorderFavoriteGroups)
-
-  // ── Search ────────────────────────────────────────────────────────────────
-  const q = query.trim().toLowerCase()
-  const matches = (name) => !!name?.toLowerCase().includes(q)
-  const shownChannels = q ? channels.filter(c => matches(c.name)) : channels
-  const shownGroups   = q ? groups.filter(g => matches(g.name) || g.channels.some(c => matches(c.name))) : groups
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -425,41 +380,44 @@ export default function FavoritesView({ query = '', onRemoved }) {
         </div>
       )}
 
-      {q && !empty && shownChannels.length === 0 && shownGroups.length === 0 && (
-        <p className="text-sm text-[var(--color-muted)] py-8 text-center">No favorites match “{query.trim()}”.</p>
-      )}
-
       {/* ── Favorite Channels ── */}
-      {shownChannels.length > 0 && (
+      {channels.length > 0 && (
         <section>
-          <SectionHeader icon={Heart} title="Channels" count={shownChannels.length} />
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
-            {shownChannels.map((ch, i) => (
-              <ChannelCard
+          <SectionHeader icon={Heart} title="Channels" count={channels.length} />
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: `${gap}px` }}>
+            {channels.map((ch, i) => (
+              // Drag a tile to reorder; the tile itself plays and its heart unfavorites.
+              <div
                 key={ch.uniqueId}
-                channel={ch}
-                logoUrl={logoMap[String(ch.uniqueId)]}
-                onRemove={handleRemoveChannel}
-                onClick={navigateToChannel}
-                isDragging={!q && channelDrag.draggingIndex === i}
-                dragHandlers={q ? undefined : {
-                  onDragStart: () => channelDrag.onDragStart(i),
-                  onDragOver:  (e) => channelDrag.onDragOver(e, i),
-                  onDragEnd:   channelDrag.onDragEnd,
-                }}
-              />
+                draggable
+                onDragStart={() => channelDrag.onDragStart(i)}
+                onDragOver={(e) => channelDrag.onDragOver(e, i)}
+                onDragEnd={channelDrag.onDragEnd}
+                className={cn('relative min-w-0', channelDrag.draggingIndex === i && 'opacity-40')}
+                title="Drag to reorder"
+              >
+                <ChannelCard
+                  channel={ch}
+                  logoUrl={logoMap[String(ch.uniqueId)]}
+                  isFavorite
+                  onToggleFavorite={onToggleFavorite}
+                  onClick={onOpen}
+                  onSetLogo={onSetLogo}
+                  nowNext={nowNext[String(ch.uniqueId)]}
+                  health={health[String(ch.uniqueId)]}
+                />
+              </div>
             ))}
           </div>
         </section>
       )}
 
       {/* ── Groups ── */}
-      {(!q || shownGroups.length > 0) && (
       <section>
         <SectionHeader
           icon={Layers}
           title="Groups"
-          count={shownGroups.length}
+          count={groups.length}
           action={
             <Button
               variant="outline"
@@ -496,7 +454,7 @@ export default function FavoritesView({ query = '', onRemoved }) {
         )}
 
         <div className="flex flex-col gap-3">
-          {shownGroups.map((group, i) =>
+          {groups.map((group, i) =>
             editingGroupId === group.id ? (
               <GroupEditor
                 key={group.id}
@@ -511,12 +469,11 @@ export default function FavoritesView({ query = '', onRemoved }) {
                 key={group.id}
                 group={group}
                 logoMap={logoMap}
-                allChannels={allChannels}
                 onEdit={() => openGroupEditor(group.id)}
                 onDelete={() => handleDeleteGroup(group.id)}
-                onNavigate={navigateToChannel}
-                isDragging={!q && groupDrag.draggingIndex === i}
-                dragHandlers={q ? undefined : {
+                onNavigate={onOpen}
+                isDragging={groupDrag.draggingIndex === i}
+                dragHandlers={{
                   onDragStart: () => groupDrag.onDragStart(i),
                   onDragOver:  (e) => groupDrag.onDragOver(e, i),
                   onDragEnd:   groupDrag.onDragEnd,
@@ -526,7 +483,6 @@ export default function FavoritesView({ query = '', onRemoved }) {
           )}
         </div>
       </section>
-      )}
     </div>
   )
 }

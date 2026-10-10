@@ -26,7 +26,8 @@ const LIST_MAX     = 500;
 
 // What My List keeps of a title: enough to show its tile, filter it and play
 // it, without asking the portal again.
-const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'genres', 'rating', 'added', 'durationMin',
+// `episodes` too: some portals mark a show only by its episode list.
+const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'episodes', 'genres', 'rating', 'added', 'durationMin',
   'screenshotUrl', 'cmd', 'description', 'director', 'actors'];
 const listItem = (item) => Object.fromEntries(LIST_FIELDS.filter((k) => item[k] !== undefined).map((k) => [k, item[k]]));
 
@@ -39,29 +40,62 @@ class WatchStore {
     this._file = path.join(dataDir, 'watch.json');
   }
 
+  // The file is read again only when it changed on disk (by mtime and size),
+  // not on every request — progress saves come every few seconds.
   _load() {
+    let st;
+    try { st = fs.statSync(this._file); } catch { this._cache = null; return {}; }
+    if (this._cache && this._cache.mtimeMs === st.mtimeMs && this._cache.size === st.size) return this._cache.data;
     try {
       const d = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      return d && typeof d === 'object' ? d : {};
+      const data = d && typeof d === 'object' ? d : {};
+      this._cache = { mtimeMs: st.mtimeMs, size: st.size, data };
+      return data;
     } catch {
+      this._cache = null;
       return {};
     }
   }
 
   _save(d) {
+    delete d.__adopted;   // _bucket's note to get(), not data
     try {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(d), 'utf8');
       fs.renameSync(tmp, this._file);
+      const st = fs.statSync(this._file);
+      this._cache = { mtimeMs: st.mtimeMs, size: st.size, data: d };
     } catch (e) {
+      this._cache = null;   // what's in memory may now differ from the file
       log.error(TAG, `save failed: ${e.message}`);
       throw e;
     }
   }
 
   // A viewer's lists on one portal, created when asked for with `create`.
+  // Entries kept under no portal — old Continue Watching entries saved before
+  // the portal was recorded — go to the first portal this viewer uses, merged
+  // under what's there (its own entries win). Returns whether any moved.
+  _adoptOrphans(d, viewerId, p) {
+    const orphans = p ? d[viewerId]?.[''] : null;
+    if (!orphans) return false;
+    delete d[viewerId][''];
+    const b = this._bucket(d, viewerId, p, true);
+    const list = (k) => (Array.isArray(orphans[k]) ? orphans[k] : []);
+    const keys = new Set(b.progress.map((e) => e.key));
+    b.progress = [...b.progress, ...list('progress').filter((e) => !keys.has(e.key))].slice(0, PROGRESS_MAX);
+    const ids = new Set(b.history.map((e) => e.id));
+    b.history = [...b.history, ...list('history').filter((e) => !ids.has(e.id))].slice(0, HISTORY_MAX);
+    b.watched = [...new Set([...b.watched, ...list('watched')])].slice(0, WATCHED_MAX);
+    const saved = new Set(b.list.map((e) => e.id));
+    b.list = [...b.list, ...list('list').filter((e) => !saved.has(e.id))].slice(0, LIST_MAX);
+    log.info(TAG, `moved ${viewerId}'s entries with no portal to ${p}`);
+    return true;
+  }
+
   _bucket(d, viewerId, portal, create = false) {
     const p = String(portal || '');
+    if (this._adoptOrphans(d, viewerId, p)) d.__adopted = true;
     if (!d[viewerId]?.[p]) {
       if (!create) return empty();
       d[viewerId] ??= {};
@@ -73,7 +107,13 @@ class WatchStore {
   }
 
   get(viewerId, portal) {
-    return this._bucket(this._load(), viewerId, portal);
+    const d = this._load();
+    const b = this._bucket(d, viewerId, portal);
+    if (d.__adopted) {
+      delete d.__adopted;
+      try { this._save(d); } catch { /* moved again on the next read */ }
+    }
+    return b;
   }
 
   _apply(b, entry, updatedAt) {

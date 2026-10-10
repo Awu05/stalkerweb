@@ -23,7 +23,7 @@ describe('/api/vod/watch', () => {
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}/api/vod/watch`
   })
-  afterAll(() => { server.close(); fs.rmSync(dir, { recursive: true, force: true }) })
+  afterAll(() => { server.closeAllConnections(); server.close(); fs.rmSync(dir, { recursive: true, force: true }) })
 
   const call = async (method, p, body, viewer) => {
     const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...(viewer ? { 'X-Viewer': viewer } : {}) }, body: body ? JSON.stringify(body) : undefined })

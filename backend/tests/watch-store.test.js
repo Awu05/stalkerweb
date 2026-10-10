@@ -74,6 +74,19 @@ describe('WatchStore', () => {
     expect(fresh.importLegacy('view_def')).toBe(false)
   })
 
+  it('gives old entries saved with no portal to the first portal the viewer uses', () => {
+    fs.writeFileSync(path.join(dir, 'vod-progress.json'), JSON.stringify([
+      { key: '100', title: 'Heat', position: 600, duration: 6000, params: 'videoId=100', updatedAt: 5 },
+    ]))
+    const fresh = new WatchStore(dir)
+    fresh.importLegacy('view_def')
+    expect(fresh.get('view_def', P).history.map((e) => e.id)).toEqual(['100'])
+    expect(fresh.get('view_def', P).progress[0]).toMatchObject({ key: '100', position: 600 })
+    // moved for good: on disk, and not handed to another portal as well
+    expect(new WatchStore(dir).get('view_def', 'http://other/c/').history).toEqual([])
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'watch.json'), 'utf8')).view_def['']).toBeUndefined()
+  })
+
   it('survives a restart', () => {
     play('100', 600)
     expect(new WatchStore(dir).get('view_a', P).history[0].id).toBe('100')

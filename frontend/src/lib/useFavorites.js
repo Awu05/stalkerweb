@@ -24,11 +24,13 @@ export function invalidateFavoritesCache() { favsCache = null; favsInflight = nu
 
 export function useFavorites() {
   const [favoriteIds, setFavoriteIds] = useState(new Set())
+  const [loaded, setLoaded] = useState(false)   // favoriteIds is the viewer's, not the empty start
+  const [saved, setSaved]   = useState(0)       // bumped when the server has taken a change
 
   useEffect(() => {
     let cancelled = false
     loadFavorites()
-      .then(r => { if (!cancelled) setFavoriteIds(new Set(r.channels.map(c => String(c.uniqueId)))) })
+      .then(r => { if (!cancelled) { setFavoriteIds(new Set(r.channels.map(c => String(c.uniqueId)))); setLoaded(true) } })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -41,6 +43,7 @@ export function useFavorites() {
     try {
       await (wasIn ? removeFavoriteChannel(id) : addFavoriteChannel(id))
       invalidateFavs()
+      setSaved(n => n + 1)
     } catch {
       // Roll back on API failure
       setFavoriteIds(prev => { const s = new Set(prev); wasIn ? s.add(id) : s.delete(id); return s })
@@ -48,5 +51,5 @@ export function useFavorites() {
     }
   }
 
-  return { favoriteIds, setFavoriteIds, toggleFavorite }
+  return { favoriteIds, setFavoriteIds, toggleFavorite, loaded, saved }
 }

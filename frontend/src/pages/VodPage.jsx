@@ -80,6 +80,8 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
 
 // ── My List ───────────────────────────────────────────────────────────────
 const MY_LIST = { id: 'mylist', title: 'My List' }
+// The Series "All" the server adds on portals without a series section (backend routes/vod.js).
+const SERIES_ALL_ID = 'series:all'
 
 // The titles to watch, as a row under Recently watched.
 function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
@@ -494,8 +496,15 @@ export default function VodPage() {
   const sortRef = useRef(sort)
 
   // Load items when category / search changes
+  // Not for My List or the Series "All": those aren't portal categories (one
+  // is read from the viewer's list, the other whole — see `filtering`), so
+  // the search box, the sort buttons and leaving filter mode never page them.
   const loadItems = useCallback(async (catId, q, page, token) => {
     if (!catId) return
+    if (catId === MY_LIST.id || catId === SERIES_ALL_ID) {
+      itemsLoadingRef.current = false; setItemsLoading(false); setItemsError('')
+      return
+    }
     itemsLoadingRef.current = true
     setItemsLoading(true)
     setItemsError('')
@@ -539,7 +548,7 @@ export default function VodPage() {
   // The Series "All" StalkerWeb adds on portals without a series section is
   // always read whole (backend routes/vod.js) — and can be filtered, unlike
   // the portal's own "All", which is the whole catalog.
-  const isSeriesAll = selectedCategory?.id === 'series:all'
+  const isSeriesAll = selectedCategory?.id === SERIES_ALL_ID
   const isMyList = selectedCategory?.id === MY_LIST.id
   const isAllCategory = !!selectedCategory && !isSeriesAll && (String(selectedCategory.id) === '*' || selectedCategory.title?.trim().toLowerCase() === 'all')
   // Whole-listing mode: a filter is on, or the Series "All".
@@ -586,7 +595,9 @@ export default function VodPage() {
     setItems([])
     setCurrentPage(1)
     const token = ++itemsTokenRef.current
-    if (cat.id !== 'series:all' && cat.id !== MY_LIST.id) loadItems(cat.id, searchRef.current, 1, token)
+    // This loads the new category; leaving filter mode with it mustn't load it again.
+    wasFiltering.current = false
+    loadItems(cat.id, searchRef.current, 1, token)
   }, [loadItems])
 
   // Load categories on type change, or when the viewer's filters change
@@ -600,15 +611,18 @@ export default function VodPage() {
     getVodCategories(vodType)
       .then(r => {
         let cats = r.categories || []
-        if (!showAdult) cats = cats.filter(c => !isAdult(c.name))
+        if (!showAdult) cats = cats.filter(c => !isAdult(c.title))
         setCategories(cats)
         setCatsLoading(false)
         // Default to the portal's "All" category so titles load immediately
-        // instead of requiring the user to pick a category first.
+        // instead of requiring the user to pick a category first. Not the
+        // Series "All" StalkerWeb adds: that reads every series category in
+        // full, so it waits to be picked; the first real category opens instead.
         if (cats.length > 0) {
-          const allCat = cats.find(c => c.id === '*') ||
-                         cats.find(c => c.title?.trim().toLowerCase() === 'all') ||
-                         cats[0]
+          const real = cats.filter(c => c.id !== SERIES_ALL_ID)
+          const allCat = real.find(c => c.id === '*') ||
+                         real.find(c => c.title?.trim().toLowerCase() === 'all') ||
+                         real[0] || cats[0]
           selectCategory(allCat)
         }
       })
