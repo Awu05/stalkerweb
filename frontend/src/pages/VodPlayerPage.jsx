@@ -72,6 +72,12 @@ export default function VodPlayerPage() {
   // seeks when the drag ends: one seek, not one per pixel moved, and the
   // playing position can't pull the handle back mid-drag.
   const [scrubPct, setScrubPct]       = useState(null)
+  // Which title the video element's media (and so `duration`) belongs to.
+  // Switching episode in place keeps this page, and the old episode plays on
+  // until the new stream loads: the resume point must wait for the new one.
+  const streamKeyRef                  = useRef(null)
+  const [mediaKey, setMediaKey]       = useState(null)
+  const mediaKeyRef                   = useRef(null)
   const [showControls, setShowControls] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP]               = useState(false)
@@ -106,8 +112,12 @@ export default function VodPlayerPage() {
   useEffect(() => { if (seasons) { loadSeason(seasonId); loadSeason(panelSeason) } }, [seasons, seasonId, panelSeason, loadSeason])
 
   const neighbours = seasons ? episodeNeighbours(seasons, episodesBySeason, seasonId, episodeId) : { prev: null, next: null, needs: [] }
-  // The show's very last episode: finishing it moves the show to Completed on My List.
-  const lastEpisode = isEpisode && !!seasons && !!episodesBySeason[seasonId] && !neighbours.next && neighbours.needs.length === 0
+  // The show's very last episode: finishing it moves the show to Completed on My
+  // List. Only once this episode is actually found in the show's seasons —
+  // seasons that failed to load also leave no next episode.
+  const found = !!seasons?.some((s) => String(s.id) === String(seasonId))
+    && !!episodesBySeason[seasonId]?.some((e) => String(e.episodeId) === String(episodeId))
+  const lastEpisode = isEpisode && found && !neighbours.next && neighbours.needs.length === 0
   useEffect(() => { metaRef.current = { ...metaRef.current, lastEpisode } })
   const needsKey = neighbours.needs.join(',')
   useEffect(() => { needsKey.split(',').filter(Boolean).forEach(loadSeason) }, [needsKey, loadSeason])
@@ -171,6 +181,8 @@ export default function VodPlayerPage() {
   const persist = useCallback(() => {
     const v = videoRef.current
     if (!v || !v.duration || !isFinite(v.duration)) return
+    // Not while the previous title's media is still the one playing.
+    if (mediaKeyRef.current !== metaRef.current.key) return
     saveVodProgress({ ...metaRef.current, position: v.currentTime, duration: v.duration })
   }, [])
 
@@ -185,7 +197,7 @@ export default function VodPlayerPage() {
   const resumedKeyRef = useRef(null)
   useEffect(() => {
     const v = videoRef.current
-    if (!v || !duration || resumedKeyRef.current === progressKey) return
+    if (!v || !duration || mediaKey !== progressKey || resumedKeyRef.current === progressKey) return
     resumedKeyRef.current = progressKey
     const saved = getVodProgress(progressKey)
     if (saved && saved.position >= VOD_RESUME_MIN_SECS && saved.position < duration * VOD_DONE_FRACTION) {
@@ -194,7 +206,7 @@ export default function VodPlayerPage() {
     } else {
       setResumedFrom(0)
     }
-  }, [progressKey, duration])
+  }, [progressKey, duration, mediaKey])
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -219,6 +231,11 @@ export default function VodPlayerPage() {
     let cancelled = false
     setStatus('loading')
     setErrorMsg('')
+    // A new title: what's on screen until it loads is the old one's.
+    streamKeyRef.current = makeVodKey({ videoId, seasonId, episodeId })
+    mediaKeyRef.current = null
+    setMediaKey(null)
+    setScrubPct(null)
 
     getVodStreamUrl({ videoId, cmd, series: seriesNo, seasonId, episodeId })
       .then(({ streamUrl }) => {
@@ -297,7 +314,7 @@ export default function VodPlayerPage() {
     const v = videoRef.current
     if (!v) return
     const onTime   = () => setCurrentTime(v.currentTime)
-    const onDur    = () => setDuration(v.duration || 0)
+    const onDur    = () => { setDuration(v.duration || 0); mediaKeyRef.current = streamKeyRef.current; setMediaKey(streamKeyRef.current) }
     const onPlay   = () => { setPlaying(true); setStatus('playing') }
     const onPause  = () => { setPlaying(false); setStatus('paused') }
     const onEnded  = () => { setPlaying(false); setStatus('paused'); if (nextRef.current) setUpNext(nextRef.current) }
@@ -374,6 +391,9 @@ export default function VodPlayerPage() {
 
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
   const shownTime = scrubPct != null ? (scrubPct / 100) * duration : currentTime
+  // The bar goes away with the duration (a new title loading): a drag in
+  // progress then can't end, so it's dropped.
+  useEffect(() => { if (!duration) setScrubPct(null) }, [duration])
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem)] bg-black">

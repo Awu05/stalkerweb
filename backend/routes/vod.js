@@ -14,6 +14,7 @@ const sessionMiddleware = require('../middleware/session');
 const { visibleVodCategories } = require('../lib/vodCategoryFilter');
 const { vodLayout } = require('../lib/seriesCategories');
 const { refuseIfGone } = require('./viewers');
+const { isAdult } = require('../lib/exportFilter');
 
 // The Series "All" added on portals without a series section (see below).
 const SERIES_ALL = 'series:all';
@@ -45,10 +46,15 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     res.json({ categories: visible(layout.movies) });
   });
 
-  const visible = (categories) => visibleVodCategories(categories, {
-    hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
-    hiddenLanguages: appState.getHiddenLanguages?.() ?? new Set(),
-  });
+  // The viewer's categories: hidden ones left out, and adult ones unless the
+  // viewer may see them — here, so Series "All" never takes an adult one in.
+  const visible = (categories) => {
+    const shown = visibleVodCategories(categories, {
+      hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
+      hiddenLanguages: appState.getHiddenLanguages?.() ?? new Set(),
+    });
+    return appState.getShowAdult?.() === true ? shown : shown.filter((c) => !isAdult(c.title));
+  };
 
   // The Series categories. When they were picked out of the movie section by
   // name (lib/seriesCategories.js) the portal has no "All" of its own for them,
@@ -62,20 +68,27 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   // The Series "All" above: each of the viewer's series categories read in
   // turn (the paced, cached getAllItems), every show listed once, in the order
   // read — append-only, so clients can ask for what's new from `from` on.
+  // Kept an hour, like the listings it's made of — or a couple of minutes when
+  // a category couldn't be read, so a retry soon gets another go. Keyed by
+  // portal: another connection's categories can have the same ids.
   const SERIES_ALL_TTL_MS = 60 * 60 * 1000;
-  const combined = new Map();   // `${type}|${ids}` → { done, seen, current, complete, partial, at }
+  const SERIES_ALL_PARTIAL_TTL_MS = 2 * 60 * 1000;
+  const combined = new Map();   // `${portal}|${type}|${ids}` → { done, seen, current, complete, partial, at }
   function combinedListing(type, ids) {
-    const key = `${type}|${ids.join(',')}`;
+    const vm = appState.vodManager;
+    const key = `${appState.client?.getBasePath?.() ?? ''}|${type}|${ids.join(',')}`;
     const old = combined.get(key);
-    if (old && (!old.complete || Date.now() - old.at < SERIES_ALL_TTL_MS)) return old;
+    const ttl = old?.partial ? SERIES_ALL_PARTIAL_TTL_MS : SERIES_ALL_TTL_MS;
+    if (old && (!old.complete || Date.now() - old.at < ttl)) return old;
     const c = { done: [], seen: new Set(), current: null, complete: false, partial: false, at: Date.now() };
     combined.set(key, c);
     (async () => {
       for (const id of ids) {
+        if (appState.vodManager !== vm) { c.partial = true; break; }   // the connection changed
         c.current = id;
         try {
-          const items = await appState.vodManager.getAllItems(type, id);
-          if (appState.vodManager.peekListing?.(type, id)?.complete === false) c.partial = true;
+          const items = await vm.getAllItems(type, id);
+          if (vm.peekListing?.(type, id)?.complete === false) c.partial = true;
           for (const item of items) if (!c.seen.has(item.id)) { c.seen.add(item.id); c.done.push(item); }
         } catch (e) {
           c.partial = true;
@@ -99,6 +112,8 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
 
     if (!category) return res.status(400).json({ error: 'category is required' });
 
+    if (category === SERIES_ALL) return res.json(await seriesAllPage(type, req.query));
+
     const result = await vodManager.getItems({
       type,
       sort:       req.query.sort === 'name' ? 'name' : 'added',
@@ -117,6 +132,39 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     appState.touchActivity?.();
     res.json(result);
   });
+
+  // A page of Series "All" for clients that page through /items (the Android
+  // app): what the combined listing has read so far, searched and sorted here.
+  // While it's still being read, one more page is promised, so a client asks
+  // again.
+  const SERIES_ALL_PAGE = 42;
+  async function seriesAllPage(type, { search = '', page = '1', sort } = {}) {
+    const { vodManager } = appState;
+    const ids = (await seriesCategories(await vodLayout(vodManager))).map((c) => c.id).filter((id) => id !== SERIES_ALL);
+    const c = combinedListing(type, ids);
+    let items = c.done.slice();
+    const q = String(search).trim().toLowerCase();
+    if (q) items = items.filter((i) => (i.name ?? '').toLowerCase().includes(q));
+    if (sort === 'name') items.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' }));
+    const n = Math.max(1, parseInt(page, 10) || 1);
+    const totalPages = Math.max(1, Math.ceil(items.length / SERIES_ALL_PAGE)) + (c.complete ? 0 : 1);
+    appState.touchActivity?.();
+    return {
+      items: items.slice((n - 1) * SERIES_ALL_PAGE, n * SERIES_ALL_PAGE).map((item) => ({
+        ...item,
+        screenshotUrl: item.screenshotUri ? vodManager.resolveScreenshot(item.screenshotUri) : null,
+      })),
+      totalItems: items.length,
+      totalPages,
+      page: n,
+    };
+  }
+
+  // A listing whose read failed (first page) — remembered briefly, so /listing
+  // can say so instead of answering "not yet" and starting the read again on
+  // every poll.
+  const LISTING_FAILURE_MS = 60 * 1000;
+  const listingFailures = new Map();   // `${type}|${category}` → { message, at }
 
   // GET /api/vod/listing?type=vod|series&category=X&from=N
   //
@@ -152,7 +200,17 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       // partial: a page failed part-way; the rest is read again on a later visit.
       return res.json({ items: withImages(done.items.slice(from)), loaded: done.items.length, total: done.items.length, complete: true, partial: !done.complete });
     }
-    vodManager.getAllItems(type, category).catch((e) => log.warn(TAG, `listing ${type}/${category}: ${e.message}`));
+    const failKey = `${type}|${category}`;
+    const failed = listingFailures.get(failKey);
+    if (failed && Date.now() - failed.at < LISTING_FAILURE_MS && !vodManager.listingProgress(type, category)) {
+      return res.json({ items: [], loaded: 0, total: 0, complete: true, partial: true, error: `Couldn't read this category: ${failed.message}` });
+    }
+    vodManager.getAllItems(type, category)
+      .then(() => listingFailures.delete(failKey))
+      .catch((e) => {
+        listingFailures.set(failKey, { message: e.message, at: Date.now() });
+        log.warn(TAG, `listing ${type}/${category}: ${e.message}`);
+      });
     const walk = vodManager.listingProgress(type, category);
     const items = walk ? walk.items.slice(0) : [];
     appState.touchActivity?.();

@@ -26,7 +26,8 @@ const LIST_MAX     = 500;
 
 // What My List keeps of a title: enough to show its tile, filter it and play
 // it, without asking the portal again.
-const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'genres', 'rating', 'added', 'durationMin',
+// `episodes` too: some portals mark a show only by its episode list.
+const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'episodes', 'genres', 'rating', 'added', 'durationMin',
   'screenshotUrl', 'cmd', 'description', 'director', 'actors'];
 const listItem = (item) => Object.fromEntries(LIST_FIELDS.filter((k) => item[k] !== undefined).map((k) => [k, item[k]]));
 
@@ -39,11 +40,19 @@ class WatchStore {
     this._file = path.join(dataDir, 'watch.json');
   }
 
+  // The file is read again only when it changed on disk (by mtime and size),
+  // not on every request — progress saves come every few seconds.
   _load() {
+    let st;
+    try { st = fs.statSync(this._file); } catch { this._cache = null; return {}; }
+    if (this._cache && this._cache.mtimeMs === st.mtimeMs && this._cache.size === st.size) return this._cache.data;
     try {
       const d = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      return d && typeof d === 'object' ? d : {};
+      const data = d && typeof d === 'object' ? d : {};
+      this._cache = { mtimeMs: st.mtimeMs, size: st.size, data };
+      return data;
     } catch {
+      this._cache = null;
       return {};
     }
   }
@@ -53,7 +62,10 @@ class WatchStore {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(d), 'utf8');
       fs.renameSync(tmp, this._file);
+      const st = fs.statSync(this._file);
+      this._cache = { mtimeMs: st.mtimeMs, size: st.size, data: d };
     } catch (e) {
+      this._cache = null;   // what's in memory may now differ from the file
       log.error(TAG, `save failed: ${e.message}`);
       throw e;
     }

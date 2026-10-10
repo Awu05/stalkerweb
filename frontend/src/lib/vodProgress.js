@@ -20,6 +20,24 @@ function set(next) {
   listeners.forEach((fn) => fn(watch))
 }
 
+// Answers can arrive out of order — a progress save sent before a My List
+// change can answer after it, with the list as it was. Each request is
+// numbered when sent; its answer replaces what's here only if nothing newer
+// has been answered, nor changed here, since it was sent.
+let sent = 0          // numbers handed out
+let answered = 0      // the newest request whose answer was used
+let changedAt = 0     // the request that carried the latest change made here
+
+/** `call` (a request to the server) whose answer, when still current, replaces the lists. */
+function request(call, { local = false } = {}) {
+  const n = ++sent
+  if (local) changedAt = n
+  return call().then((r) => {
+    if (n > answered && n >= changedAt) { answered = n; set(r) }
+    return r
+  })
+}
+
 /** Called with the viewer's lists whenever they change; returns an unsubscribe. */
 export function onWatchChange(fn) {
   listeners.add(fn)
@@ -27,7 +45,7 @@ export function onWatchChange(fn) {
 }
 
 export async function loadWatch() {
-  try { set(await getWatch()) } catch { /* offline or signed out — keep what's here */ }
+  try { await request(getWatch) } catch { /* offline or signed out — keep what's here */ }
   return watch
 }
 
@@ -50,17 +68,17 @@ export function getVodHistory() {
 // resume point once finished (but it stays in the history, marked watched).
 export function saveVodProgress(entry) {
   if (!entry?.key || !entry.duration || !isFinite(entry.duration)) return
-  saveWatch(entry).then(set).catch(() => {})
+  request(() => saveWatch(entry)).catch(() => {})
 }
 
 export function removeFromVodHistory(titleId) {
   set({ ...watch, history: watch.history.filter((e) => e.id !== titleId), progress: watch.progress.filter((e) => e.key.split(':')[0] !== titleId) })
-  removeWatchTitle(titleId).then(set).catch(() => loadWatch())
+  request(() => removeWatchTitle(titleId), { local: true }).catch(() => loadWatch())
 }
 
 export function clearVodHistory() {
   set({ ...watch, history: [] })
-  clearWatchHistory().then(set).catch(() => loadWatch())
+  request(clearWatchHistory, { local: true }).catch(() => loadWatch())
 }
 
 /** Ids of titles the viewer started or finished — for the "Not watched" filter. */
@@ -89,14 +107,14 @@ export function toggleMyList(item) {
   const id = String(item.id)
   if (isInMyList(id)) {
     set({ ...watch, list: watch.list.filter((e) => e.id !== id) })
-    removeFromWatchList(id).then(set).catch(() => loadWatch())
+    request(() => removeFromWatchList(id), { local: true }).catch(() => loadWatch())
   } else {
     set({ ...watch, list: [{ id, item, addedAt: Date.now(), completedAt: null }, ...watch.list] })
-    addToWatchList(item).then(set).catch(() => loadWatch())
+    request(() => addToWatchList(item), { local: true }).catch(() => loadWatch())
   }
 }
 
 export function setMyListCompleted(id, completed) {
   set({ ...watch, list: watch.list.map((e) => (e.id === String(id) ? { ...e, completedAt: completed ? Date.now() : null } : e)) })
-  setWatchListCompleted(id, completed).then(set).catch(() => loadWatch())
+  request(() => setWatchListCompleted(id, completed), { local: true }).catch(() => loadWatch())
 }

@@ -10,7 +10,7 @@ const log = require('../logger');
 const { groupChannels } = require('../routes/m3u');
 const { isAdult } = require('./exportFilter');
 const { visibleVodCategories, isAllCategory, ALL_CATEGORIES_ID } = require('./vodCategoryFilter');
-const { vodLayout } = require('./seriesCategories');
+const { vodLayout, isMixedCategory } = require('./seriesCategories');
 const TAG = 'catalog';
 
 const SYNTHETIC_CATEGORY_BASE = 900000;     // live categories with no numeric portal id
@@ -52,7 +52,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
 
   // "Every movie" listings walk all categories in the background; requests wait
   // a while for that walk, then answer with what is cached so far.
-  const fills = new Map(); // `${portal}|${type}` → promise
+  const fills = new Map(); // `${portal}|${type}|${category ids}` → promise
 
   const showAdult = () => appState.getShowAdult?.() === true;
   const hiddenLanguages = () => appState.getHiddenLanguages?.() ?? new Set();
@@ -104,14 +104,22 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   async function seriesSource() {
     const layout = await vodLayout(appState.vodManager);
     if (layout.seriesType === 'series') return { type: 'series', categories: visible(layout.series), all: true };
-    if (layout.byName) return { type: 'vod', categories: visible(layout.series), all: false, byName: true };
+    if (layout.byName) {
+      // A category named for both movies and shows holds both: only its titles
+      // flagged as shows count there.
+      const categories = visible(layout.series);
+      const mixed = new Set(categories.filter(isMixedCategory).map((c) => String(c.id)));
+      return { type: 'vod', categories, all: false, byName: true, mixed };
+    }
     return { type: 'vod', categories: visible(layout.movies), all: false };
   }
 
   // Reads every category's listing in the background, one after another. One
-  // walk per portal and type, however many requests ask.
+  // walk per portal, type and set of categories, however many requests ask —
+  // by categories too, since on a portal without a series section the movies
+  // and the shows are different categories of the same 'vod' type.
   function fillAll(type, categories) {
-    const key = `${currentPortal()}|${type}`;
+    const key = `${currentPortal()}|${type}|${categories.map((c) => c.id).join(',')}`;
     if (!fills.has(key)) {
       const walk = (async () => {
         for (const c of categories) {
@@ -167,7 +175,13 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
   async function listShows(categoryId = null) {
     const src = await seriesSource();
     const rows = await listTitles(src.type, src.categories, categoryId);
-    return rows.filter(({ item }) => src.all || src.byName || item.isSeries);
+    return rows.filter(({ item, categoryId: c }) => isShowIn(src, item, c));
+  }
+
+  // Whether a title listed in category `categoryId` of a series source is a show.
+  function isShowIn(src, item, categoryId) {
+    if (src.all || item.isSeries) return true;
+    return !!src.byName && !!categoryId && !src.mixed?.has(String(categoryId));
   }
 
   /**
@@ -187,7 +201,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
     const { items } = await appState.vodManager.getItems({ type: src.type, categoryId: ALL_CATEGORIES_ID, search: query });
     const out = [];
     for (const item of items) {
-      if (kind === 'movie' ? item.isSeries : !(src.all || (src.byName && item.categoryId) || item.isSeries)) continue;
+      if (kind === 'movie' ? item.isSeries : !isShowIn(src, item, item.categoryId)) continue;
       if (item.categoryId && !visible.has(String(item.categoryId))) continue;
       if (!adult && isAdult(item.name)) continue;
       titles.set(`${src.type}:${item.id}`, item);
@@ -207,7 +221,7 @@ function createCatalog(appState, { logoManager = null, idStore, allTitlesWaitMs 
    */
   async function pageOfTitles(kind, categoryId, skip, limit) {
     const src = kind === 'movie' ? { type: 'vod', all: false } : await seriesSource();
-    const keep = (item) => (kind === 'movie' ? !item.isSeries : (src.all || src.byName || item.isSeries));
+    const keep = (item) => (kind === 'movie' ? !item.isSeries : isShowIn(src, item, categoryId));
     const { vodManager } = appState;
     const { titles } = state();
     let items;
