@@ -9,9 +9,9 @@ describe('chooseViewer', () => {
     expect(chooseViewer([a, b], 'view_b')).toEqual({ id: 'view_b', needsPicker: false })
   })
 
-  it('picks the only viewer without asking', () => {
-    expect(chooseViewer([a], null)).toEqual({ id: 'view_a', needsPicker: false })
-    expect(chooseViewer([a], 'view_gone')).toEqual({ id: 'view_a', needsPicker: false })
+  it('asks even when there is only one, so another can be made', () => {
+    expect(chooseViewer([a], null)).toEqual({ id: null, needsPicker: true })
+    expect(chooseViewer([a], 'view_gone')).toEqual({ id: null, needsPicker: true })
   })
 
   it('asks when there are several and none is saved, or the saved one was deleted', () => {

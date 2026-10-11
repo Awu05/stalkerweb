@@ -14,11 +14,11 @@ export function setViewerId(id) {
   } catch { /* storage blocked — the server's default viewer is used */ }
 }
 
-// Which viewer to use on startup: the saved one while it still exists, the
-// only one when there is just one, otherwise ask ("Who's watching?").
+// Which viewer to use on startup: the saved one while it still exists,
+// otherwise ask ("Who's watching?") — even when there's only one, so a new
+// device (or a fresh sign-in) can pick it or make another.
 export function chooseViewer(viewers, savedId) {
   if (savedId && viewers.some(v => v.id === savedId)) return { id: savedId, needsPicker: false }
-  if (viewers.length === 1) return { id: viewers[0].id, needsPicker: false }
   return { id: null, needsPicker: true }
 }
 
