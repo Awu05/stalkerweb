@@ -3,10 +3,12 @@ import { KeyRound, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { accessLogin } from '../stalkerApi'
+import { setViewerId } from '@/lib/viewer'
 
 // Shown instead of the app when the server has an ACCESS_KEY and this browser
 // isn't signed in. Signing in sets a cookie for a year; a reload then starts
-// the app as usual.
+// the app as usual — asking "Who's watching?" first, since whoever used this
+// browser before needn't be who just signed in.
 export default function LoginPage() {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -19,6 +21,7 @@ export default function LoginPage() {
     setError(null)
     try {
       await accessLogin(key)
+      setViewerId(null)
       window.location.reload()
     } catch (err) {
       setError(err.message)

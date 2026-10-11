@@ -193,7 +193,7 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
             )}
             {accessEnabled && (
               <button
-                onClick={() => accessLogout().finally(() => window.location.reload())}
+                onClick={() => accessLogout().finally(() => { setViewerId(null); window.location.reload() })}
                 title="Sign out"
                 aria-label="Sign out"
                 className={cn(
