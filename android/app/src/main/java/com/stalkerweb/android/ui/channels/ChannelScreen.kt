@@ -36,10 +36,6 @@ import com.stalkerweb.android.ui.utils.rememberIsTV
 fun ChannelScreen(
     viewModel: ChannelViewModel,
     onSelectChannel: (Channel) -> Unit,
-    vodEnabled: Boolean = false,
-    onOpenVod: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
-    onOpenPortal: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isTV  = rememberIsTV()
@@ -64,25 +60,14 @@ fun ChannelScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = {
                         Text(
-                            "stalkerweb",
+                            "Channels",
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     },
                     actions = {
-                        if (vodEnabled) {
-                            IconButton(onClick = onOpenVod) {
-                                Icon(Icons.Default.Movie, contentDescription = "On Demand")
-                            }
-                        }
-                        IconButton(onClick = onOpenPortal) {
-                            Icon(Icons.Default.Router, contentDescription = "Portal connection")
-                        }
                         IconButton(onClick = viewModel::load) {
                             Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                        }
-                        IconButton(onClick = onOpenSettings) {
-                            Icon(Icons.Default.Settings, contentDescription = "Server settings")
                         }
                     },
                 )

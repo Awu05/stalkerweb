@@ -40,7 +40,7 @@ fun VodScreen(
     viewModel: VodViewModel,
     onPlayMovie: (VodItem) -> Unit,
     onPlayEpisode: (show: VodItem, season: VodSeason, episodeId: String, seriesNumber: String, title: String) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isTV = rememberIsTV()
@@ -61,11 +61,13 @@ fun VodScreen(
             Column {
                 TopAppBar(
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                            }
                         }
                     },
-                    title = { Text("On Demand", color = MaterialTheme.colorScheme.primary) },
+                    title = { Text("VOD", color = MaterialTheme.colorScheme.primary) },
                 )
                 // Movies / TV Shows toggle
                 TabRow(selectedTabIndex = if (state.type == "vod") 0 else 1) {

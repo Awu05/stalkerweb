@@ -35,7 +35,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stalkerweb.android.crash.CrashReporter
+import com.stalkerweb.android.data.api.AppEvent
 import com.stalkerweb.android.data.update.UpdateManager
+import com.stalkerweb.android.ui.shell.AppShell
+import com.stalkerweb.android.ui.shell.ShellViewModel
+import com.stalkerweb.android.ui.viewers.ViewerPickerScreen
 import com.stalkerweb.android.ui.channels.ChannelViewModel
 import com.stalkerweb.android.ui.crash.CrashReportDialog
 import com.stalkerweb.android.ui.player.PlayerViewModel
@@ -120,10 +124,9 @@ class MainActivity : ComponentActivity() {
                 // 48dp was well past what TVs actually need for overscan safety
                 // (~5% of screen edge, ~24-27dp) and ate a visible chunk of every
                 // screen for no reason.
-                val overscanPadding = if (isTV && currentRoute != Screen.Player.route) 24.dp else 0.dp
+                val overscanPadding = if (isTV && currentRoute != Screen.Player.route && currentRoute != Screen.VodPlayer.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
-                val startDest     = if (container.server.getServerUrl() != null) Screen.Channels.route
-                                    else Screen.Setup.route
+                val startDest     = if (container.server.getServerUrl() != null) Screen.Shell.route else Screen.Setup.route
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -168,26 +171,46 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val shellVmFactory = remember {
+                    object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            ShellViewModel(container.server, container.viewers) as T
+                    }
+                }
+
                 val channelViewModel: ChannelViewModel = viewModel<ChannelViewModel>(factory = channelVmFactory).also { this@MainActivity.channelViewModel = it }
                 val playerViewModel:  PlayerViewModel  = viewModel<PlayerViewModel>(factory = playerVmFactory)
                 val updateViewModel:  UpdateViewModel  = viewModel<UpdateViewModel>(factory = updateVmFactory)
                 val vodViewModel:     VodViewModel     = viewModel<VodViewModel>(factory = vodVmFactory)
 
-                // Whether the VOD section is enabled (controlled from the web Settings page).
-                var vodEnabled by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    vodEnabled = container.server.getSettings()?.vodEnabled == true
+                fun toShell() = navController.navigate(Screen.Shell.route) { popUpTo(0) { inclusive = true } }
+                fun toPicker(required: Boolean) = navController.navigate(Screen.Viewers.go(required)) {
+                    if (required) popUpTo(0) { inclusive = true }
                 }
 
-                // A saved server URL doesn't mean the portal itself is connected —
-                // it may have never been set up, or dropped since. Check once on
-                // launch and send the user straight to the Portal screen instead of
-                // dumping them on a dead Channels list full of 503 errors.
+                // Startup: who's watching first (as on the web), then whether a portal is connected.
                 LaunchedEffect(Unit) {
-                    if (container.server.getServerUrl() != null) {
-                        val status = runCatching { container.server.testConnection() }.getOrNull()
-                        if (status?.connected != true) {
-                            navController.navigate(Screen.Portal.route)
+                    if (container.server.getServerUrl() == null) return@LaunchedEffect
+                    if (container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
+                    val status = runCatching { container.server.testConnection() }.getOrNull()
+                    if (status?.connected == false) navController.navigate(Screen.Portal.route)
+                }
+
+                // Problems any request can hit: a deleted viewer, or the access key no longer accepted.
+                LaunchedEffect(Unit) {
+                    container.events.events.collect { event ->
+                        val route = navController.currentBackStackEntry?.destination?.route
+                        when (event) {
+                            is AppEvent.ViewerGone -> if (route != Screen.Viewers.route) {
+                                container.viewers.forget()
+                                toPicker(required = true)
+                            }
+                            is AppEvent.AccessProblem -> if (route != Screen.Setup.route) {
+                                // Leave the shell at once: every request carries the key, and each
+                                // wrong one counts toward the server's lockout.
+                                navController.navigate(Screen.Setup.go(event.message)) { popUpTo(0) { inclusive = true } }
+                            }
                         }
                     }
                 }
@@ -218,36 +241,62 @@ class MainActivity : ComponentActivity() {
 
                 NavHost(navController = navController, startDestination = startDest) {
 
-                    composable(Screen.Setup.route) {
-                        // Reachable two ways: first-run (start destination, nothing
-                        // behind it) and from the channel list's settings button.
+                    composable(
+                        Screen.Setup.route,
+                        arguments = listOf(navArgument("message") { type = NavType.StringType; defaultValue = "" }),
+                    ) { backStack ->
+                        // Reachable on first run, from Settings, and after an access-key problem.
                         val fromApp = navController.previousBackStackEntry != null
                         SetupScreen(
-                            server      = container.server,
-                            onConnected = {
+                            server       = container.server,
+                            startMessage = backStack.arguments?.getString("message"),
+                            onConnected  = {
                                 channelViewModel.load(reset = true)
-                                if (fromApp) {
-                                    navController.popBackStack()
-                                } else {
-                                    navController.navigate(Screen.Channels.route) {
-                                        popUpTo(Screen.Setup.route) { inclusive = true }
-                                    }
-                                }
+                                // A new server or key forgot the viewer (ServerRepository.setServerUrl): ask again.
+                                if (container.viewers.savedViewerId() == null) toPicker(required = true) else toShell()
                             },
                             onBack = if (fromApp) ({ navController.popBackStack() }) else null,
                         )
                     }
 
-                    composable(Screen.Channels.route) {
-                        ChannelScreen(
-                            viewModel       = channelViewModel,
-                            onSelectChannel = { channel ->
-                                navController.navigate(Screen.Player.go(channel.uniqueId, channel.name))
+                    composable(
+                        Screen.Viewers.route,
+                        arguments = listOf(navArgument("required") { type = NavType.BoolType; defaultValue = false }),
+                    ) { backStack ->
+                        val required = backStack.arguments?.getBoolean("required") ?: false
+                        ViewerPickerScreen(
+                            viewers   = container.viewers,
+                            required  = required,
+                            onChosen  = { toShell() },
+                            onClose   = { navController.popBackStack() },
+                            onExitApp = { finish() },
+                        )
+                    }
+
+                    composable(Screen.Shell.route) {
+                        val shellViewModel: ShellViewModel = viewModel(factory = shellVmFactory)
+                        AppShell(
+                            vm = shellViewModel,
+                            channels = {
+                                ChannelScreen(
+                                    viewModel = channelViewModel,
+                                    onSelectChannel = { channel -> navController.navigate(Screen.Player.go(channel.uniqueId, channel.name)) },
+                                )
                             },
-                            vodEnabled      = vodEnabled,
-                            onOpenVod       = { navController.navigate(Screen.Vod.route) },
-                            onOpenSettings  = { navController.navigate(Screen.Setup.route) },
-                            onOpenPortal    = { navController.navigate(Screen.Portal.route) },
+                            vod = {
+                                VodScreen(
+                                    viewModel = vodViewModel,
+                                    onPlayMovie = { item -> navController.navigate(Screen.VodPlayer.go(videoId = item.id, cmd = item.cmd, title = item.name)) },
+                                    onPlayEpisode = { show, season, episodeId, seriesNumber, title ->
+                                        navController.navigate(
+                                            Screen.VodPlayer.go(videoId = show.id, series = seriesNumber, seasonId = season.id, episodeId = episodeId, title = "${show.name} · $title")
+                                        )
+                                    },
+                                )
+                            },
+                            onSwitchViewer   = { toPicker(required = false) },
+                            onOpenServer     = { navController.navigate(Screen.Setup.go()) },
+                            onOpenConnection = { navController.navigate(Screen.Portal.route) },
                         )
                     }
 
@@ -262,30 +311,7 @@ class MainActivity : ComponentActivity() {
                                 // the same "Connect a portal to load channels" empty
                                 // state they just came here to fix.
                                 channelViewModel.load()
-                                navController.popBackStack()
-                            },
-                        )
-                    }
-
-                    composable(Screen.Vod.route) {
-                        VodScreen(
-                            viewModel   = vodViewModel,
-                            onBack      = { navController.popBackStack() },
-                            onPlayMovie = { item ->
-                                navController.navigate(
-                                    Screen.VodPlayer.go(videoId = item.id, cmd = item.cmd, title = item.name)
-                                )
-                            },
-                            onPlayEpisode = { show, season, episodeId, seriesNumber, title ->
-                                navController.navigate(
-                                    Screen.VodPlayer.go(
-                                        videoId   = show.id,
-                                        series    = seriesNumber,
-                                        seasonId  = season.id,
-                                        episodeId = episodeId,
-                                        title     = "${show.name} · $title",
-                                    )
-                                )
+                                if (!navController.popBackStack()) toShell()
                             },
                         )
                     }
