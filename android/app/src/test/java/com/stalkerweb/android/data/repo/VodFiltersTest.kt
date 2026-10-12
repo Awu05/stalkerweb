@@ -74,3 +74,31 @@ class VodFiltersTest {
         assertEquals(emptyList<String>(), ids(applyVodFilters(list, VodFilterState(year = "Older"), emptySet(), "", now)))
     }
 }
+
+class VodFilterChoicesTest {
+    private fun t(id: String, genres: List<String> = emptyList(), added: String = "", isHD: Boolean = false, year: String = "") =
+        VodItem(id = id, name = "T$id", genres = genres, added = added, isHD = isHD, year = year)
+
+    @Test fun genresAreKeptAsTheyAreSpelled() {
+        assertEquals(listOf("Comedie", "Comédie"), filterOptions(listOf(t("1", listOf("Comédie")), t("2", listOf("Comedie")))).genres.sorted())
+    }
+
+    @Test fun addedIsOfferedOnlyWhenTitlesAreDated() {
+        assertFalse(filterOptions(listOf(t("1"))).hasAdded)
+        org.junit.Assert.assertTrue(filterOptions(listOf(t("1", added = "2026-10-01 10:00:00"))).hasAdded)
+    }
+
+    @Test fun aFilterThatIsOnStaysOfferedWithItsChoice() {
+        val none = filterOptions(emptyList())          // while the listing is still being read
+        val shown = none.withChosen(VodFilterState(genre = "Drama", year = "2016", hd = true, addedDays = 7, minRating = 7.0))
+        assertEquals(listOf("Drama"), shown.genres)
+        assertEquals(listOf("2016"), shown.years)
+        org.junit.Assert.assertTrue(shown.hasHD && shown.hasAdded && shown.hasRating)
+    }
+
+    @Test fun showingMoreStopsAtWhatThereIs() {
+        assertEquals(280, nextVisibleCount(140, 500))
+        assertEquals(140, nextVisibleCount(140, 90))   // fewer than shown: nothing more to show
+        assertEquals(140, nextVisibleCount(140, 140))
+    }
+}
