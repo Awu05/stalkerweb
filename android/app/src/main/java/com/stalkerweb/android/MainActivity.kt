@@ -43,7 +43,7 @@ import com.stalkerweb.android.ui.setup.SetupScreen
 import com.stalkerweb.android.ui.channels.ChannelScreen
 import com.stalkerweb.android.ui.player.PlayerScreen
 import com.stalkerweb.android.ui.theme.StalkerTheme
-import com.stalkerweb.android.ui.theme.appBackgroundBrush
+import androidx.compose.material3.MaterialTheme
 import com.stalkerweb.android.ui.portal.PortalScreen
 import com.stalkerweb.android.ui.portal.PortalViewModel
 import com.stalkerweb.android.ui.update.UpdateDialog
@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 // (~5% of screen edge, ~24-27dp) and ate a visible chunk of every
                 // screen for no reason.
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route) 24.dp else 0.dp
-                Box(Modifier.fillMaxSize().background(appBackgroundBrush()).padding(overscanPadding)) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
                 val startDest     = if (container.server.getServerUrl() != null) Screen.Channels.route
                                     else Screen.Setup.route
 

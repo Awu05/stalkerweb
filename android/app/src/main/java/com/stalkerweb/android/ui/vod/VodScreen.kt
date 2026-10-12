@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.stalkerweb.android.data.api.VodItem
+import com.stalkerweb.android.ui.components.PosterTile
 import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.ui.utils.rememberIsTV
 
@@ -206,50 +207,7 @@ fun VodScreen(
 
 @Composable
 private fun VodCard(item: VodItem, onClick: () -> Unit) {
-    Column(Modifier.clickable { onClick() }) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        ) {
-            if (!item.screenshotUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = item.screenshotUrl,
-                    contentDescription = item.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    Icons.Default.Movie, null,
-                    Modifier.align(Alignment.Center).size(28.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (item.isSeries) {
-                Surface(
-                    color = Color.Black.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
-                ) {
-                    Text("Series", color = Color.White, style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
-                }
-            }
-        }
-        Text(
-            item.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        if (item.year.isNotBlank()) {
-            Text(item.year, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    PosterTile(title = item.name, year = item.year, posterUrl = item.screenshotUrl, isHD = item.isHD, onClick = onClick)
 }
 
 @Composable
