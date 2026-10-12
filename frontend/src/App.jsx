@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { Tv2, Settings, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react'
+import { Tv2, Settings, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut, Server } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
 import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, VIEWER_GONE, getViewers, createViewer, getMyViewer } from './stalkerApi'
 import LoginPage from './pages/LoginPage'
 import { loadWatch } from '@/lib/vodProgress'
-import { fetchProfiles } from '@/lib/profiles'
+import { fetchProfiles, getCachedProfiles } from '@/lib/profiles'
+import { connectionLabel } from '@/lib/connection'
 import ViewerPicker, { ViewerAvatar } from '@/components/ViewerPicker'
 import { getViewerId, setViewerId, chooseViewer } from '@/lib/viewer'
 import { invalidateFavoritesCache } from '@/lib/useFavorites'
@@ -100,7 +101,7 @@ function LogoMark({ collapsed }) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
-function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
+function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
   const { reminders, removeReminder } = useReminders()
   const status = useStatusDetails(connected, lastPingAt, idleInfo)
   // Settings opens as a window over the page you're on (see AppInner).
@@ -170,6 +171,27 @@ function Sidebar({ connected, epgEnabled, lastPingAt, idleInfo, version, accessE
               {!collapsed && <span className="truncate">{viewer.name}</span>}
             </button>
           )}
+          {connection && (
+            <NavLink
+              to="/settings?tab=connection"
+              state={settingsState}
+              onClick={onCloseMobile}
+              title={`Connected to ${connection.name} (${connection.host})`}
+              aria-label={`Connected to ${connection.name}. IPTV connection settings`}
+              className={cn(
+                'flex items-center gap-3 rounded-[var(--radius-md)] h-10 text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)]/70 transition-all duration-150',
+                collapsed ? 'justify-center w-10 mx-auto' : 'px-3 w-full'
+              )}
+            >
+              <Server size={18} className="shrink-0" />
+              {!collapsed && (
+                <span className="flex flex-col min-w-0 leading-tight">
+                  <span className="truncate text-sm font-medium text-[var(--color-text)]">{connection.name}</span>
+                  {connection.name !== connection.host && <span className="truncate text-[11px]">{connection.host}</span>}
+                </span>
+              )}
+            </NavLink>
+          )}
           <NavItem to="/settings" state={settingsState} icon={Settings} label="Settings" collapsed={collapsed} onNavigate={onCloseMobile} />
 
           {/* Status: connection (details on hover), version, sign out */}
@@ -224,6 +246,7 @@ function AppInner() {
   const [disabledGenres, setDisabledGenres] = useState(new Set())
   const [disabledLanguages, setDisabledLanguages] = useState(new Set())
   const [viewer, setViewer]   = useState(null)   // /api/viewers/me
+  const [connection, setConnection] = useState(null)   // { name, host } of the portal connected to (lib/connection.js)
   const [viewers, setViewers] = useState([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerRequired, setPickerRequired] = useState(false)
@@ -325,6 +348,7 @@ function AppInner() {
         if (pick.needsPicker) { setPickerRequired(true); setPickerOpen(true) }
         applyViewer(await getMyViewer())
         setConnected(status.connected)
+        setConnection(connectionLabel(status, getCachedProfiles()))
         if (status.version) setVersion(status.version)
         loadWatch()   // what this viewer watched (after the viewer is set above)
         setEpgEnabled(settings.epg_enabled !== false)
@@ -341,12 +365,17 @@ function AppInner() {
       try {
         const s = await getStatus()
         setConnected(s.connected)
+        setConnection(prev => {
+          const next = connectionLabel(s, getCachedProfiles())
+          return prev && next && prev.name === next.name && prev.host === next.host ? prev : next
+        })
         if (s.watchdog?.lastPingAt) setLastPingAt(s.watchdog.lastPingAt)
         else if (!s.connected) setLastPingAt(null)
         if (s.lastActivityAt) updateIdleInfo(s.lastActivityAt, s.idleTimeoutMs)
         else if (!s.connected) setIdleInfo(null)
       } catch {
         setConnected(false)
+        setConnection(null)
       }
     }
     let cancelled = false
@@ -375,12 +404,22 @@ function AppInner() {
 
   const ctxValue = useMemo(
     () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
-      viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true),
+      viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true), connection, refreshConnection,
       // Keeps the current viewer in step with a filter just saved (no reload).
       updateViewerFields: (fields) => setViewer((v) => (v ? { ...v, ...fields } : v)) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the functions only call setters
-    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers]
+    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers, connection]
   )
+
+  // Connecting, switching connection or disconnecting (in Settings) shows in
+  // the sidebar at once, not at the next status poll.
+  function refreshConnection() {
+    return getStatus().then(s => setConnection(connectionLabel(s, getCachedProfiles()))).catch(() => {})
+  }
+  useEffect(() => {
+    if (!connected) setConnection(null)
+    else refreshConnection()
+  }, [connected])
 
   if (needsLogin) return <LoginPage />
 
@@ -405,6 +444,7 @@ function AppInner() {
         )}
         <Sidebar
           connected={connected}
+          connection={connection}
           epgEnabled={epgEnabled}
           lastPingAt={lastPingAt}
           idleInfo={idleInfo}
