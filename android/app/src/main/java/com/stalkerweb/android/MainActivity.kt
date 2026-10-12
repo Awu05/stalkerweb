@@ -281,6 +281,7 @@ class MainActivity : ComponentActivity() {
                                 ChannelScreen(
                                     viewModel = channelViewModel,
                                     onSelectChannel = { channel -> navController.navigate(Screen.Player.go(channel.uniqueId, channel.name)) },
+                                    onOpenPortal = { navController.navigate(Screen.Portal.route) },
                                 )
                             },
                             vod = {

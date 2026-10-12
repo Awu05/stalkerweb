@@ -36,6 +36,7 @@ import com.stalkerweb.android.ui.utils.rememberIsTV
 fun ChannelScreen(
     viewModel: ChannelViewModel,
     onSelectChannel: (Channel) -> Unit,
+    onOpenPortal: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isTV  = rememberIsTV()
