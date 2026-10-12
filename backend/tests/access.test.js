@@ -51,7 +51,7 @@ describe('access key', () => {
   const get = (path, opts = {}) => fetch(origin + path, opts)
 
   beforeAll(async () => {
-    access = createAccess({ key: KEY, logger: quiet })
+    access = createAccess({ key: KEY, logger: quiet, wrongKeyDelayMs: 0 })
     ;({ server, origin } = await listen(access))
   })
   afterAll(() => server.close())
@@ -153,15 +153,15 @@ describe('access key', () => {
 describe('access key lockout', () => {
   async function withClock() {
     const clock = { t: 0 }
-    const access = createAccess({ key: KEY, logger: quiet, now: () => clock.t })
+    const access = createAccess({ key: KEY, logger: quiet, now: () => clock.t, wrongKeyDelayMs: 0 })
     const { server, origin } = await listen(access)
     return { clock, access, server, origin }
   }
 
-  it('locks an address out of the key after 20 wrong keys — but links keep working', async () => {
+  it('locks an address out of the key after 10 wrong keys — but links keep working', async () => {
     const { clock, access, server, origin } = await withClock()
     try {
-      for (let i = 0; i < 20; i++) await fetch(`${origin}/k/wrong${i}/api/m3u`)
+      for (let i = 0; i < 10; i++) await fetch(`${origin}/k/wrong${i}/api/m3u`)
       expect((await fetch(`${origin}/k/${encodeURIComponent(KEY)}/api/m3u`)).status).toBe(429)
       expect((await fetch(`${origin}/api/settings`, { headers: { authorization: `Bearer ${KEY}` } })).status).toBe(429)
       // The share token is not a guessable secret: players with links carry on.
@@ -179,8 +179,46 @@ describe('access key lockout', () => {
   it('counts wrong bearer keys', async () => {
     const { server, origin } = await withClock()
     try {
-      for (let i = 0; i < 20; i++) await fetch(`${origin}/api/settings`, { headers: { authorization: `Bearer wrong${i}` } })
+      for (let i = 0; i < 10; i++) await fetch(`${origin}/api/settings`, { headers: { authorization: `Bearer wrong${i}` } })
       expect((await fetch(`${origin}/api/settings`, { headers: { authorization: `Bearer ${KEY}` } })).status).toBe(429)
+    } finally {
+      server.close()
+    }
+  })
+
+  it('locks an address out for twice as long each time, and forgets after a quiet day', async () => {
+    const { clock, server, origin } = await withClock()
+    const lockFor = async () => {
+      for (let i = 0; i < 10; i++) await fetch(`${origin}/k/wrong${i}/api/m3u`)
+      const r = await fetch(`${origin}/k/${encodeURIComponent(KEY)}/api/m3u`)
+      return { status: r.status, wait: Number(r.headers.get('retry-after')) }
+    }
+    try {
+      expect(await lockFor()).toEqual({ status: 429, wait: 15 * 60 })
+      clock.t += 16 * 60 * 1000
+      expect(await lockFor()).toEqual({ status: 429, wait: 30 * 60 })
+      clock.t += 31 * 60 * 1000
+      expect(await lockFor()).toEqual({ status: 429, wait: 60 * 60 })
+      clock.t += 61 * 60 * 1000 + 25 * 3600 * 1000   // a day with no lockout
+      expect(await lockFor()).toEqual({ status: 429, wait: 15 * 60 })
+    } finally {
+      server.close()
+    }
+  })
+
+  it('tells the sign-in page how many tries are left, and how long a lockout lasts', async () => {
+    const { server, origin } = await withClock()
+    const login = async (key) => {
+      const r = await fetch(`${origin}/api/access/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
+      return { status: r.status, ...(await r.json()) }
+    }
+    try {
+      for (let i = 0; i < 6; i++) expect((await login(`wrong${i}`)).error).toBe('Wrong access key.')
+      expect(await login('wrong6')).toMatchObject({ status: 401, triesLeft: 3, error: expect.stringMatching(/3 tries left/) })
+      expect(await login('wrong7')).toMatchObject({ status: 401, triesLeft: 2, error: expect.stringMatching(/2 tries left/) })
+      expect(await login('wrong8')).toMatchObject({ status: 401, triesLeft: 1, error: expect.stringMatching(/1 try left/) })
+      expect(await login('wrong9')).toMatchObject({ status: 429, error: expect.stringMatching(/15 minutes/) })
+      expect(await login(KEY)).toMatchObject({ status: 429 })   // even the right key waits
     } finally {
       server.close()
     }

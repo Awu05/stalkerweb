@@ -30,11 +30,22 @@ const TAG = 'access';
 
 const COOKIE = 'sw_session';
 const COOKIE_MAX_AGE_S = 365 * 24 * 3600;
-const FAIL_LIMIT = 20;                   // wrong keys from one address…
+const FAIL_LIMIT = 10;                   // wrong keys from one address…
 const GLOBAL_FAIL_LIMIT = 200;           // …or from everywhere together…
 const FAIL_WINDOW_MS = 15 * 60 * 1000;   // …within 15 minutes lock out further tries…
-const LOCKOUT_MS = 15 * 60 * 1000;       // …for 15 minutes
+const LOCKOUT_MS = 15 * 60 * 1000;       // …for 15 minutes — and an address locked out
+const MAX_LOCKOUT_MS = 24 * 3600 * 1000; // again waits twice as long each time, up to a
+const STRIKES_FORGOTTEN_MS = 24 * 3600 * 1000; // day, until a day passes without a lockout
+const WRONG_KEY_DELAY_MS = 1000;         // a wrong key at the sign-in page is answered after this
 const MIN_KEY_LENGTH = 12;
+
+// "15 minutes", "2 hours" — how long a lockout lasts, for people.
+function describeWait(ms) {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'}`;
+  const h = Math.round(m / 60);
+  return `${h} hour${h === 1 ? '' : 's'}`;
+}
 
 const derive = (key, purpose) =>
   crypto.createHmac('sha256', key).update(`stalkerweb:${purpose}`).digest('base64url').slice(0, 32);
@@ -99,13 +110,13 @@ function levelFor(req, { logToken = false } = {}) {
   return 'full';
 }
 
-function createAccess({ key = '', logToken = false, logger = log, now = Date.now } = {}) {
+function createAccess({ key = '', logToken = false, logger = log, now = Date.now, wrongKeyDelayMs = WRONG_KEY_DELAY_MS } = {}) {
   const enabled = !!key;
   const shareToken = enabled ? derive(key, 'share') : null;
   const sessionToken = enabled ? derive(key, 'session') : null;
   const sharePrefix = enabled ? `/k/${shareToken}` : '';
-  const failures = new Map();   // address → { count, since, until }
-  const everyone = { count: 0, since: 0, until: 0 };
+  const failures = new Map();   // address → { count, since, until, strikes, lastLock }
+  const everyone = { count: 0, since: 0, until: 0, global: true };
 
   if (enabled && key.length < MIN_KEY_LENGTH) {
     logger.warn(TAG, `ACCESS_KEY is only ${key.length} characters — use at least ${MIN_KEY_LENGTH} (a passphrase or random string) if the server is reachable from the internet`);
@@ -121,23 +132,36 @@ function createAccess({ key = '', logToken = false, logger = log, now = Date.now
   // reports it ('trust proxy' in server.js). Without a proxy a client can write
   // that header itself and spread its tries over made-up addresses, which the
   // overall limit catches.
-  const lockedOut = (req) => {
-    const t = now();
-    return (failures.get(req.ip)?.until ?? 0) > t || everyone.until > t;
-  };
+  //
+  // Each lockout of the same address lasts twice the one before (15 min, 30,
+  // 1 h … up to a day), so guessing slows to a few dozen tries a day; the
+  // strikes are forgotten after a day without a lockout. The everyone-lockout
+  // doesn't grow — it would keep the owner from signing in too.
+  const lockedUntil = (req) => Math.max(failures.get(req.ip)?.until ?? 0, everyone.until);
+  const lockedOut = (req) => lockedUntil(req) > now();
   function count(entry, limit, who) {
     const t = now();
     if (t - entry.since > FAIL_WINDOW_MS) { entry.count = 0; entry.since = t; }
     if (++entry.count >= limit) {
-      entry.until = t + LOCKOUT_MS;
+      if (!entry.global && t - (entry.lastLock ?? 0) > STRIKES_FORGOTTEN_MS) entry.strikes = 0;
+      const ms = entry.global ? LOCKOUT_MS : Math.min(LOCKOUT_MS * 2 ** (entry.strikes ?? 0), MAX_LOCKOUT_MS);
+      entry.until = t + ms;
+      entry.lastLock = entry.until;
+      if (!entry.global) entry.strikes = (entry.strikes ?? 0) + 1;
       entry.count = 0;
-      logger.warn(TAG, `${who}: ${limit} wrong access keys in 15 minutes — sign-in with the key refused for 15 minutes`);
+      logger.warn(TAG, `${who}: ${limit} wrong access keys in 15 minutes — sign-in with the key refused for ${describeWait(ms)}`);
     }
+  }
+  // Tries left from this address before a lockout (for the sign-in page).
+  function triesLeft(req) {
+    const f = failures.get(req.ip);
+    if (!f || now() - f.since > FAIL_WINDOW_MS) return FAIL_LIMIT;
+    return Math.max(0, FAIL_LIMIT - f.count);
   }
   function recordFailure(req) {
     let f = failures.get(req.ip);
     if (!f) {
-      f = { count: 0, since: now(), until: 0 };
+      f = { count: 0, since: now(), until: 0, strikes: 0, lastLock: 0 };
       failures.set(req.ip, f);
       if (failures.size > 10_000) failures.delete(failures.keys().next().value);
     }
@@ -159,13 +183,19 @@ function createAccess({ key = '', logToken = false, logger = log, now = Date.now
   }
 
   function deny(req, res, status, message) {
-    const p = normalPath(req.path);
+    // The full path: inside a router (POST /api/access/login) req.path is only
+    // the part after where it is mounted.
+    const p = normalPath((req.baseUrl || '') + req.path);
     if (p.startsWith('/api/') || p === '/player_api.php') {
       return res.status(status).json({ error: message, accessRequired: status === 401 });
     }
     return res.status(status).type('text/plain').send(message);
   }
-  const tooMany = (req, res) => deny(req, res, 429, 'Too many wrong access keys — try again in 15 minutes.');
+  const tooMany = (req, res) => {
+    const wait = Math.max(0, lockedUntil(req) - now());
+    res.set('Retry-After', String(Math.ceil(wait / 1000)));
+    return deny(req, res, 429, `Too many wrong access keys — try again in ${describeWait(wait)}.`);
+  };
 
   // Takes /k/<token> off the path and remembers what it granted. Runs before
   // routing; the request log runs before it and hides the token.
@@ -246,7 +276,16 @@ function createAccess({ key = '', logToken = false, logger = log, now = Date.now
       if (grant === 'locked') return tooMany(req, res);
       if (grant !== 'full') {
         logger.warn(TAG, `${req.ip}: web sign-in with a wrong access key`);
-        return res.status(401).json({ error: 'Wrong access key.' });
+        // Answered after a pause, which slows a script down and a person not at all.
+        const left = triesLeft(req);
+        const answer = () => {
+          if (lockedOut(req)) return tooMany(req, res);   // that was the last try
+          res.status(401).json({
+            error: left <= 3 ? `Wrong access key — ${left} ${left === 1 ? 'try' : 'tries'} left before sign-in is locked.` : 'Wrong access key.',
+            triesLeft: left,
+          });
+        };
+        return wrongKeyDelayMs > 0 ? setTimeout(answer, wrongKeyDelayMs) : answer();
       }
       setCookie(req, res, sessionToken, COOKIE_MAX_AGE_S);
       logger.info(TAG, `${req.ip}: signed in to the web UI`);

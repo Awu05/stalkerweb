@@ -482,7 +482,7 @@ export default function SetupPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { connected, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer } = useApp()
+  const { connected, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer, connection, refreshConnection } = useApp()
 
   // ── Profiles ────────────────────────────────────────────────────────────────
   const [profiles, setProfiles]     = useState([])
@@ -675,6 +675,7 @@ export default function SetupPage() {
     try {
       await connect(profile)
       setConnected(true)
+      refreshConnection?.()   // another connection while already connected: the name changes too
       setConnectedPortal({ portal: profile.portal, mac: profile.mac })
 
       // Discard any channel list / favorites cached from a previously
@@ -921,9 +922,15 @@ export default function SetupPage() {
       <div className="max-w-4xl mx-auto px-4 sm:px-8 pt-6 sm:pt-8 pb-10 flex flex-col gap-6">
 
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[var(--color-text)]">Settings</h1>
             <p className="text-sm text-[var(--color-muted)] mt-1">Viewers, IPTV connections, links and app preferences.</p>
+            {connected && connection && (
+              <p className="flex items-center gap-2 text-sm text-[var(--color-muted)] mt-2" title={connection.host}>
+                <span className="inline-block h-2 w-2 rounded-full shrink-0 bg-[var(--color-success)]" />
+                <span className="truncate">Connected to <span className="font-medium text-[var(--color-text)]">{connection.name}</span>{connection.name !== connection.host && <> · {connection.host}</>}</span>
+              </p>
+            )}
           </div>
           {connected && (
             <button
