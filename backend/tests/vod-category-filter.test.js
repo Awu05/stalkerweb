@@ -42,9 +42,10 @@ describe('GET /api/vod/categories', () => {
   })
   afterAll(() => server.close())
 
-  it("leaves out the viewer's hidden categories", async () => {
+  it("leaves out the viewer's hidden categories, with an All of only the ones shown", async () => {
     const { categories } = await (await fetch(base)).json()
-    expect(categories.map((c) => c.id)).toEqual(['1', '3'])
+    // The portal's own "All" would bring the hidden ones back; StalkerWeb's is of the rest.
+    expect(categories.map((c) => c.id)).toEqual(['movies:all', '1', '3'])
   })
 
   it('lists every category with ?all=1, for the Settings list', async () => {

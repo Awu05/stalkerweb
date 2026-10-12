@@ -11,13 +11,15 @@
 const express = require('express');
 const router  = express.Router();
 const sessionMiddleware = require('../middleware/session');
-const { visibleVodCategories } = require('../lib/vodCategoryFilter');
+const { visibleVodCategories, isAllCategory } = require('../lib/vodCategoryFilter');
 const { vodLayout } = require('../lib/seriesCategories');
 const { refuseIfGone } = require('./viewers');
 const { isAdult } = require('../lib/exportFilter');
 
-// The Series "All" added on portals without a series section (see below).
-const SERIES_ALL = 'series:all';
+// The "All" StalkerWeb adds to Movies or Series when the portal's own can't
+// be shown (see tabCategories below), by tab.
+const COMBINED_ALL = { vod: 'movies:all', series: 'series:all' };
+const tabOfCombined = (id) => Object.keys(COMBINED_ALL).find((tab) => COMBINED_ALL[tab] === id) ?? null;
 
 const log = require('../logger');
 const TAG = 'vod';
@@ -41,13 +43,11 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       const own = await vodManager.getCategories(type).catch((e) => { if (type === 'series') return []; throw e; });
       return res.json({ categories: own });
     }
-    const layout = await vodLayout(vodManager);
-    if (type === 'series') return res.json({ categories: await seriesCategories(layout) });
-    res.json({ categories: visible(layout.movies) });
+    res.json({ categories: tabCategories(type, await vodLayout(vodManager)) });
   });
 
   // The viewer's categories: hidden ones left out, and adult ones unless the
-  // viewer may see them — here, so Series "All" never takes an adult one in.
+  // viewer may see them — here, so an added "All" never takes an adult one in.
   const visible = (categories) => {
     const shown = visibleVodCategories(categories, {
       hiddenCategories: appState.getHiddenVodCategories?.() ?? new Set(),
@@ -56,29 +56,34 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     return appState.getShowAdult?.() === true ? shown : shown.filter((c) => !isAdult(c.title));
   };
 
-  // The Series categories. When they were picked out of the movie section by
-  // name (lib/seriesCategories.js) the portal has no "All" of its own for them,
-  // so one is added: every show of those categories, put together
-  // (SERIES_ALL in /listing).
-  async function seriesCategories(layout) {
-    const list = visible(layout.series);
-    return layout.byName && list.length > 1 ? [{ id: SERIES_ALL, title: 'All' }, ...list] : list;
+  // A tab's categories (Movies 'vod' or 'series'). When the portal's own "All"
+  // can't be shown — the viewer hides some categories (its titles carry no
+  // category, so it would bring them back), or the shows were picked out of
+  // the movie section by name (lib/seriesCategories.js), which has none for
+  // them — an "All" is added: every title of the viewer's categories, put
+  // together (COMBINED_ALL; read in /listing and /items).
+  function tabCategories(tab, layout) {
+    const list = visible(tab === 'series' ? layout.series : layout.movies);
+    return !list.some(isAllCategory) && list.length > 1 ? [{ id: COMBINED_ALL[tab], title: 'All' }, ...list] : list;
+  }
+  async function combinedIds(tab) {
+    return tabCategories(tab, await vodLayout(appState.vodManager)).map((c) => c.id).filter((id) => !tabOfCombined(id));
   }
 
-  // The Series "All" above: each of the viewer's series categories read in
-  // turn (the paced, cached getAllItems), every show listed once, in the order
-  // read — append-only, so clients can ask for what's new from `from` on.
+  // That "All": each of the viewer's categories of the tab read in turn (the
+  // paced, cached getAllItems), every title listed once, in the order read —
+  // append-only, so clients can ask for what's new from `from` on.
   // Kept an hour, like the listings it's made of — or a couple of minutes when
   // a category couldn't be read, so a retry soon gets another go. Keyed by
   // portal: another connection's categories can have the same ids.
-  const SERIES_ALL_TTL_MS = 60 * 60 * 1000;
-  const SERIES_ALL_PARTIAL_TTL_MS = 2 * 60 * 1000;
+  const COMBINED_TTL_MS = 60 * 60 * 1000;
+  const COMBINED_PARTIAL_TTL_MS = 2 * 60 * 1000;
   const combined = new Map();   // `${portal}|${type}|${ids}` → { done, seen, current, complete, partial, at }
   function combinedListing(type, ids) {
     const vm = appState.vodManager;
     const key = `${appState.client?.getBasePath?.() ?? ''}|${type}|${ids.join(',')}`;
     const old = combined.get(key);
-    const ttl = old?.partial ? SERIES_ALL_PARTIAL_TTL_MS : SERIES_ALL_TTL_MS;
+    const ttl = old?.partial ? COMBINED_PARTIAL_TTL_MS : COMBINED_TTL_MS;
     if (old && (!old.complete || Date.now() - old.at < ttl)) return old;
     const c = { done: [], seen: new Set(), current: null, complete: false, partial: false, at: Date.now() };
     combined.set(key, c);
@@ -112,7 +117,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
 
     if (!category) return res.status(400).json({ error: 'category is required' });
 
-    if (category === SERIES_ALL) return res.json(await seriesAllPage(type, req.query));
+    if (tabOfCombined(category)) return res.json(await combinedPage(tabOfCombined(category), type, req.query));
 
     const result = await vodManager.getItems({
       type,
@@ -133,24 +138,23 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     res.json(result);
   });
 
-  // A page of Series "All" for clients that page through /items (the Android
-  // app): what the combined listing has read so far, searched and sorted here.
-  // While it's still being read, one more page is promised, so a client asks
-  // again.
-  const SERIES_ALL_PAGE = 42;
-  async function seriesAllPage(type, { search = '', page = '1', sort } = {}) {
+  // A page of an added "All" for clients that page through /items (the
+  // Android app): what the combined listing has read so far, searched and
+  // sorted here. While it's still being read, one more page is promised, so a
+  // client asks again.
+  const COMBINED_PAGE = 42;
+  async function combinedPage(tab, type, { search = '', page = '1', sort } = {}) {
     const { vodManager } = appState;
-    const ids = (await seriesCategories(await vodLayout(vodManager))).map((c) => c.id).filter((id) => id !== SERIES_ALL);
-    const c = combinedListing(type, ids);
+    const c = combinedListing(type, await combinedIds(tab));
     let items = c.done.slice();
     const q = String(search).trim().toLowerCase();
     if (q) items = items.filter((i) => (i.name ?? '').toLowerCase().includes(q));
     if (sort === 'name') items.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' }));
     const n = Math.max(1, parseInt(page, 10) || 1);
-    const totalPages = Math.max(1, Math.ceil(items.length / SERIES_ALL_PAGE)) + (c.complete ? 0 : 1);
+    const totalPages = Math.max(1, Math.ceil(items.length / COMBINED_PAGE)) + (c.complete ? 0 : 1);
     appState.touchActivity?.();
     return {
-      items: items.slice((n - 1) * SERIES_ALL_PAGE, n * SERIES_ALL_PAGE).map((item) => ({
+      items: items.slice((n - 1) * COMBINED_PAGE, n * COMBINED_PAGE).map((item) => ({
         ...item,
         screenshotUrl: item.screenshotUri ? vodManager.resolveScreenshot(item.screenshotUri) : null,
       })),
@@ -185,9 +189,8 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       screenshotUrl: item.screenshotUri ? vodManager.resolveScreenshot(item.screenshotUri) : null,
     }));
 
-    if (category === SERIES_ALL) {
-      const ids = (await seriesCategories(await vodLayout(vodManager))).map((c) => c.id).filter((id) => id !== SERIES_ALL);
-      const c = combinedListing(type, ids);
+    if (tabOfCombined(category)) {
+      const c = combinedListing(type, await combinedIds(tabOfCombined(category)));
       // What's read so far: the categories done, then the one being read.
       const reading = c.current ? (vodManager.listingProgress(type, c.current)?.items ?? []).filter((i) => !c.seen.has(i.id)) : [];
       const items = [...c.done, ...reading];
