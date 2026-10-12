@@ -16,6 +16,7 @@ import com.stalkerweb.android.data.repo.ViewerRepository
 import com.stalkerweb.android.data.repo.filterChannels
 import com.stalkerweb.android.data.repo.flakyCount
 import com.stalkerweb.android.data.repo.moveItem
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -72,6 +73,9 @@ class ChannelViewModel(
     /** Short messages for a toast (a save that failed). */
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
+    private var loadJob: Job? = null
+    private var favoritesJob: Job? = null
+
     init {
         if (server.getServerUrl() != null) load()
         // Another viewer: their favorites and filters — read the lists again.
@@ -81,6 +85,8 @@ class ChannelViewModel(
     /** @param reset clears what's shown first (another server or viewer). */
     fun load(reset: Boolean = false) {
         if (reset) {
+            // The last viewer's (or server's) answers still on the way mustn't land on this one.
+            loadJob?.cancel(); favoritesJob?.cancel()
             _state.value = _state.value.copy(
                 channels = emptyList(), logoMap = emptyMap(), groups = emptyList(), favoriteIds = emptySet(),
                 favoriteChannels = emptyList(), favoriteGroups = emptyList(), nowNext = emptyMap(), selectedGroupId = null,
@@ -95,7 +101,7 @@ class ChannelViewModel(
             channels = _state.value.channels.ifEmpty { cached },
             logoMap = _state.value.logoMap.ifEmpty { cachedLogos },
         )
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             runCatching {
                 // coroutineScope: a failing async is rethrown here, where runCatching catches it
                 // (a portal-not-connected 503 becomes the banner, not a crash).
@@ -108,6 +114,7 @@ class ChannelViewModel(
             }.onSuccess { (channels, logos, groups) ->
                 _state.value = _state.value.copy(channels = channels, logoMap = logos, groups = groups, loading = false)
             }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 val notConnected = e is HttpException && e.code() == 503
                 _state.value = _state.value.copy(
                     loading = false, portalNotConnected = notConnected,
@@ -120,8 +127,10 @@ class ChannelViewModel(
         refreshHealth()
     }
 
+    /** The viewer's favorites from the server; only the latest read counts. */
     fun loadFavorites() {
-        viewModelScope.launch {
+        favoritesJob?.cancel()
+        favoritesJob = viewModelScope.launch {
             runCatching { live.getFavorites() }.onSuccess { f ->
                 _state.value = _state.value.copy(
                     favoriteChannels = f.channels.distinctBy { it.uniqueId },
@@ -165,13 +174,14 @@ class ChannelViewModel(
     fun toggleFavorite(channel: Channel) {
         val id = channel.uniqueId
         val isFav = id in _state.value.favoriteIds
+        val before = _state.value
         // At once: the heart, and the Favorites section.
         _state.value = _state.value.copy(
             favoriteIds = if (isFav) _state.value.favoriteIds - id else _state.value.favoriteIds + id,
             favoriteChannels = if (isFav) _state.value.favoriteChannels.filter { it.uniqueId != id }
                                else _state.value.favoriteChannels + channel,
         )
-        save { if (isFav) live.removeFavorite(id) else live.addFavorite(id) }
+        save(before = before) { if (isFav) live.removeFavorite(id) else live.addFavorite(id) }
     }
 
     /** A favorite moved one place left or right (the remote can't drag). */
@@ -179,34 +189,42 @@ class ChannelViewModel(
         val list = _state.value.favoriteChannels
         val moved = moveItem(list, list.indexOfFirst { it.uniqueId == channel.uniqueId }, delta)
         if (moved == list) return
+        val before = _state.value
         _state.value = _state.value.copy(favoriteChannels = moved)
-        save(reload = false) { live.reorderFavorites(moved.map { it.uniqueId }) }
+        save(reload = false, before = before) { live.reorderFavorites(moved.map { it.uniqueId }) }
     }
 
     fun moveGroup(group: FavoriteGroup, delta: Int) {
         val list = _state.value.favoriteGroups
         val moved = moveItem(list, list.indexOfFirst { it.id == group.id }, delta)
         if (moved == list) return
+        val before = _state.value
         _state.value = _state.value.copy(favoriteGroups = moved)
-        save(reload = false) { live.reorderGroups(moved.map { it.id }) }
+        save(reload = false, before = before) { live.reorderGroups(moved.map { it.id }) }
     }
 
     fun createGroup(name: String) { if (name.isNotBlank()) save { live.createGroup(name) } }
     fun renameGroup(group: FavoriteGroup, name: String) { if (name.isNotBlank()) save { live.renameGroup(group.id, name) } }
     fun deleteGroup(group: FavoriteGroup) {
+        val before = _state.value
         _state.value = _state.value.copy(favoriteGroups = _state.value.favoriteGroups.filter { it.id != group.id })
-        save { live.deleteGroup(group.id) }
+        save(before = before) { live.deleteGroup(group.id) }
     }
     fun addToGroup(group: FavoriteGroup, channel: Channel) = save { live.addToGroup(group.id, channel.uniqueId) }
     fun removeFromGroup(group: FavoriteGroup, channel: Channel) = save { live.removeFromGroup(group.id, channel.uniqueId) }
 
-    // A favorites change on the server; on failure say so and read the truth back.
-    private fun save(reload: Boolean = true, call: suspend () -> Unit) {
+    // A favorites change on the server. On failure: say so, put back what was
+    // shown before the change ([before] — the reload may fail too, offline),
+    // and read the truth back.
+    private fun save(reload: Boolean = true, before: ChannelUiState? = null, call: suspend () -> Unit) {
         viewModelScope.launch {
             runCatching { call() }
                 .onSuccess { if (reload) loadFavorites() }
                 .onFailure {
                     _messages.tryEmit("Couldn't save — try again")
+                    before?.let {
+                        _state.value = _state.value.copy(favoriteIds = it.favoriteIds, favoriteChannels = it.favoriteChannels, favoriteGroups = it.favoriteGroups)
+                    }
                     loadFavorites()
                 }
         }

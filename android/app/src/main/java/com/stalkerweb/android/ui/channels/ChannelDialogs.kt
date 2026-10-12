@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -53,6 +54,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,7 +73,7 @@ import kotlinx.coroutines.launch
 /** "Jump to channel 101" — the digits typed on the remote. */
 @Composable
 fun NumberJumpOverlay(digits: String) {
-    Box(Modifier.fillMaxWidth().padding(bottom = 48.dp), contentAlignment = Alignment.BottomCenter) {
+    Box(Modifier.fillMaxSize().padding(bottom = 48.dp), contentAlignment = Alignment.BottomCenter) {
         Surface(color = SwColors.Bg.copy(alpha = 0.9f), shape = RoundedCornerShape(12.dp)) {
             Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Jump to channel", style = MaterialTheme.typography.labelSmall, color = SwColors.Muted)
@@ -97,11 +103,18 @@ fun ChannelActionsDialog(
 ) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+    // The OK held to open this menu is still down: its repeats and release mustn't
+    // press the focused row. Only a fresh press (repeatCount 0) counts.
+    var armed by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(channel.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
-            Column {
+            Column(Modifier.onPreviewKeyEvent { e ->
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                if (!ok || armed) return@onPreviewKeyEvent false
+                if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) { armed = true; false } else true
+            }) {
                 ActionRow(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     if (isFavorite) "Remove from favorites" else "Add to favorites", first) { onToggleFavorite(); onDismiss() }
                 if (hasGroups) ActionRow(Icons.Default.Layers, "Add to group…") { onAddToGroup(); onDismiss() }

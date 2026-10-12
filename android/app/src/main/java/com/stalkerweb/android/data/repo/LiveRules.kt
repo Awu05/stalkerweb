@@ -22,7 +22,8 @@ fun flakyCount(channels: List<Channel>, health: Map<String, ChannelHealth>): Int
 
 /** The channel whose number was typed on the remote, or null. */
 fun jumpTarget(channels: List<Channel>, digits: String): Channel? {
-    val n = digits.toIntOrNull() ?: return null
+    // 0 is "no number": typing it must not open the first channel without one.
+    val n = digits.toIntOrNull()?.takeIf { it > 0 } ?: return null
     return channels.firstOrNull { it.number == n }
 }
 

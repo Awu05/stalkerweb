@@ -1,6 +1,14 @@
 package com.stalkerweb.android.ui.channels
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,6 +108,17 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
     var genresExpanded by remember { mutableStateOf(false) }
     var searchFocused by remember { mutableStateOf(false) }
     var digits by remember { mutableStateOf("") }
+    // On TV: start on the first favorite (Favorites open) or the first channel, once.
+    val firstTile = remember { FocusRequester() }
+    var focusedOnce by rememberSaveable { mutableStateOf(false) }
+    val focusFavorite = state.browsing && state.favoritesOpen && state.favoriteChannels.isNotEmpty()
+    LaunchedEffect(isTV, state.loading, displayed.isNotEmpty(), focusFavorite) {
+        if (isTV && !focusedOnce && !state.loading && (displayed.isNotEmpty() || focusFavorite)) {
+            if (runCatching { firstTile.requestFocus() }.isSuccess) focusedOnce = true
+        }
+    }
+    // Back (or Escape) cancels a channel number being typed.
+    BackHandler(enabled = digits.isNotEmpty()) { digits = "" }
 
     // Toasts for failed saves.
     LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
@@ -107,6 +126,11 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // Back from the player (same Activity, so no onResume): what was watched and
+            // favorited there, and health now rather than a minute later.
+            viewModel.refreshHistory()
+            viewModel.loadFavorites()
+            viewModel.refreshHealth()
             launch { while (true) { delay(5 * 60_000L); viewModel.refreshNowNext() } }
             while (true) { delay(60_000L); viewModel.refreshHealth() }
         }
@@ -122,6 +146,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
     Column(
         Modifier.fillMaxSize().onPreviewKeyEvent { e ->
             if (e.type != KeyEventType.KeyDown || searchFocused) return@onPreviewKeyEvent false
+            if (digits.isNotEmpty() && e.key == Key.Escape) { digits = ""; return@onPreviewKeyEvent true }
             val c = e.utf16CodePoint.toChar()
             if (c.isDigit()) { digits = (digits + c).takeLast(4); true } else false
         },
@@ -152,7 +177,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
                     state.groups.forEach { g -> Pill(g.name, state.selectedGroupId == g.id, { viewModel.setSelectedGroup(g.id) }) }
                 }
                 if (genresExpanded || state.groups.size <= GENRE_COLLAPSE_THRESHOLD) {
-                    FlowRow(Modifier.weight(1f).heightIn(max = 240.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { pills() }
+                    FlowRow(Modifier.weight(1f).heightIn(max = 240.dp).verticalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { pills() }
                 } else {
                     LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item { Pill("All", state.selectedGroupId == null, { viewModel.setSelectedGroup(null) }) }
@@ -173,8 +198,9 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
             }
         }
 
-        val tile: @Composable (Channel, Boolean) -> Unit = { ch, inFavorites ->
+        val tile: @Composable (Channel, Boolean, Boolean) -> Unit = { ch, inFavorites, first ->
             ChannelTile(
+                modifier = if (first) Modifier.focusRequester(firstTile) else Modifier,
                 channel = ch, logoUrl = state.logoMap[ch.uniqueId], isFavorite = ch.uniqueId in state.favoriteIds,
                 nowNext = state.nowNext[ch.uniqueId], errors = state.health[ch.uniqueId]?.errors ?: 0,
                 onClick = { onSelectChannel(ch) },
@@ -199,7 +225,9 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
                     if (state.favoriteChannels.isEmpty() && state.favoriteGroups.isEmpty()) {
                         full { Text("No favorites yet — long-press a channel (or hold OK) to add it.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }
                     }
-                    items(state.favoriteChannels, key = { "fav-" + it.uniqueId }) { ch -> tile(byId[ch.uniqueId] ?: ch, true) }
+                    items(state.favoriteChannels, key = { "fav-" + it.uniqueId }) { ch ->
+                        tile(byId[ch.uniqueId] ?: ch, true, focusFavorite && ch.uniqueId == state.favoriteChannels.first().uniqueId)
+                    }
                     full { GroupsSection(state.favoriteGroups, state.logoMap, byId, onSelectChannel, onNew = { newGroup = true }, onEdit = { editGroup = it },
                         onDelete = viewModel::deleteGroup, onMove = viewModel::moveGroup) }
                 }
@@ -238,7 +266,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
                     EmptyState(Icons.Default.Router, "No portal connected", "Connect a portal to load channels.") { Button(onClick = onOpenPortal) { Text("Connect Portal") } }
                 }
                 displayed.isEmpty() -> full { EmptyState(Icons.Default.Search, "No channels found.") }
-                else -> items(displayed, key = { it.uniqueId }) { ch -> tile(ch, false) }
+                else -> items(displayed, key = { it.uniqueId }) { ch -> tile(ch, false, !focusFavorite && ch.uniqueId == displayed.first().uniqueId) }
             }
         }
     }
