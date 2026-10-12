@@ -12,19 +12,18 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
         runCatching { apis.get().getVodCategories(type).categories }.getOrDefault(emptyList())
 
     suspend fun getVodItems(type: String, category: String, page: Int, search: String): VodItemsResponse {
-        links.ensureShareToken()
         val resp = apis.get().getVodItems(type, category, page, search)
-        return resp.copy(items = resp.items.map { it.copy(screenshotUrl = links.absolute(it.screenshotUrl)) })
+        return resp.copy(items = resp.items.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) })
     }
 
     suspend fun getVodSeasons(showId: String): List<VodSeason> =
         runCatching {
-            apis.get().getVodSeasons(showId).seasons.map { it.copy(screenshotUrl = links.absolute(it.screenshotUrl)) }
+            apis.get().getVodSeasons(showId).seasons.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) }
         }.getOrDefault(emptyList())
 
     suspend fun getVodEpisodes(showId: String, seasonId: String): List<VodEpisode> =
         runCatching {
-            apis.get().getVodEpisodes(showId, seasonId).episodes.map { it.copy(screenshotUrl = links.absolute(it.screenshotUrl)) }
+            apis.get().getVodEpisodes(showId, seasonId).episodes.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) }
         }.getOrDefault(emptyList())
 
     /** Resolves a VOD stream and returns the absolute, playable proxy URL. */

@@ -21,6 +21,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -126,7 +128,7 @@ class MainActivity : ComponentActivity() {
                 // screen for no reason.
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route && currentRoute != Screen.VodPlayer.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
-                val startDest     = if (container.server.getServerUrl() != null) Screen.Shell.route else Screen.Setup.route
+                val startDest     = if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -184,6 +186,7 @@ class MainActivity : ComponentActivity() {
                 val updateViewModel:  UpdateViewModel  = viewModel<UpdateViewModel>(factory = updateVmFactory)
                 val vodViewModel:     VodViewModel     = viewModel<VodViewModel>(factory = vodVmFactory)
 
+                val setupScope = rememberCoroutineScope()
                 fun toShell() = navController.navigate(Screen.Shell.route) { popUpTo(0) { inclusive = true } }
                 fun toPicker(required: Boolean) = navController.navigate(Screen.Viewers.go(required)) {
                     if (required) popUpTo(0) { inclusive = true }
@@ -191,7 +194,7 @@ class MainActivity : ComponentActivity() {
 
                 // Startup: who's watching first (as on the web), then whether a portal is connected.
                 LaunchedEffect(Unit) {
-                    if (container.server.getServerUrl() == null) return@LaunchedEffect
+                    if (container.server.getServerUrl() == null || container.guard.blocked) return@LaunchedEffect
                     if (container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
                     val status = runCatching { container.server.testConnection() }.getOrNull()
                     if (status?.connected == false) navController.navigate(Screen.Portal.route)
@@ -249,11 +252,14 @@ class MainActivity : ComponentActivity() {
                         val fromApp = navController.previousBackStackEntry != null
                         SetupScreen(
                             server       = container.server,
-                            startMessage = backStack.arguments?.getString("message"),
+                            startMessage = backStack.arguments?.getString("message")?.takeIf { it.isNotBlank() } ?: container.guard.message,
                             onConnected  = {
                                 channelViewModel.load(reset = true)
-                                // A new server or key forgot the viewer (ServerRepository.setServerUrl): ask again.
-                                if (container.viewers.savedViewerId() == null) toPicker(required = true) else toShell()
+                                // A new server or key forgot the viewer (ServerRepository.setServerUrl):
+                                // ask again — unless the server has no viewers to ask about (an older one).
+                                setupScope.launch {
+                                    if (container.viewers.startupChoice().needsPicker) toPicker(required = true) else toShell()
+                                }
                             },
                             onBack = if (fromApp) ({ navController.popBackStack() }) else null,
                         )

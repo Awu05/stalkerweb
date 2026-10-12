@@ -7,6 +7,10 @@ import com.stalkerweb.android.data.api.NowNextEntry
 import com.stalkerweb.android.data.prefs.AppPrefs
 import com.stalkerweb.android.data.prefs.WatchedChannel
 
+/** [read] when the cache holds [current]'s list, else nothing: lists are filtered per viewer. */
+fun <T> cachedFor(current: String?, cachedBy: String?, read: () -> List<T>): List<T> =
+    if (current == cachedBy) read() else emptyList()
+
 /** A resolved live stream: its absolute URL and the engine hint for the player. */
 data class StreamInfo(val url: String, val type: String)
 
@@ -30,12 +34,15 @@ class LiveRepository(
         // the on-disk cache doesn't store it. One-shot; see AppPrefs.
         prefs.migrateLegacyChannelIds(channels)
         prefs.cacheChannels(channels)
+        prefs.channelsCacheViewer = prefs.viewerId
         return channels
     }
 
     /** Last-known channel list from disk — lets the UI render instantly on cold
-     *  start while the network refresh runs in the background. */
-    fun getCachedChannels(): List<Channel> = prefs.getCachedChannels()
+     *  start while the network refresh runs in the background. Only the current
+     *  viewer's: another viewer's list may show channels this one hides. */
+    fun getCachedChannels(): List<Channel> =
+        cachedFor(prefs.viewerId, prefs.channelsCacheViewer) { prefs.getCachedChannels() }
 
     /** Last-known logo map from disk (already absolute URLs). */
     fun getCachedLogoMap(): Map<String, String> = prefs.getCachedLogoMap()
@@ -53,8 +60,7 @@ class LiveRepository(
     // needs an absolute URL. Prefix them with the server base.
     suspend fun getLogoMap(): Map<String, String> =
         runCatching {
-            links.ensureShareToken()
-            val base = links.base()
+            val base = links.imageBase()
             apis.get().getLogoMap().mapValues { (_, url) ->
                 if (url.startsWith("http", ignoreCase = true)) url else "$base$url"
             }.also { prefs.cacheLogoMap(it) }

@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.AccessGuard
 import com.stalkerweb.android.data.api.PortalActionResponse
 import com.stalkerweb.android.data.api.PortalConfigResponse
 import com.stalkerweb.android.data.api.PortalConnectRequest
@@ -12,25 +13,28 @@ import com.stalkerweb.android.data.api.StatusResponse
 import com.stalkerweb.android.data.prefs.AppPrefs
 
 /** The StalkerWeb server itself: address, access key, status, IPTV connections, settings. */
-class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvider) {
+class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvider, private val guard: AccessGuard) {
 
     fun getServerUrl(): String? = prefs.serverUrl
     fun getAccessKey(): String? = prefs.accessKey
 
     /**
-     * Saves the address and key and rebuilds the client. A different server or
-     * key forgets this device's viewer (the picker asks again) and the cached
-     * channel list (so the old server's channels don't flash).
+     * Saves the address and key (Setup tested them first) and rebuilds the
+     * client; a key refused before may be tried again. A different server or key
+     * forgets this device's viewer (the picker asks again), the cached channels
+     * and logos (so the old server's don't flash), and the playback token with
+     * the links that carry it — sent with a new key they'd count as wrong keys.
      */
     fun setServerUrl(url: String, accessKey: String? = null) {
         val normalized = url.trimEnd('/')
         val key = accessKey?.trim()?.ifEmpty { null }
-        val serverChanged = normalized != prefs.serverUrl
-        if (serverChanged) prefs.clearChannelCache()
-        if (serverChanged || key != prefs.accessKey) {
+        if (normalized != prefs.serverUrl || key != prefs.accessKey) {
+            prefs.clearChannelCache()
+            prefs.clearWatchedLogos()
             prefs.shareToken = null
             prefs.viewerId = null
         }
+        guard.reset()
         prefs.serverUrl = normalized
         prefs.accessKey = key
         apis.rebuild()

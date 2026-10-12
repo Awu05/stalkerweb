@@ -98,6 +98,6 @@ interface StalkerApi {
     companion object {
         /** A client for [baseUrl] with a fixed [accessKey] and no viewer — for testing a server in Setup. */
         fun create(baseUrl: String, accessKey: String? = null): StalkerApi =
-            ApiClient.create(baseUrl, { accessKey }, { null }, events = null)
+            ApiClient.create(baseUrl, ApiClient.httpClient({ baseUrl }, { accessKey }, { null }, guard = null, events = null))
     }
 }

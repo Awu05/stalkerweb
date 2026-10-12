@@ -2,7 +2,9 @@ package com.stalkerweb.android.data.api
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -15,27 +17,54 @@ fun requestHeaders(accessKey: String?, viewerId: String?): Map<String, String> =
 }
 
 object ApiClient {
+    private val CHECKED_CODES = setOf(401, 403, 409, 429)
+
     /**
-     * [accessKey] and [viewerId] are read on every request, so a viewer switch
-     * applies to the next one without rebuilding the client. [events], when
-     * given, hears about access-key and deleted-viewer answers (AppEvent).
+     * The one HTTP client for the server: the API and images (Coil) alike. To
+     * the server itself ([serverUrl]) it adds the access key and the viewer —
+     * read on every request, so a viewer switch applies to the next one — and
+     * passes answers through [guard], which reports access and deleted-viewer
+     * problems on [events]. Other hosts (channel logos on the internet) get
+     * none of that.
      */
-    fun create(baseUrl: String, accessKey: () -> String?, viewerId: () -> String?, events: AppEvents?): StalkerApi {
-        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val client = OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
-                requestHeaders(accessKey(), viewerId()).forEach { (k, v) -> builder.header(k, v) }
-                val response = chain.proceed(builder.build())
-                if (events != null && response.code in setOf(401, 409, 429)) {
-                    appEventFor(response.code, response.peekBody(64 * 1024).string())?.let(events::emit)
+    fun httpClient(
+        serverUrl: () -> String?,
+        accessKey: () -> String?,
+        viewerId: () -> String?,
+        guard: AccessGuard?,
+        events: AppEvents?,
+    ): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(Interceptor { chain ->
+            val request = chain.request()
+            if (!sameServer(request.url, serverUrl())) return@Interceptor chain.proceed(request)
+            if (guard?.blocked == true) return@Interceptor refusedResponse(request, guard.message)
+            val builder = request.newBuilder()
+            requestHeaders(accessKey(), viewerId()).forEach { (k, v) -> builder.header(k, v) }
+            val send = {
+                val response: Response = chain.proceed(builder.build())
+                if (guard != null) {
+                    val body = if (response.code in CHECKED_CODES) response.peekBody(64 * 1024).string() else null
+                    guard.onResponse(response.code, body)?.let { events?.emit(it) }
                 }
                 response
             }
-            .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .build()
+            // Until the key is known to be good, one request at a time: a burst
+            // with a changed key would otherwise spend the whole lockout allowance.
+            if (guard != null && !guard.verified) {
+                synchronized(guard.lock) {
+                    if (guard.blocked) refusedResponse(request, guard.message) else send()
+                }
+            } else {
+                send()
+            }
+        })
+        .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    fun create(baseUrl: String, client: OkHttpClient): StalkerApi {
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         return Retrofit.Builder()
             .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")
             .client(client)

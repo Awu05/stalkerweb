@@ -119,7 +119,11 @@ fun ViewerPickerScreen(
             Text("Who's watching?", style = MaterialTheme.typography.headlineMedium, color = SwColors.Text)
             when {
                 loadError != null -> EmptyState(Icons.Default.ErrorOutline, "Couldn't load viewers", loadError) {
-                    OutlinedButton(onClick = ::load) { Text("Retry") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = ::load) { Text("Retry") }
+                        // An older server has no viewers: go on as its default one.
+                        if (required) Button(onClick = onChosen) { Text("Continue") }
+                    }
                 }
                 list == null -> CircularProgressIndicator(color = SwColors.Primary)
                 else -> LazyVerticalGrid(
