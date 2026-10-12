@@ -22,7 +22,32 @@ data class VodFilterState(
     val isActive: Boolean get() = genre.isNotEmpty() || year.isNotEmpty() || minRating > 0 || addedDays > 0 || hd || unwatched
 }
 
-data class FilterOptions(val genres: List<String>, val years: List<String>, val hasRating: Boolean, val hasHD: Boolean)
+data class FilterOptions(
+    val genres: List<String>,
+    val years: List<String>,
+    val hasRating: Boolean,
+    val hasHD: Boolean,
+    val hasAdded: Boolean = false,   // some titles carry a date added
+) {
+    /**
+     * Also offers the filters that are on, with their choice — while a listing is
+     * still being read, or in a category without that value, a filter in use
+     * mustn't vanish from the bar (only "Clear" could turn it off then).
+     */
+    fun withChosen(f: VodFilterState) = copy(
+        genres = if (f.genre.isNotEmpty() && f.genre !in genres) genres + f.genre else genres,
+        years = if (f.year.isNotEmpty() && f.year !in years) years + f.year else years,
+        hasRating = hasRating || f.minRating > 0,
+        hasHD = hasHD || f.hd,
+        hasAdded = hasAdded || f.addedDays > 0,
+    )
+}
+
+/** Titles shown a step at a time while filtering (as the web's VOD page). */
+const val SHOW_STEP = 140
+
+/** How many to show after "more": another step, unless all [total] are shown already. */
+fun nextVisibleCount(current: Int, total: Int): Int = if (current < total) current + SHOW_STEP else current
 
 private fun yearOf(year: String): Int? = Regex("""^\s*(\d+)""").find(year)?.groupValues?.get(1)?.toIntOrNull()
 
@@ -101,18 +126,20 @@ private fun decadeRank(d: String) = if (d == "Older") -1 else d.dropLast(1).toIn
 
 /** What the titles offer — a filter with nothing to pick isn't shown. */
 fun filterOptions(items: List<VodItem>): FilterOptions {
-    val genres = sortedSetOf<String>(collator)
+    val genres = linkedSetOf<String>()   // as spelled: the filter matches genres exactly
     val years = mutableSetOf<Int>()
     val decades = mutableSetOf<String>()
     var hasRating = false
     var hasHD = false
+    var hasAdded = false
     for (item in items) {
         genres.addAll(item.genres)
         decadeOf(item.year)?.let { d -> decades.add(d); yearOf(item.year)?.let(years::add) }
         if (item.rating > 0) hasRating = true
         if (item.isHD) hasHD = true
+        if (!hasAdded && parseAdded(item.added) != null) hasAdded = true
     }
     val yearChoices = if (years.size <= MAX_SINGLE_YEARS) years.sortedDescending().map { it.toString() }
                       else decades.sortedByDescending(::decadeRank)
-    return FilterOptions(genres.toList(), yearChoices, hasRating, hasHD)
+    return FilterOptions(genres.sortedWith(collator), yearChoices, hasRating, hasHD, hasAdded)
 }

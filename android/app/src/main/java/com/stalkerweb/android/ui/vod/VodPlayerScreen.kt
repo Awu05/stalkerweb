@@ -3,6 +3,7 @@ package com.stalkerweb.android.ui.vod
 import android.app.Activity
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -100,6 +101,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val inMyList = watchState.list.any { it.id == p.videoId }
 
     LaunchedEffect(Unit) { viewModel.init(params) }
+    // Back closes the episodes panel first (the remote's Back would otherwise leave the player).
+    BackHandler(enabled = panelOpen) { panelOpen = false }
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
@@ -125,7 +128,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
                     }
                 },
-                update = { it.player = player as Player? },
+                update = { it.player = player },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -137,6 +140,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Default.ErrorOutline, null, tint = SwColors.Live, modifier = Modifier.size(36.dp))
                 Text(msg, color = Color.White)
+                Button(onClick = viewModel::retry) { Text("Retry") }
             }
         }
 

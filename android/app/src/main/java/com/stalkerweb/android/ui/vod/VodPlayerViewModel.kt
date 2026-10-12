@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
@@ -81,17 +82,19 @@ class VodPlayerViewModel(
     private var saver: Job? = null
 
     // Which title the player's media (and so its duration and position) belongs
-    // to. Switching episode in place plays the old one until the new stream
-    // loads: resuming and saving wait for the new one (web v0.4.28).
-    private var streamKey: String? = null
+    // to — read from the media item itself (its mediaId is the title's key).
+    // Switching episode in place plays the old one until the new stream loads:
+    // a rebuffer or seek in that window reports the OLD media, so resuming and
+    // saving can't land on the new episode's key (web v0.4.28).
     private var mediaKey: String? = null
     private var resumedKey: String? = null
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val p = _player.value ?: return
-            if (playbackState == Player.STATE_READY && mediaKey != streamKey) {
-                mediaKey = streamKey
+            val id = p.currentMediaItem?.mediaId
+            if (playbackState == Player.STATE_READY && id != null && id != mediaKey) {
+                mediaKey = id
                 resume(p)
             }
             if (playbackState == Player.STATE_ENDED) {
@@ -102,6 +105,11 @@ class VodPlayerViewModel(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isPlaying) persist()
+        }
+
+        // A stream that fails after it was handed to the player (404, decoder): say so, with Retry.
+        override fun onPlayerError(error: PlaybackException) {
+            _state.value = _state.value.copy(loading = false, error = error.message ?: "Playback error")
         }
     }
 
@@ -124,6 +132,8 @@ class VodPlayerViewModel(
             }
         }, MoreExecutors.directExecutor())
 
+        // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
+        watch.load()
         load(params)
         // Every 10 s while playing (as the web does).
         saver = viewModelScope.launch {
@@ -135,7 +145,6 @@ class VodPlayerViewModel(
     }
 
     private fun load(params: PlayerParams) {
-        streamKey = params.key
         _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null)
         viewModelScope.launch {
             runCatching { vod.resolveVodStreamUrl(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId) }
@@ -150,7 +159,8 @@ class VodPlayerViewModel(
     private fun startPlayback(url: String, params: PlayerParams) {
         val p = _player.value ?: return
         val title = if (params.episodeTitle.isNotEmpty()) "${params.title} · ${params.episodeTitle}" else params.title
-        val builder = MediaItem.Builder().setUri(url).setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        val builder = MediaItem.Builder().setUri(url).setMediaId(params.key)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
         runCatching {
             p.setMediaItem(builder.build())
@@ -162,7 +172,7 @@ class VodPlayerViewModel(
 
     // Where the viewer left off, once this title's media is ready (30 s … 95%).
     private fun resume(p: Player) {
-        val key = streamKey ?: return
+        val key = mediaKey ?: return
         if (resumedKey == key) return
         resumedKey = key
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
@@ -183,7 +193,7 @@ class VodPlayerViewModel(
     private fun persist() {
         val p = _player.value ?: return
         val params = _state.value.params ?: return
-        if (mediaKey == null || mediaKey != params.key) return
+        if (mediaKey == null || mediaKey != params.key || p.currentMediaItem?.mediaId != params.key) return
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
         val s = _state.value
         val last = params.isEpisode && s.seasons != null && isLastEpisode(s.seasons, s.episodes, params.seasonId, params.episodeId)
@@ -232,6 +242,9 @@ class VodPlayerViewModel(
         ))
         loadSeason(season.id)
     }
+
+    /** The stream again, after an error. */
+    fun retry() { _state.value.params?.let { mediaKey = null; resumedKey = null; load(it) } }
 
     fun playNext() { _state.value.neighbours.next?.let { playEpisode(it.season, it.episode) } }
     fun playPrevious() { _state.value.neighbours.prev?.let { playEpisode(it.season, it.episode) } }

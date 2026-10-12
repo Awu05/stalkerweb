@@ -8,7 +8,9 @@ import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.data.repo.SHOW_STEP
 import com.stalkerweb.android.data.repo.VodFilterState
+import com.stalkerweb.android.data.repo.nextVisibleCount
 import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
 import com.stalkerweb.android.data.repo.WatchRepository
@@ -27,7 +29,6 @@ val MY_LIST = VodCategory(id = "mylist", title = "My List")
 /** The "All" the server adds when the portal's own can't be shown (backend routes/vod.js). */
 private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
 
-const val SHOW_STEP = 140
 
 /** A category's whole listing, read a part at a time (/api/vod/listing). */
 data class ListingState(
@@ -87,6 +88,7 @@ class VodViewModel(
     val state: StateFlow<VodUiState> = _state.asStateFlow()
 
     private var itemsJob: Job? = null
+    private var categoriesJob: Job? = null
     private var searchJob: Job? = null
     private var listingJob: Job? = null
 
@@ -102,14 +104,19 @@ class VodViewModel(
 
     fun setType(type: String) {
         if (type == _state.value.type) return
+        // The other tab's loads are stale now.
+        itemsJob?.cancel(); listingJob?.cancel(); searchJob?.cancel()
         _state.value = VodUiState(type = type, sort = _state.value.sort, search = _state.value.search)
         loadCategories()
     }
 
     fun loadCategories() {
         _state.value = _state.value.copy(loadingCategories = true, error = null)
-        viewModelScope.launch {
-            val cats = runCatching { vod.getVodCategories(_state.value.type) }.getOrDefault(emptyList())
+        categoriesJob?.cancel()   // a quick Movies → Series → Movies: only the last tab's list
+        val type = _state.value.type
+        categoriesJob = viewModelScope.launch {
+            val cats = runCatching { vod.getVodCategories(type) }.getOrDefault(emptyList())
+            if (_state.value.type != type) return@launch
             _state.value = _state.value.copy(categories = cats, loadingCategories = false)
             // The portal's "All" opens first; never an added one (it reads every category in full).
             val real = cats.filter { it.id !in COMBINED_ALL_IDS }
@@ -148,11 +155,17 @@ class VodViewModel(
         if (!_state.value.filtering && !_state.value.isMyList) loadItems(page = 1)
     }
 
-    fun showMore() { _state.value = _state.value.copy(visibleCount = _state.value.visibleCount + SHOW_STEP) }
+    /** Another step of the filtered titles — none past the [total] there are, or the grid would ask forever. */
+    fun showMore(total: Int) {
+        val next = nextVisibleCount(_state.value.visibleCount, total)
+        if (next != _state.value.visibleCount) _state.value = _state.value.copy(visibleCount = next)
+    }
 
-    fun loadMore() {
+    /** The end of the grid came into view: [total] filtered titles in whole-listing mode, else the next portal page. */
+    fun loadMore(total: Int) {
         val s = _state.value
-        if (s.filtering || s.isMyList) { showMore(); return }
+        if (s.isMyList) return
+        if (s.filtering) { showMore(total); return }
         if (s.hasMore && !s.loadingItems) loadItems(page = s.page + 1)
     }
 
@@ -178,7 +191,8 @@ class VodViewModel(
                 .onSuccess { r ->
                     val cur = _state.value
                     _state.value = cur.copy(
-                        items = if (page == 1) r.items else (cur.items + r.items).distinctBy { it.id },
+                        // Ids once: the grid keys by id, and a title added mid-read can come twice.
+                        items = (if (page == 1) r.items else cur.items + r.items).distinctBy { it.id },
                         page = page, totalPages = r.totalPages, loadingItems = false,
                     )
                 }
@@ -198,12 +212,13 @@ class VodViewModel(
         listingJob = viewModelScope.launch {
             while (true) {
                 val have = _state.value.listing.items
-                val r = runCatching { vod.getListing(s.type, cat.id, have.size) }.getOrElse { e ->
+                // From the server's count, not ours: ours drops repeats.
+                val r = runCatching { vod.getListing(s.type, cat.id, _state.value.listing.loaded) }.getOrElse { e ->
                     if (e is CancellationException) throw e
                     _state.value = _state.value.copy(listing = _state.value.listing.copy(error = e.toApiError().message, complete = true))
                     return@launch
                 }
-                _state.value = _state.value.copy(listing = ListingState(have + r.items, r.loaded, r.total, r.complete, r.error))
+                _state.value = _state.value.copy(listing = ListingState((have + r.items).distinctBy { it.id }, r.loaded, r.total, r.complete, r.error))
                 if (r.complete || r.error != null) return@launch
                 delay(1200)
             }

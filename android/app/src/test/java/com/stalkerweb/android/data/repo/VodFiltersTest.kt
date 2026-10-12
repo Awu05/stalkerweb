@@ -50,7 +50,7 @@ class VodFiltersTest {
     }
 
     @Test fun offersWhatTheTitlesHave() {
-        assertEquals(FilterOptions(listOf("Crime", "Drama", "Horror", "Sci-Fi"), listOf("2021", "2016", "2007", "1979"), true, true), filterOptions(items))
+        assertEquals(FilterOptions(listOf("Crime", "Drama", "Horror", "Sci-Fi"), listOf("2021", "2016", "2007", "1979"), true, true, hasAdded = true), filterOptions(items))
         val bare = filterOptions(listOf(t("1", year = "2020")))
         assertEquals(emptyList<String>(), bare.genres)
         assertFalse(bare.hasRating)

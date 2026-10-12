@@ -98,7 +98,11 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     val firstCategory = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { if (state.categories.isEmpty()) viewModel.loadCategories() }
+    LaunchedEffect(Unit) {
+        // What was watched elsewhere (the phone, the web) since — and resume points with it.
+        watch.load()
+        if (state.categories.isEmpty()) viewModel.loadCategories()
+    }
     LaunchedEffect(state.loadingCategories, isTV) {
         if (isTV && !state.loadingCategories && state.categories.isNotEmpty()) runCatching { firstCategory.requestFocus() }
     }
@@ -158,7 +162,12 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
             Pill("A–Z", state.sort == "name", { viewModel.setSort("name") })
             Pill("Newest", state.sort == "added", { viewModel.setSort("added") })
         }
-        FilterBar(state.filters, options, viewModel::setFilters)
+        if (state.isPortalAll) {
+            Text("Pick a category to filter — \"All\" is the whole catalog.", style = MaterialTheme.typography.labelMedium,
+                color = SwColors.Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        } else {
+            FilterBar(state.filters, options.withChosen(state.filters), viewModel::setFilters)
+        }
 
         if (wide) {
             Row(Modifier.fillMaxSize()) {
@@ -249,7 +258,7 @@ private fun CategoryColumn(state: VodUiState, myListCount: Int, firstFocus: Focu
 private fun FilterBar(f: VodFilterState, o: com.stalkerweb.android.data.repo.FilterOptions, onChange: (VodFilterState) -> Unit) {
     LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (o.years.isNotEmpty()) item { ChoicePill("Any year", f.year, o.years.map { it to it }) { onChange(f.copy(year = it)) } }
-        item {
+        if (o.hasAdded) item {
             ChoicePill("Any time", if (f.addedDays > 0) f.addedDays.toString() else "",
                 listOf("7" to "Last 7 days", "30" to "Last 30 days", "90" to "Last 90 days")) { onChange(f.copy(addedDays = it.toIntOrNull() ?: 0)) }
         }
@@ -298,7 +307,7 @@ private fun Content(
         val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         last >= gridState.layoutInfo.totalItemsCount - 6
     } }
-    LaunchedEffect(nearEnd, state.page, state.visibleCount) { if (nearEnd && !state.isMyList) viewModel.loadMore() }
+    LaunchedEffect(nearEnd, state.page, shown.size) { if (nearEnd && !state.isMyList) viewModel.loadMore(matchCount) }
     val browsing = !state.isMyList && !state.filters.isActive && state.search.isBlank()
 
     LazyVerticalGrid(
@@ -366,13 +375,16 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
             items(entries, key = { it.id }) { e ->
                 val p = progress[e.key]
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
-                Box(Modifier.width(150.dp)) {
+                Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
                         title = e.title, year = e.episodeTitle, posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
                     )
-                    IconButton(onClick = { watch.removeFromHistory(e.id) }, modifier = Modifier.align(Alignment.TopEnd).size(32.dp)) {
-                        Icon(Icons.Default.Close, "Remove ${e.title} from Recently watched", Modifier.size(16.dp), tint = SwColors.Muted)
+                    // Below the tile, not on it: the remote's focus search can't reach a button inside a tile.
+                    TextButton(onClick = { watch.removeFromHistory(e.id) }, modifier = Modifier.tvFocus(RoundedCornerShape(8.dp))) {
+                        Icon(Icons.Default.Close, null, Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Remove", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
