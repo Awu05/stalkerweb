@@ -25,6 +25,36 @@ interface StalkerApi {
     @DELETE("api/favorites/channels/{id}")
     suspend fun removeFavorite(@Path("id") id: String)
 
+    @POST("api/favorites/groups")
+    suspend fun createFavoriteGroup(@Body body: NameRequest)
+
+    @PUT("api/favorites/groups/{id}")
+    suspend fun renameFavoriteGroup(@Path("id") id: String, @Body body: NameRequest)
+
+    @DELETE("api/favorites/groups/{id}")
+    suspend fun deleteFavoriteGroup(@Path("id") id: String)
+
+    @POST("api/favorites/groups/{id}/channels")
+    suspend fun addToFavoriteGroup(@Path("id") id: String, @Body body: AddFavoriteRequest)
+
+    @DELETE("api/favorites/groups/{id}/channels/{chId}")
+    suspend fun removeFromFavoriteGroup(@Path("id") id: String, @Path("chId") chId: String)
+
+    @PUT("api/favorites/channels/order")
+    suspend fun reorderFavorites(@Body body: OrderRequest)
+
+    @PUT("api/favorites/groups/order")
+    suspend fun reorderFavoriteGroups(@Body body: OrderRequest)
+
+    @GET("api/channels/health")
+    suspend fun getChannelHealth(): Map<String, ChannelHealth>
+
+    @GET("api/logos/check")
+    suspend fun checkLogo(@Query("name") name: String): LogoCheck
+
+    @POST("api/logos")
+    suspend fun setLogoOverride(@Body body: LogoOverrideRequest)
+
     @GET("api/epg/now")
     suspend fun getNowNext(): Map<String, NowNextEntry>
 

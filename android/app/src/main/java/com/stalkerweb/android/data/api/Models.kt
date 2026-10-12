@@ -273,3 +273,16 @@ data class ChannelHealth(
     val errors: Int = 0,
     val lastError: String? = null,
 )
+
+@JsonClass(generateAdapter = false)
+data class NameRequest(val name: String)
+
+@JsonClass(generateAdapter = false)
+data class OrderRequest(val order: List<String>)
+
+@JsonClass(generateAdapter = false)
+data class LogoOverrideRequest(val name: String, val url: String)
+
+/** The logo the server finds for a name (backend routes/logos.js /check). */
+@JsonClass(generateAdapter = false)
+data class LogoCheck(val logo: String? = null, val name: String? = null)

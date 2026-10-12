@@ -54,6 +54,16 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_VOD_SORT, null) ?: "name"
         set(value) = prefs.edit().putString(KEY_VOD_SORT, value).apply()
 
+    // Whether the Channels page's Favorites section is open, remembered on this device.
+    var favoritesOpen: Boolean
+        get() = prefs.getBoolean(KEY_FAVORITES_OPEN, true)
+        set(value) = prefs.edit().putBoolean(KEY_FAVORITES_OPEN, value).apply()
+
+    fun removeWatchedChannel(uniqueId: String) {
+        val list = getWatchedChannels().filter { it.uniqueId != uniqueId }
+        prefs.edit().putString(KEY_WATCH_HISTORY, historyToJson(list)).apply()
+    }
+
     /** Forgets the logos saved with watch history — after a key change their links may carry the old token. */
     fun clearWatchedLogos() {
         val list = getWatchedChannels()
@@ -228,6 +238,7 @@ class AppPrefs(context: Context) {
         private const val KEY_ACCESS_REJECTED = "access_rejected_message"
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
         private const val KEY_VOD_SORT        = "vod_sort"
+        private const val KEY_FAVORITES_OPEN  = "favorites_open"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"
