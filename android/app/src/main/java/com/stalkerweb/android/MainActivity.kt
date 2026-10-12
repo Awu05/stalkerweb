@@ -35,8 +35,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stalkerweb.android.crash.CrashReporter
-import com.stalkerweb.android.data.prefs.AppPrefs
-import com.stalkerweb.android.data.repository.ChannelRepository
 import com.stalkerweb.android.data.update.UpdateManager
 import com.stalkerweb.android.ui.channels.ChannelViewModel
 import com.stalkerweb.android.ui.crash.CrashReportDialog
@@ -106,8 +104,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         createNotificationChannel()
 
-        val prefs         = AppPrefs(this)
-        val repository    = ChannelRepository(prefs).also { it.initFromPrefs() }
+        val container     = (application as StalkerWebApp).container
         val updateManager = UpdateManager(this)
 
         val isTV = BuildConfig.IS_TV
@@ -125,21 +122,21 @@ class MainActivity : ComponentActivity() {
                 // screen for no reason.
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(appBackgroundBrush()).padding(overscanPadding)) {
-                val startDest     = if (repository.getServerUrl() != null) Screen.Channels.route
+                val startDest     = if (container.server.getServerUrl() != null) Screen.Channels.route
                                     else Screen.Setup.route
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            ChannelViewModel(repository) as T
+                            ChannelViewModel(container.live, container.server, container.viewers) as T
                     }
                 }
                 val playerVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            PlayerViewModel(application, repository) as T
+                            PlayerViewModel(application, container.live) as T
                     }
                 }
                 val updateVmFactory = remember {
@@ -153,21 +150,21 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodViewModel(repository) as T
+                            VodViewModel(container.vod, container.viewers) as T
                     }
                 }
                 val vodPlayerVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodPlayerViewModel(application, repository) as T
+                            VodPlayerViewModel(application, container.vod) as T
                     }
                 }
                 val portalVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            PortalViewModel(repository) as T
+                            PortalViewModel(container.server) as T
                     }
                 }
 
@@ -179,7 +176,7 @@ class MainActivity : ComponentActivity() {
                 // Whether the VOD section is enabled (controlled from the web Settings page).
                 var vodEnabled by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
-                    runCatching { repository.isVodEnabled() }.onSuccess { vodEnabled = it }
+                    vodEnabled = container.server.getSettings()?.vodEnabled == true
                 }
 
                 // A saved server URL doesn't mean the portal itself is connected —
@@ -187,8 +184,8 @@ class MainActivity : ComponentActivity() {
                 // launch and send the user straight to the Portal screen instead of
                 // dumping them on a dead Channels list full of 503 errors.
                 LaunchedEffect(Unit) {
-                    if (repository.getServerUrl() != null) {
-                        val status = runCatching { repository.testConnection() }.getOrNull()
+                    if (container.server.getServerUrl() != null) {
+                        val status = runCatching { container.server.testConnection() }.getOrNull()
                         if (status?.connected != true) {
                             navController.navigate(Screen.Portal.route)
                         }
@@ -226,7 +223,7 @@ class MainActivity : ComponentActivity() {
                         // behind it) and from the channel list's settings button.
                         val fromApp = navController.previousBackStackEntry != null
                         SetupScreen(
-                            repository  = repository,
+                            server      = container.server,
                             onConnected = {
                                 channelViewModel.load(reset = true)
                                 if (fromApp) {

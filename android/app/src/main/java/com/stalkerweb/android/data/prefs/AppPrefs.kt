@@ -30,6 +30,13 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_SHARE_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_SHARE_TOKEN, value).apply()
 
+    // The viewer this device watches as (Settings → Viewers on the web), sent as
+    // X-Viewer. Cleared when the server or access key changes, or the viewer is
+    // deleted — then "Who's watching?" asks again.
+    var viewerId: String?
+        get() = prefs.getString(KEY_VIEWER_ID, null)
+        set(value) = prefs.edit().putString(KEY_VIEWER_ID, value).apply()
+
     // ── Watch history ─────────────────────────────────────────────────────────
 
     fun pushWatchedChannel(uniqueId: String, name: String, logoUrl: String?) {
@@ -192,6 +199,7 @@ class AppPrefs(context: Context) {
         private const val KEY_SERVER_URL      = "server_url"
         private const val KEY_ACCESS_KEY      = "access_key"
         private const val KEY_SHARE_TOKEN     = "share_token"
+        private const val KEY_VIEWER_ID       = "viewer_id"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"

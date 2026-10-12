@@ -18,7 +18,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.ServerRepository
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
@@ -49,15 +49,15 @@ private fun connectError(e: Throwable): String = when ((e as? HttpException)?.co
 
 @Composable
 fun SetupScreen(
-    repository: ChannelRepository,
+    server: ServerRepository,
     onConnected: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
-    val initial = remember { parseUrl(repository.getServerUrl() ?: "") }
+    val initial = remember { parseUrl(server.getServerUrl() ?: "") }
     var host    by remember { mutableStateOf(initial.host) }
     var port    by remember { mutableStateOf(initial.port) }
     // Only needed when the server sets ACCESS_KEY; sent as a header, never in links.
-    var accessKey by remember { mutableStateOf(repository.getAccessKey() ?: "") }
+    var accessKey by remember { mutableStateOf(server.getAccessKey() ?: "") }
     var testing by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(null) }
     val scope   = rememberCoroutineScope()
@@ -94,10 +94,10 @@ fun SetupScreen(
             runCatching {
                 // Test first; only persist the URL once it actually connects so a
                 // failed/abandoned edit never leaves the app on a broken server.
-                repository.testServerUrl(fullUrl, key)
+                server.testServerUrl(fullUrl, key)
             }.onSuccess {
                 testing = false
-                repository.setServerUrl(fullUrl, key)
+                server.setServerUrl(fullUrl, key)
                 onConnected()
             }.onFailure { e ->
                 testing = false

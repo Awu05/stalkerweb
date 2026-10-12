@@ -6,12 +6,15 @@ import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.Group
 import com.stalkerweb.android.data.api.NowNextEntry
 import com.stalkerweb.android.data.prefs.WatchedChannel
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.LiveRepository
+import com.stalkerweb.android.data.repo.ServerRepository
+import com.stalkerweb.android.data.repo.ViewerRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
@@ -54,13 +57,19 @@ data class ChannelUiState(
         get() = tab == ChannelTab.ALL && query.isBlank() && selectedGroupId == null && recentChannels.isNotEmpty()
 }
 
-class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() {
+class ChannelViewModel(
+    private val live: LiveRepository,
+    private val server: ServerRepository,
+    private val viewers: ViewerRepository,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(ChannelUiState())
     val state: StateFlow<ChannelUiState> = _state.asStateFlow()
 
     init {
-        if (repository.getServerUrl() != null) load()
+        if (server.getServerUrl() != null) load()
+        // Another viewer: their favorites and filters — read the lists again.
+        viewModelScope.launch { viewers.changes.drop(1).collect { load(reset = true) } }
     }
 
     /**
@@ -81,14 +90,14 @@ class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() 
         // Render the on-disk cache immediately (channels, logos, watch history) so
         // the list appears instantly on cold start and survives a briefly-
         // unreachable backend; the network refresh below replaces it silently.
-        val cached      = repository.getCachedChannels()
-        val cachedLogos = repository.getCachedLogoMap()
+        val cached      = live.getCachedChannels()
+        val cachedLogos = live.getCachedLogoMap()
         val haveData    = cached.isNotEmpty() || _state.value.channels.isNotEmpty()
         _state.value = _state.value.copy(
             loading            = !haveData,
             error              = null,
             portalNotConnected = false,
-            recentChannels     = repository.getWatched(),
+            recentChannels     = live.getWatched(),
             channels       = if (_state.value.channels.isEmpty()) cached else _state.value.channels,
             logoMap        = if (_state.value.logoMap.isEmpty()) cachedLogos else _state.value.logoMap,
         )
@@ -102,10 +111,10 @@ class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() 
                 // which is what turns a portal-not-connected 503 into the empty
                 // state below rather than a crash on launch.
                 coroutineScope {
-                    val channels = async { repository.getChannels() }
-                    val logos    = async { repository.getLogoMap() }
-                    val favs     = async { repository.getFavoriteIds() }
-                    val groups   = async { repository.getGroups() }
+                    val channels = async { live.getChannels() }
+                    val logos    = async { live.getLogoMap() }
+                    val favs     = async { live.getFavoriteIds() }
+                    val groups   = async { live.getGroups() }
                     val data = Triple(channels.await(), logos.await(), favs.await())
                     val grps = groups.await()
                     data to grps
@@ -141,7 +150,7 @@ class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() 
         }
         // EPG fetch is best-effort — don't block or fail the channel list
         viewModelScope.launch {
-            val nowNext = repository.getNowNext()
+            val nowNext = live.getNowNext()
             if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
         }
     }
@@ -149,7 +158,7 @@ class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() 
     /** Re-read history from prefs — called from MainActivity.onResume so the row
      *  stays fresh after the user returns from the player. */
     fun refreshHistory() {
-        _state.value = _state.value.copy(recentChannels = repository.getWatched())
+        _state.value = _state.value.copy(recentChannels = live.getWatched())
     }
 
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
@@ -166,7 +175,7 @@ class ChannelViewModel(private val repository: ChannelRepository) : ViewModel() 
         )
         viewModelScope.launch {
             runCatching {
-                if (isFav) repository.removeFavorite(id) else repository.addFavorite(id)
+                if (isFav) live.removeFavorite(id) else live.addFavorite(id)
             }.onFailure {
                 // Roll back on network failure
                 _state.value = _state.value.copy(

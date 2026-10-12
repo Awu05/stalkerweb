@@ -225,7 +225,7 @@ data class PortalConfigResponse(
 // The device-identity fields matter as much as portal/mac: a portal can bind an
 // account to a specific STB identity, and connecting without them (or with
 // send_device_id flipped on) is rejected. They're carried through to
-// PortalConnectRequest verbatim — see ChannelRepository.connectProfile.
+// PortalConnectRequest verbatim — see ServerRepository.connectProfile.
 @JsonClass(generateAdapter = false)
 data class Profile(
     val id: String,

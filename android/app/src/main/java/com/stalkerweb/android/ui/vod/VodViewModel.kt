@@ -6,13 +6,15 @@ import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.VodRepository
+import com.stalkerweb.android.data.repo.ViewerRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 data class VodUiState(
@@ -40,7 +42,7 @@ data class VodUiState(
 // shown (backend routes/vod.js).
 private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
 
-class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
+class VodViewModel(private val vod: VodRepository, private val viewers: ViewerRepository) : ViewModel() {
 
     private val _state = MutableStateFlow(VodUiState())
     val state: StateFlow<VodUiState> = _state.asStateFlow()
@@ -51,6 +53,16 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
     // the user has already moved on from can land last and win.
     private var itemsJob: Job? = null
 
+    init {
+        // Another viewer: start the section again (their hidden categories differ).
+        viewModelScope.launch {
+            viewers.changes.drop(1).collect {
+                _state.value = VodUiState(type = _state.value.type)
+                loadCategories()
+            }
+        }
+    }
+
     fun setType(type: String) {
         if (type == _state.value.type) return
         _state.value = VodUiState(type = type)
@@ -60,7 +72,7 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
     fun loadCategories() {
         _state.value = _state.value.copy(loadingCategories = true, error = null)
         viewModelScope.launch {
-            runCatching { repository.getVodCategories(_state.value.type) }
+            runCatching { vod.getVodCategories(_state.value.type) }
                 .onSuccess { cats ->
                     _state.value = _state.value.copy(categories = cats, loadingCategories = false)
                     // Not an "All" the server added: it reads every category in
@@ -100,7 +112,7 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
         itemsJob?.cancel()
         _state.value = _state.value.copy(loadingItems = true, error = null)
         itemsJob = viewModelScope.launch {
-            runCatching { repository.getVodItems(_state.value.type, categoryId, page, search) }
+            runCatching { vod.getVodItems(_state.value.type, categoryId, page, search) }
                 .onSuccess { r ->
                     // Pages come from a server-side list whose order isn't stable,
                     // so the same item can arrive on two pages. LazyVerticalGrid
@@ -130,7 +142,7 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
             seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true,
         )
         viewModelScope.launch {
-            val seasons = repository.getVodSeasons(item.id)
+            val seasons = vod.getVodSeasons(item.id)
             _state.value = _state.value.copy(seasons = seasons, seriesLoading = false)
         }
     }
@@ -139,7 +151,7 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
         val show = _state.value.seriesItem ?: return
         _state.value = _state.value.copy(selectedSeason = season, episodes = null, seriesLoading = true)
         viewModelScope.launch {
-            val eps = repository.getVodEpisodes(show.id, season.id)
+            val eps = vod.getVodEpisodes(show.id, season.id)
             _state.value = _state.value.copy(episodes = eps, seriesLoading = false)
         }
     }
