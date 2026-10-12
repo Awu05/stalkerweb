@@ -1,477 +1,297 @@
 package com.stalkerweb.android.ui.channels
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
+import androidx.lifecycle.repeatOnLifecycle
 import com.stalkerweb.android.data.api.Channel
-import com.stalkerweb.android.data.api.Group
-import com.stalkerweb.android.data.api.NowNextEntry
-import com.stalkerweb.android.data.prefs.WatchedChannel
+import com.stalkerweb.android.data.api.FavoriteGroup
+import com.stalkerweb.android.data.repo.jumpTarget
+import com.stalkerweb.android.ui.components.ChannelTile
+import com.stalkerweb.android.ui.components.EmptyState
+import com.stalkerweb.android.ui.components.Pill
+import com.stalkerweb.android.ui.components.SectionHeader
+import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.utils.rememberIsTV
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+private const val GENRE_COLLAPSE_THRESHOLD = 12
+
+/**
+ * The Channels page, as on the web: search, count, "Hide flaky" and genre
+ * pills; then, on All, Favorites (collapsible, with groups) and Recently
+ * Watched; then the channel tiles. Long-press a tile (a held OK on the remote)
+ * for its actions; type a channel number on the remote to jump to it.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ChannelScreen(
-    viewModel: ChannelViewModel,
-    onSelectChannel: (Channel) -> Unit,
-    onOpenPortal: () -> Unit = {},
-) {
+fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Unit, onOpenPortal: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val isTV  = rememberIsTV()
-    // ChannelUiState.displayed filters the full channel list on every access and
-    // caches nothing, so reading it per row cost O(rows x channels) per frame on
-    // large portals. Evaluate it once per state change instead.
-    val displayed = remember(state) { state.displayed }
-    val firstItemFocusRequester = remember { FocusRequester() }
+    val isTV = rememberIsTV()
+    val context = LocalContext.current
+    val displayed = remember(state.channels, state.selectedGroupId, state.query, state.hideFlaky, state.health) { state.displayed }
+    val byId = remember(state.channels) { state.channels.associateBy { it.uniqueId } }
+    var menuFor by remember { mutableStateOf<Channel?>(null) }
+    var logoFor by remember { mutableStateOf<Channel?>(null) }
+    var groupPickFor by remember { mutableStateOf<Channel?>(null) }
+    var editGroup by remember { mutableStateOf<FavoriteGroup?>(null) }
+    var newGroup by remember { mutableStateOf(false) }
+    var genresExpanded by remember { mutableStateOf(false) }
+    var searchFocused by remember { mutableStateOf(false) }
+    var digits by remember { mutableStateOf("") }
 
-    // On TV, push initial focus into the channel list so the remote is immediately useful
-    LaunchedEffect(state.loading, isTV, displayed.isNotEmpty()) {
-        if (isTV && !state.loading && displayed.isNotEmpty()) {
-            try { firstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+    // Toasts for failed saves.
+    LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
+    // Now/next every 5 minutes and health every minute, while this screen is in front.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            launch { while (true) { delay(5 * 60_000L); viewModel.refreshNowNext() } }
+            while (true) { delay(60_000L); viewModel.refreshHealth() }
         }
     }
+    // Number jump: the digits typed, then the channel 1.2 s after the last one.
+    LaunchedEffect(digits) {
+        if (digits.isEmpty()) return@LaunchedEffect
+        delay(1_200)
+        jumpTarget(state.channels, digits)?.let(onSelectChannel)
+        digits = ""
+    }
 
-    Scaffold(
-        containerColor = Color.Transparent,
-        topBar = {
-            Column {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                    title = {
-                        Text(
-                            "Channels",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    },
-                    actions = {
-                        IconButton(onClick = viewModel::load) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                        }
-                    },
-                )
-                // Search bar
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::setQuery,
-                    placeholder = { Text("Search channels…") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, null, Modifier.size(18.dp))
-                    },
-                    trailingIcon = {
-                        if (state.query.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.setQuery("") }) {
-                                Icon(Icons.Default.Close, "Clear", Modifier.size(18.dp))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-                // All / Favorites tabs
-                val tabTitles = listOf("All", "Favorites")
-                TabRow(
-                    selectedTabIndex = state.tab.ordinal,
-                    indicator = { positions ->
-                        TabRowDefaults.PrimaryIndicator(
-                            Modifier.tabIndicatorOffset(positions[state.tab.ordinal])
-                        )
-                    },
-                ) {
-                    tabTitles.forEachIndexed { index, title ->
-                        Tab(
-                            selected = state.tab.ordinal == index,
-                            onClick  = { viewModel.setTab(ChannelTab.entries[index]) },
-                            text     = { Text(title) },
-                        )
+    Column(
+        Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+            if (e.type != KeyEventType.KeyDown || searchFocused) return@onPreviewKeyEvent false
+            val c = e.utf16CodePoint.toChar()
+            if (c.isDigit()) { digits = (digits + c).takeLast(4); true } else false
+        },
+    ) {
+        // Search · count · hide flaky · refresh
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = state.query, onValueChange = viewModel::setQuery,
+                placeholder = { Text("Search channels…") },
+                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
+                trailingIcon = if (state.query.isNotEmpty()) ({ IconButton(onClick = { viewModel.setQuery("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
+                singleLine = true, shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f).onFocusChanged { searchFocused = it.isFocused },
+            )
+            if (state.flaky > 0) {
+                Pill(if (state.hideFlaky) "Flaky hidden" else "Hide flaky (${state.flaky})", state.hideFlaky,
+                    { viewModel.setHideFlaky(!state.hideFlaky) }, leading = Icons.Default.Warning)
+            }
+            Text("${displayed.size} ${if (displayed.size == 1) "channel" else "channels"}", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
+            IconButton(onClick = { viewModel.load() }) { Icon(Icons.Default.Refresh, "Refresh") }
+        }
+        // Genre pills: collapsed to one line when there are many.
+        if (state.groups.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.Top) {
+                val pills: @Composable () -> Unit = {
+                    Pill("All", state.selectedGroupId == null, { viewModel.setSelectedGroup(null) })
+                    state.groups.forEach { g -> Pill(g.name, state.selectedGroupId == g.id, { viewModel.setSelectedGroup(g.id) }) }
+                }
+                if (genresExpanded || state.groups.size <= GENRE_COLLAPSE_THRESHOLD) {
+                    FlowRow(Modifier.weight(1f).heightIn(max = 240.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { pills() }
+                } else {
+                    LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { Pill("All", state.selectedGroupId == null, { viewModel.setSelectedGroup(null) }) }
+                        items(state.groups, key = { it.id }) { g -> Pill(g.name, state.selectedGroupId == g.id, { viewModel.setSelectedGroup(g.id) }) }
                     }
                 }
-
-                // Genre selection chips
-                if (state.tab == ChannelTab.ALL && state.groups.isNotEmpty()) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = state.selectedGroupId == null,
-                                onClick  = { viewModel.setSelectedGroup(null) },
-                                label    = { Text("All") },
-                                shape    = RoundedCornerShape(16.dp),
-                            )
-                        }
-                        items(state.groups) { group ->
-                            FilterChip(
-                                selected = state.selectedGroupId == group.id,
-                                onClick  = { viewModel.setSelectedGroup(group.id) },
-                                label    = { Text(group.name) },
-                                shape    = RoundedCornerShape(16.dp),
-                            )
-                        }
-                    }
+                if (state.groups.size > GENRE_COLLAPSE_THRESHOLD) {
+                    Pill(if (genresExpanded) "Less" else "More", false, { genresExpanded = !genresExpanded },
+                        leading = if (genresExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, modifier = Modifier.padding(start = 8.dp))
                 }
             }
         }
-    ) { innerPadding ->
-        Box(Modifier.fillMaxSize().padding(innerPadding)) {
-            when {
-                state.loading -> {
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+        if (state.portalNotConnected) {
+            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Router, null, tint = SwColors.Warning)
+                Text("Portal not connected — showing cached channels.", color = SwColors.Text, modifier = Modifier.weight(1f))
+                TextButton(onClick = onOpenPortal) { Text("Connect") }
+            }
+        }
+
+        val tile: @Composable (Channel, Boolean) -> Unit = { ch, inFavorites ->
+            ChannelTile(
+                channel = ch, logoUrl = state.logoMap[ch.uniqueId], isFavorite = ch.uniqueId in state.favoriteIds,
+                nowNext = state.nowNext[ch.uniqueId], errors = state.health[ch.uniqueId]?.errors ?: 0,
+                onClick = { onSelectChannel(ch) },
+                onToggleFavorite = { viewModel.toggleFavorite(ch) },
+                onEdit = { logoFor = ch },
+                onLongClick = { menuFor = ch },
+            )
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(if (isTV) 180.dp else 150.dp),
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (state.browsing) {
+                full {
+                    SectionHeader(Icons.Default.Favorite, "Favorites", state.favoriteChannels.size, state.favoritesOpen, viewModel::toggleFavoritesOpen)
                 }
-                state.portalNotConnected && state.channels.isEmpty() -> {
-                    Column(
-                        Modifier.align(Alignment.Center).padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            Icons.Default.Router, null,
-                            Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "No portal connected",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Connect a portal to load channels.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = onOpenPortal) { Text("Connect Portal") }
+                if (state.favoritesOpen) {
+                    if (state.favoriteChannels.isEmpty() && state.favoriteGroups.isEmpty()) {
+                        full { Text("No favorites yet — long-press a channel (or hold OK) to add it.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }
                     }
+                    items(state.favoriteChannels, key = { "fav-" + it.uniqueId }) { ch -> tile(byId[ch.uniqueId] ?: ch, true) }
+                    full { GroupsSection(state.favoriteGroups, state.logoMap, byId, onSelectChannel, onNew = { newGroup = true }, onEdit = { editGroup = it },
+                        onDelete = viewModel::deleteGroup, onMove = viewModel::moveGroup) }
                 }
-                state.error != null -> {
-                    Column(
-                        Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            Icons.Default.Warning, null,
-                            Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            state.error!!,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = viewModel::load) { Text("Retry") }
-                    }
-                }
-                displayed.isEmpty() -> {
-                    Column(
-                        Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            Icons.Default.Tv, null, Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            if (state.query.isNotEmpty()) "No channels match \"${state.query}\""
-                            else "No channels",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        )
-                    }
-                }
-                else -> {
-                    Column {
-                        // The list below is a cached snapshot from before the portal
-                        // dropped — say so, rather than letting it pass for live data.
-                        if (state.portalNotConnected) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.errorContainer)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Router, null,
-                                    Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                                Text(
-                                    "Portal not connected — showing cached channels.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = onOpenPortal) { Text("Connect") }
-                            }
-                        }
-                        LazyColumn {
-                            // Continue watching row
-                            if (state.showRecent) {
-                                item(key = "recent_header") {
-                                    Text(
-                                        "Continue watching",
-                                        style    = MaterialTheme.typography.labelMedium,
-                                        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                                        modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp),
-                                    )
-                                }
-                                item(key = "recent_row") {
-                                    LazyRow(
-                                        contentPadding       = PaddingValues(horizontal = 12.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        modifier             = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                    ) {
-                                        items(state.recentChannels, key = { "r_${it.uniqueId}" }) { recent ->
-                                            RecentChannelChip(
-                                                recent    = recent,
-                                                logoUrl   = state.logoMap[recent.uniqueId] ?: recent.logoUrl,
-                                                onClick   = {
-                                                    val ch = state.channels.find { it.uniqueId == recent.uniqueId }
-                                                    if (ch != null) onSelectChannel(ch)
-                                                },
-                                            )
+                if (state.recentChannels.isNotEmpty()) {
+                    full {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionHeader(Icons.Default.History, "Recently Watched", state.recentChannels.size)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)) {
+                                items(state.recentChannels.take(10), key = { "rec-" + it.uniqueId }) { r ->
+                                    val ch = byId[r.uniqueId] ?: Channel(uniqueId = r.uniqueId, name = r.name)
+                                    Column(Modifier.width(if (isTV) 180.dp else 150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        ChannelTile(
+                                            channel = ch, logoUrl = state.logoMap[ch.uniqueId] ?: r.logoUrl, isFavorite = ch.uniqueId in state.favoriteIds,
+                                            nowNext = state.nowNext[ch.uniqueId], errors = state.health[ch.uniqueId]?.errors ?: 0,
+                                            onClick = { onSelectChannel(ch) }, onToggleFavorite = { viewModel.toggleFavorite(ch) },
+                                            onEdit = { logoFor = ch }, onLongClick = { menuFor = ch },
+                                        )
+                                        TextButton(onClick = { viewModel.removeRecent(r.uniqueId) }) {
+                                            Icon(Icons.Default.Close, null, Modifier.size(12.dp)); Spacer(Modifier.width(4.dp))
+                                            Text("Remove", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
                                 }
-                                item(key = "recent_divider") {
-                                    HorizontalDivider(
-                                        thickness = 0.5.dp,
-                                        color     = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                                    )
-                                }
-                            }
-
-                            items(displayed, key = { it.uniqueId }) { channel ->
-                                val isFirst = channel == displayed.firstOrNull()
-                                ChannelRow(
-                                    channel          = channel,
-                                    logoUrl          = state.logoMap[channel.uniqueId],
-                                    isFavorite       = channel.uniqueId in state.favoriteIds,
-                                    nowNext          = state.nowNext[channel.uniqueId],
-                                    onClick          = { onSelectChannel(channel) },
-                                    onToggleFavorite = { viewModel.toggleFavorite(channel) },
-                                    isTV             = isTV,
-                                    focusRequester   = if (isFirst) firstItemFocusRequester else null,
-                                )
-                                HorizontalDivider(
-                                    thickness = 0.5.dp,
-                                    color     = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                                )
                             }
                         }
                     }
                 }
+                full { SectionHeader(Icons.Default.Tv, "All channels", displayed.size) }
+            }
+            when {
+                state.loading && state.channels.isEmpty() -> full { Box(Modifier.fillMaxWidth().padding(48.dp), Alignment.Center) { CircularProgressIndicator() } }
+                state.error != null && state.channels.isEmpty() -> full {
+                    EmptyState(Icons.Default.Tv, "Couldn't load channels", state.error) { Button(onClick = { viewModel.load() }) { Text("Retry") } }
+                }
+                state.portalNotConnected && state.channels.isEmpty() -> full {
+                    EmptyState(Icons.Default.Router, "No portal connected", "Connect a portal to load channels.") { Button(onClick = onOpenPortal) { Text("Connect Portal") } }
+                }
+                displayed.isEmpty() -> full { EmptyState(Icons.Default.Search, "No channels found.") }
+                else -> items(displayed, key = { it.uniqueId }) { ch -> tile(ch, false) }
             }
         }
     }
-}
 
-@Composable
-private fun RecentChannelChip(
-    recent: WatchedChannel,
-    logoUrl: String?,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick   = onClick,
-        shape     = RoundedCornerShape(8.dp),
-        color     = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp,
-        modifier  = Modifier.width(100.dp),
-    ) {
-        Column(
-            modifier            = Modifier.padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surface),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (!logoUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model              = logoUrl,
-                        contentDescription = recent.name,
-                        contentScale       = ContentScale.Fit,
-                        modifier           = Modifier.fillMaxSize().padding(4.dp),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Tv, null, Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                    )
-                }
-            }
-            Text(
-                text     = recent.name,
-                style    = MaterialTheme.typography.labelSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+    if (digits.isNotEmpty()) NumberJumpOverlay(digits)
+
+    menuFor?.let { ch ->
+        val favIndex = state.favoriteChannels.indexOfFirst { it.uniqueId == ch.uniqueId }
+        ChannelActionsDialog(
+            channel = ch, isFavorite = ch.uniqueId in state.favoriteIds, canMoveLeft = favIndex > 0,
+            canMoveRight = favIndex >= 0 && favIndex < state.favoriteChannels.size - 1, hasGroups = state.favoriteGroups.isNotEmpty(),
+            onDismiss = { menuFor = null },
+            onToggleFavorite = { viewModel.toggleFavorite(ch) },
+            onAddToGroup = { groupPickFor = ch },
+            onEditLogo = { logoFor = ch },
+            onMove = { delta -> viewModel.moveFavorite(ch, delta) },
+        )
+    }
+    groupPickFor?.let { ch ->
+        GroupPickerDialog(state.favoriteGroups, onPick = { g -> viewModel.addToGroup(g, ch) }, onDismiss = { groupPickFor = null })
+    }
+    logoFor?.let { ch ->
+        LogoDialog(ch, onCheck = viewModel::checkLogo, onSave = { url -> viewModel.saveLogo(ch, url) }, onDismiss = { logoFor = null })
+    }
+    if (newGroup) NameDialog("New group", "", onSave = viewModel::createGroup, onDismiss = { newGroup = false })
+    editGroup?.let { g ->
+        GroupEditDialog(
+            group = g, allChannels = state.channels, logoMap = state.logoMap,
+            onRename = { viewModel.renameGroup(g, it) },
+            onAdd = { viewModel.addToGroup(g, it) },
+            onRemove = { viewModel.removeFromGroup(g, it) },
+            onDismiss = { editGroup = null },
+        )
     }
 }
 
+private fun LazyGridScope.full(content: @Composable () -> Unit) = item(span = { GridItemSpan(maxLineSpan) }) { content() }
+
+/** The Favorites groups: a row each with a logo preview, count and actions; New group. */
 @Composable
-private fun ChannelRow(
-    channel: Channel,
-    logoUrl: String?,
-    isFavorite: Boolean,
-    nowNext: NowNextEntry? = null,
-    onClick: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    isTV: Boolean = false,
-    focusRequester: FocusRequester? = null,
+private fun GroupsSection(
+    groups: List<FavoriteGroup>, logoMap: Map<String, String>, byId: Map<String, Channel>, onOpen: (Channel) -> Unit,
+    onNew: () -> Unit, onEdit: (FavoriteGroup) -> Unit, onDelete: (FavoriteGroup) -> Unit, onMove: (FavoriteGroup, Int) -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val primary = MaterialTheme.colorScheme.primary
-
-    // TV doesn't need bigger touch targets (there's no touch) — legibility at
-    // a distance comes from the larger text style below, not from bloating
-    // row height/logo size, which just wastes vertical space and shows fewer
-    // channels per screen.
-    val vertPad  = 10.dp
-    val logoSize = if (isTV) 40.dp else 38.dp
-    val numWidth = if (isTV) 30.dp else 28.dp
-
-    val modifier = Modifier
-        .fillMaxWidth()
-        .onFocusChanged { focused = it.isFocused }
-        .then(
-            if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier
-        )
-        // Visible D-pad focus border — TV users have no other focus cue
-        .border(
-            width = if (focused) 2.dp else 0.dp,
-            color = if (focused) primary else Color.Transparent,
-            shape = RoundedCornerShape(4.dp),
-        )
-        .background(
-            if (focused) primary.copy(alpha = 0.10f) else Color.Transparent,
-            shape = RoundedCornerShape(4.dp),
-        )
-        .clickable(onClick = onClick)
-        .padding(horizontal = 12.dp, vertical = vertPad)
-
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        // Channel number
-        Text(
-            text  = channel.number.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-            modifier = Modifier.width(numWidth),
-        )
-
-        // Logo box
-        Box(
-            modifier = Modifier
-                .size(logoSize)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (!logoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model            = logoUrl,
-                    contentDescription = channel.name,
-                    contentScale     = ContentScale.Fit,
-                    modifier         = Modifier.fillMaxSize().padding(3.dp),
-                )
-            } else {
-                Icon(
-                    Icons.Default.Tv, null, Modifier.size(if (isTV) 22.dp else 18.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                )
-            }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionHeader(Icons.Default.Layers, "Groups", groups.size)
+            Spacer(Modifier.weight(1f))
+            Pill("New group", false, onNew, leading = Icons.Default.Add)
         }
-
-        Spacer(Modifier.width(12.dp))
-
-        // Name + Now & Next
-        Column(Modifier.weight(1f)) {
-            Text(
-                text     = channel.name,
-                style    = if (isTV) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (nowNext != null) {
-                val nowSecs  = remember { System.currentTimeMillis() / 1000L }
-                val duration = nowNext.now.endTime - nowNext.now.startTime
-                val progress = if (duration > 0)
-                    ((nowSecs - nowNext.now.startTime).toFloat() / duration).coerceIn(0f, 1f)
-                else 0f
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text     = nowNext.now.title,
-                    style    = MaterialTheme.typography.labelSmall,
-                    color    = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                LinearProgressIndicator(
-                    progress        = { progress },
-                    modifier        = Modifier.fillMaxWidth().height(2.dp),
-                    color           = MaterialTheme.colorScheme.primary,
-                    trackColor      = MaterialTheme.colorScheme.surfaceVariant,
-                )
-                if (nowNext.next != null) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text     = "Next: ${nowNext.next.title}",
-                        style    = MaterialTheme.typography.labelSmall,
-                        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-
-        // Favorite toggle
-        IconButton(onClick = onToggleFavorite, modifier = Modifier.size(if (isTV) 44.dp else 36.dp)) {
-            Icon(
-                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                contentDescription = if (isFavorite) "Remove favourite" else "Add favourite",
-                tint = if (isFavorite) MaterialTheme.colorScheme.error
-                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                modifier = Modifier.size(if (isTV) 22.dp else 18.dp),
-            )
+        groups.forEachIndexed { i, g ->
+            GroupRow(g, logoMap, byId, onOpen, canUp = i > 0, canDown = i < groups.size - 1,
+                onEdit = { onEdit(g) }, onDelete = { onDelete(g) }, onMove = { d -> onMove(g, d) })
         }
     }
 }
