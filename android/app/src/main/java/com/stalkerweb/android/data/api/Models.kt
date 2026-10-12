@@ -114,6 +114,13 @@ data class VodItem(
     val isSeries: Boolean = false,
     val screenshotUrl: String? = null,
     val cmd: String = "",
+    // For the VOD filters and My List (backend VodManager._normalizeItem); empty when the portal sends none.
+    val genres: List<String> = emptyList(),
+    val rating: Double = 0.0,
+    val added: String = "",
+    val episodes: List<String> = emptyList(),
+    val director: String = "",
+    val actors: String = "",
 )
 
 @JsonClass(generateAdapter = false)
