@@ -6,8 +6,12 @@ import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
+import com.stalkerweb.android.data.api.toApiError
+import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
+import com.stalkerweb.android.data.repo.WatchRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,47 +21,80 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
+/** My List, shown as the first category (its titles come from the watch state, not the portal). */
+val MY_LIST = VodCategory(id = "mylist", title = "My List")
+
+/** The "All" the server adds when the portal's own can't be shown (backend routes/vod.js). */
+private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
+
+const val SHOW_STEP = 140
+
+/** A category's whole listing, read a part at a time (/api/vod/listing). */
+data class ListingState(
+    val items: List<VodItem> = emptyList(),
+    val loaded: Int = 0,
+    val total: Int = 0,
+    val complete: Boolean = false,
+    val error: String? = null,
+)
+
 data class VodUiState(
-    val type: String                       = "vod",   // "vod" (Movies) | "series" (TV Shows)
-    val categories: List<VodCategory>      = emptyList(),
-    val selectedCategory: VodCategory?     = null,
-    val items: List<VodItem>               = emptyList(),
-    val query: String                      = "",
-    val page: Int                          = 1,
-    val totalPages: Int                    = 1,
-    val loadingCategories: Boolean         = false,
-    val loadingItems: Boolean              = false,
-    val error: String?                     = null,
-    // Series drill-down sheet
-    val seriesItem: VodItem?               = null,
-    val seasons: List<VodSeason>?          = null,
-    val selectedSeason: VodSeason?         = null,
-    val episodes: List<VodEpisode>?        = null,
-    val seriesLoading: Boolean             = false,
+    val type: String = "vod",                 // "vod" (Movies) | "series"
+    val categories: List<VodCategory> = emptyList(),
+    val selected: VodCategory? = null,
+    val items: List<VodItem> = emptyList(),   // paged mode
+    val page: Int = 1,
+    val totalPages: Int = 1,
+    val loadingCategories: Boolean = false,
+    val loadingItems: Boolean = false,
+    val error: String? = null,
+    val search: String = "",
+    val filters: VodFilterState = VodFilterState(),
+    val sort: String = "name",
+    val listing: ListingState = ListingState(),
+    val visibleCount: Int = SHOW_STEP,
+    // The seasons pop-up
+    val seriesItem: VodItem? = null,
+    val seasons: List<VodSeason>? = null,
+    val selectedSeason: VodSeason? = null,
+    val episodes: List<VodEpisode>? = null,
+    val seriesLoading: Boolean = false,
 ) {
+    val isMyList: Boolean get() = selected?.id == MY_LIST.id
+    val isCombinedAll: Boolean get() = selected?.id in COMBINED_ALL_IDS
+    /** The portal's own "All": the whole catalog, so it's never read whole to filter. */
+    val isPortalAll: Boolean get() = selected != null && !isCombinedAll &&
+        (selected.id == "*" || selected.title.trim().equals("all", ignoreCase = true))
+    /** Whole-listing mode: a filter is on (not in the portal's "All"), or an added "All". */
+    val filtering: Boolean get() = !isMyList && selected != null &&
+        ((filters.isActive && !isPortalAll) || isCombinedAll)
     val hasMore: Boolean get() = page < totalPages
 }
 
-// The "All" the server adds to Movies or Series when the portal's own can't be
-// shown (backend routes/vod.js).
-private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
+/**
+ * The VOD page, as on the web (frontend/src/pages/VodPage.jsx): Movies and
+ * Series; My List and the categories; paged titles from the portal, or — for a
+ * filter or an added "All" — the whole category, filtered and sorted here.
+ */
+class VodViewModel(
+    private val vod: VodRepository,
+    private val watch: WatchRepository,
+    private val viewers: ViewerRepository,
+    private val prefs: AppPrefs,
+) : ViewModel() {
 
-class VodViewModel(private val vod: VodRepository, private val viewers: ViewerRepository) : ViewModel() {
-
-    private val _state = MutableStateFlow(VodUiState())
+    private val _state = MutableStateFlow(VodUiState(sort = prefs.vodSort))
     val state: StateFlow<VodUiState> = _state.asStateFlow()
 
-    private var searchJob: Job? = null
-    // Tracked so a newer request supersedes an in-flight one instead of
-    // racing it — otherwise a slow response for a category or search term
-    // the user has already moved on from can land last and win.
     private var itemsJob: Job? = null
+    private var searchJob: Job? = null
+    private var listingJob: Job? = null
 
     init {
-        // Another viewer: start the section again (their hidden categories differ).
+        // Another viewer: start again (their hidden categories differ).
         viewModelScope.launch {
             viewers.changes.drop(1).collect {
-                _state.value = VodUiState(type = _state.value.type)
+                _state.value = VodUiState(type = _state.value.type, sort = _state.value.sort)
                 loadCategories()
             }
         }
@@ -65,82 +102,118 @@ class VodViewModel(private val vod: VodRepository, private val viewers: ViewerRe
 
     fun setType(type: String) {
         if (type == _state.value.type) return
-        _state.value = VodUiState(type = type)
+        _state.value = VodUiState(type = type, sort = _state.value.sort, search = _state.value.search)
         loadCategories()
     }
 
     fun loadCategories() {
         _state.value = _state.value.copy(loadingCategories = true, error = null)
         viewModelScope.launch {
-            runCatching { vod.getVodCategories(_state.value.type) }
-                .onSuccess { cats ->
-                    _state.value = _state.value.copy(categories = cats, loadingCategories = false)
-                    // Not an "All" the server added: it reads every category in
-                    // full, so it waits to be picked.
-                    (cats.firstOrNull { it.id !in COMBINED_ALL_IDS } ?: cats.firstOrNull())?.let { selectCategory(it) }
-                }
-                .onFailure { _state.value = _state.value.copy(loadingCategories = false, error = it.message) }
+            val cats = runCatching { vod.getVodCategories(_state.value.type) }.getOrDefault(emptyList())
+            _state.value = _state.value.copy(categories = cats, loadingCategories = false)
+            // The portal's "All" opens first; never an added one (it reads every category in full).
+            val real = cats.filter { it.id !in COMBINED_ALL_IDS }
+            val first = real.firstOrNull { it.id == "*" } ?: real.firstOrNull { it.title.trim().equals("all", true) } ?: real.firstOrNull() ?: cats.firstOrNull()
+            first?.let(::selectCategory)
         }
     }
 
     fun selectCategory(cat: VodCategory) {
-        _state.value = _state.value.copy(
-            selectedCategory = cat, items = emptyList(), page = 1, totalPages = 1, query = "",
-        )
-        loadItems(cat.id, "", 1)
+        _state.value = _state.value.copy(selected = cat, items = emptyList(), page = 1, totalPages = 1,
+            listing = ListingState(), visibleCount = SHOW_STEP, error = null)
+        refresh()
     }
 
-    fun setQuery(q: String) {
-        _state.value = _state.value.copy(query = q)
-        val cat = _state.value.selectedCategory ?: return
+    /** The search is kept across categories; paged mode asks the portal after a pause, a listing filters at once. */
+    fun setSearch(q: String) {
+        _state.value = _state.value.copy(search = q, visibleCount = SHOW_STEP)
         searchJob?.cancel()
+        if (_state.value.filtering || _state.value.isMyList) return
         searchJob = viewModelScope.launch {
             delay(400)
-            _state.value = _state.value.copy(items = emptyList(), page = 1)
-            loadItems(cat.id, q, 1)
+            loadItems(page = 1)
         }
     }
+
+    fun setFilters(f: VodFilterState) {
+        val wasFiltering = _state.value.filtering
+        _state.value = _state.value.copy(filters = f, visibleCount = SHOW_STEP)
+        if (wasFiltering != _state.value.filtering) refresh()
+    }
+
+    fun setSort(sort: String) {
+        if (sort == _state.value.sort) return
+        prefs.vodSort = sort
+        _state.value = _state.value.copy(sort = sort, visibleCount = SHOW_STEP)
+        if (!_state.value.filtering && !_state.value.isMyList) loadItems(page = 1)
+    }
+
+    fun showMore() { _state.value = _state.value.copy(visibleCount = _state.value.visibleCount + SHOW_STEP) }
 
     fun loadMore() {
         val s = _state.value
-        if (s.loadingItems || !s.hasMore) return
-        val cat = s.selectedCategory ?: return
-        loadItems(cat.id, s.query, s.page + 1)
+        if (s.filtering || s.isMyList) { showMore(); return }
+        if (s.hasMore && !s.loadingItems) loadItems(page = s.page + 1)
     }
 
-    private fun loadItems(categoryId: String, search: String, page: Int) {
+    // Paged titles, or the whole listing, for what's selected now.
+    private fun refresh() {
+        itemsJob?.cancel(); listingJob?.cancel()
+        val s = _state.value
+        when {
+            s.isMyList || s.selected == null -> Unit
+            s.filtering -> startListing()
+            else -> loadItems(page = 1)
+        }
+    }
+
+    private fun loadItems(page: Int) {
+        val s = _state.value
+        val cat = s.selected ?: return
+        if (s.isMyList || s.isCombinedAll) return
         itemsJob?.cancel()
-        _state.value = _state.value.copy(loadingItems = true, error = null)
+        _state.value = s.copy(loadingItems = true, error = null, items = if (page == 1) emptyList() else s.items)
         itemsJob = viewModelScope.launch {
-            runCatching { vod.getVodItems(_state.value.type, categoryId, page, search) }
+            runCatching { vod.getVodItems(s.type, cat.id, page, s.search.trim(), s.sort) }
                 .onSuccess { r ->
-                    // Pages come from a server-side list whose order isn't stable,
-                    // so the same item can arrive on two pages. LazyVerticalGrid
-                    // keys by id and throws on a duplicate, so de-dupe on append.
-                    val merged = if (page == 1) r.items else _state.value.items + r.items
-                    _state.value = _state.value.copy(
-                        items        = merged.distinctBy { it.id },
-                        page         = r.page,
-                        totalPages   = r.totalPages,
-                        loadingItems = false,
+                    val cur = _state.value
+                    _state.value = cur.copy(
+                        items = if (page == 1) r.items else (cur.items + r.items).distinctBy { it.id },
+                        page = page, totalPages = r.totalPages, loadingItems = false,
                     )
                 }
                 .onFailure { e ->
-                    // Cancellation means a newer request replaced this one; it is
-                    // not a failure and must not clear its loading state or show
-                    // an error over the request that superseded it.
-                    if (e is CancellationException) return@onFailure
-                    _state.value = _state.value.copy(loadingItems = false, error = e.message)
+                    if (e is CancellationException) throw e
+                    _state.value = _state.value.copy(loadingItems = false, error = e.toApiError().message)
                 }
         }
     }
 
-    // ── Series drill-down ─────────────────────────────────────────────────────
+    // Reads the whole category a part at a time until it's complete (web useCategoryListing).
+    private fun startListing() {
+        val s = _state.value
+        val cat = s.selected ?: return
+        listingJob?.cancel()
+        _state.value = s.copy(listing = ListingState())
+        listingJob = viewModelScope.launch {
+            while (true) {
+                val have = _state.value.listing.items
+                val r = runCatching { vod.getListing(s.type, cat.id, have.size) }.getOrElse { e ->
+                    if (e is CancellationException) throw e
+                    _state.value = _state.value.copy(listing = _state.value.listing.copy(error = e.toApiError().message, complete = true))
+                    return@launch
+                }
+                _state.value = _state.value.copy(listing = ListingState(have + r.items, r.loaded, r.total, r.complete, r.error))
+                if (r.complete || r.error != null) return@launch
+                delay(1200)
+            }
+        }
+    }
+
+    // ── The seasons pop-up ────────────────────────────────────────────────────
 
     fun openSeries(item: VodItem) {
-        _state.value = _state.value.copy(
-            seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true,
-        )
+        _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true)
         viewModelScope.launch {
             val seasons = vod.getVodSeasons(item.id)
             _state.value = _state.value.copy(seasons = seasons, seriesLoading = false)
@@ -156,13 +229,9 @@ class VodViewModel(private val vod: VodRepository, private val viewers: ViewerRe
         }
     }
 
-    fun backToSeasons() {
-        _state.value = _state.value.copy(selectedSeason = null, episodes = null)
-    }
+    fun backToSeasons() { _state.value = _state.value.copy(selectedSeason = null, episodes = null) }
 
-    fun closeSeries() {
-        _state.value = _state.value.copy(
-            seriesItem = null, seasons = null, selectedSeason = null, episodes = null, seriesLoading = false,
-        )
-    }
+    fun closeSeries() { _state.value = _state.value.copy(seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
+
+    fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
 }
