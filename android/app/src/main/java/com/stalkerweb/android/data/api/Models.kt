@@ -266,3 +266,10 @@ data class ProfilesResponse(
 
 @JsonClass(generateAdapter = false)
 data class SetActiveProfileRequest(val id: String?)
+
+/** A channel's recent stream failures (backend /api/channels/health). */
+@JsonClass(generateAdapter = false)
+data class ChannelHealth(
+    val errors: Int = 0,
+    val lastError: String? = null,
+)
