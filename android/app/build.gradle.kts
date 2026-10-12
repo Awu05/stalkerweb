@@ -109,4 +109,6 @@ dependencies {
     implementation(libs.cast.framework)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
 }

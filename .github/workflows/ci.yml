@@ -72,6 +72,10 @@ jobs:
           mkdir -p ~/.android
           echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
 
+      - name: Unit tests
+        working-directory: android
+        run: gradle :app:testMobileDebugUnitTest
+
       - name: Build debug APKs (mobile + tv)
         working-directory: android
         run: gradle :app:assembleMobileDebug :app:assembleTvDebug
