@@ -75,7 +75,15 @@ interface StalkerApi {
         @Query("category") category: String,
         @Query("page") page: Int = 1,
         @Query("search") search: String = "",
+        @Query("sort") sort: String = "name",
     ): VodItemsResponse
+
+    @GET("api/vod/listing")
+    suspend fun getVodListing(
+        @Query("type") type: String,
+        @Query("category") category: String,
+        @Query("from") from: Int = 0,
+    ): ListingResponse
 
     @GET("api/vod/seasons/{showId}")
     suspend fun getVodSeasons(@Path("showId") showId: String): VodSeasonsResponse
@@ -94,6 +102,28 @@ interface StalkerApi {
         @Query("seasonId") seasonId: String = "",
         @Query("episodeId") episodeId: String = "",
     ): VodStreamResponse
+
+    // ── What the viewer watched (per viewer and portal) ────────────────────────
+    @GET("api/vod/watch")
+    suspend fun getWatch(): WatchState
+
+    @PUT("api/vod/watch")
+    suspend fun saveWatch(@Body body: SaveWatchRequest): WatchState
+
+    @DELETE("api/vod/watch/history/{id}")
+    suspend fun removeWatchTitle(@Path("id") id: String): WatchState
+
+    @DELETE("api/vod/watch/history")
+    suspend fun clearWatchHistory(): WatchState
+
+    @PUT("api/vod/watch/list")
+    suspend fun addToWatchList(@Body item: VodItem): WatchState
+
+    @DELETE("api/vod/watch/list/{id}")
+    suspend fun removeFromWatchList(@Path("id") id: String): WatchState
+
+    @PUT("api/vod/watch/list/{id}/completed")
+    suspend fun setWatchListCompleted(@Path("id") id: String, @Body body: CompletedRequest): WatchState
 
     companion object {
         /** A client for [baseUrl] with a fixed [accessKey] and no viewer — for testing a server in Setup. */

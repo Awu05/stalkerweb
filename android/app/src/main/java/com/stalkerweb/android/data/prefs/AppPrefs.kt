@@ -49,6 +49,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_CHANNELS_VIEWER, null)
         set(value) = prefs.edit().putString(KEY_CHANNELS_VIEWER, value).apply()
 
+    // VOD title order: "name" (A–Z) or "added" (newest first), remembered on this device.
+    var vodSort: String
+        get() = prefs.getString(KEY_VOD_SORT, null) ?: "name"
+        set(value) = prefs.edit().putString(KEY_VOD_SORT, value).apply()
+
     /** Forgets the logos saved with watch history — after a key change their links may carry the old token. */
     fun clearWatchedLogos() {
         val list = getWatchedChannels()
@@ -222,6 +227,7 @@ class AppPrefs(context: Context) {
         private const val KEY_VIEWER_ID       = "viewer_id"
         private const val KEY_ACCESS_REJECTED = "access_rejected_message"
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
+        private const val KEY_VOD_SORT        = "vod_sort"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"
