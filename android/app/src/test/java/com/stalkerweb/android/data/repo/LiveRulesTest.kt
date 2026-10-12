@@ -39,6 +39,13 @@ class LiveRulesTest {
         assertNull(jumpTarget(channels, ""))
     }
 
+    @Test fun zeroIsNoChannelNumber() {
+        // Channels without a number have 0: typing 0 must not open the first of them.
+        val unnumbered = channels + Channel(uniqueId = "z", number = 0, name = "No number", genreId = "news")
+        assertNull(jumpTarget(unnumbered, "0"))
+        assertNull(jumpTarget(unnumbered, "00"))
+    }
+
     @Test fun movesAnItemWithinBounds() {
         val l = listOf("a", "b", "c")
         assertEquals(listOf("b", "a", "c"), moveItem(l, 1, -1))
