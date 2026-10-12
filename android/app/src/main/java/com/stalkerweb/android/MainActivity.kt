@@ -38,6 +38,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stalkerweb.android.crash.CrashReporter
 import com.stalkerweb.android.data.api.AppEvent
+import com.stalkerweb.android.data.repo.PlayerParams
 import com.stalkerweb.android.data.update.UpdateManager
 import com.stalkerweb.android.ui.shell.AppShell
 import com.stalkerweb.android.ui.shell.ShellViewModel
@@ -155,14 +156,14 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodViewModel(container.vod, container.viewers) as T
+                            VodViewModel(container.vod, container.watch, container.viewers, container.prefs) as T
                     }
                 }
                 val vodPlayerVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodPlayerViewModel(application, container.vod) as T
+                            VodPlayerViewModel(application, container.vod, container.watch, container.links) as T
                     }
                 }
                 val portalVmFactory = remember {
@@ -293,12 +294,8 @@ class MainActivity : ComponentActivity() {
                             vod = {
                                 VodScreen(
                                     viewModel = vodViewModel,
-                                    onPlayMovie = { item -> navController.navigate(Screen.VodPlayer.go(videoId = item.id, cmd = item.cmd, title = item.name)) },
-                                    onPlayEpisode = { show, season, episodeId, seriesNumber, title ->
-                                        navController.navigate(
-                                            Screen.VodPlayer.go(videoId = show.id, series = seriesNumber, seasonId = season.id, episodeId = episodeId, title = "${show.name} · $title")
-                                        )
-                                    },
+                                    watch = container.watch,
+                                    onPlay = { params -> navController.navigate(Screen.VodPlayer.go(params)) },
                                 )
                             },
                             onSwitchViewer   = { toPicker(required = false) },
@@ -325,25 +322,12 @@ class MainActivity : ComponentActivity() {
 
                     composable(
                         route = Screen.VodPlayer.route,
-                        arguments = listOf(
-                            navArgument("videoId")   { type = NavType.StringType; defaultValue = "" },
-                            navArgument("cmd")       { type = NavType.StringType; defaultValue = "" },
-                            navArgument("series")    { type = NavType.StringType; defaultValue = "" },
-                            navArgument("seasonId")  { type = NavType.StringType; defaultValue = "" },
-                            navArgument("episodeId") { type = NavType.StringType; defaultValue = "" },
-                            navArgument("title")     { type = NavType.StringType; defaultValue = "" },
-                        ),
+                        arguments = listOf(navArgument("params") { type = NavType.StringType; defaultValue = "" }),
                     ) { backStack ->
-                        val a = backStack.arguments
-                        // Scoped to this destination so each opened video gets a fresh VM.
+                        // Scoped to this destination so each opened title gets a fresh VM.
                         val vodPlayerViewModel: VodPlayerViewModel = viewModel(factory = vodPlayerVmFactory)
                         VodPlayerScreen(
-                            videoId   = a?.getString("videoId") ?: "",
-                            cmd       = a?.getString("cmd") ?: "",
-                            series    = a?.getString("series") ?: "",
-                            seasonId  = a?.getString("seasonId") ?: "",
-                            episodeId = a?.getString("episodeId") ?: "",
-                            title     = a?.getString("title") ?: "",
+                            params    = PlayerParams.parse(backStack.arguments?.getString("params") ?: ""),
                             viewModel = vodPlayerViewModel,
                             onBack    = { navController.popBackStack() },
                         )
