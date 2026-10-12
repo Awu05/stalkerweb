@@ -36,8 +36,9 @@ data class VodUiState(
     val hasMore: Boolean get() = page < totalPages
 }
 
-// The Series "All" the server adds on portals without a series section (backend routes/vod.js).
-private const val SERIES_ALL_ID = "series:all"
+// The "All" the server adds to Movies or Series when the portal's own can't be
+// shown (backend routes/vod.js).
+private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
 
 class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
 
@@ -62,9 +63,9 @@ class VodViewModel(private val repository: ChannelRepository) : ViewModel() {
             runCatching { repository.getVodCategories(_state.value.type) }
                 .onSuccess { cats ->
                     _state.value = _state.value.copy(categories = cats, loadingCategories = false)
-                    // Not the server's Series "All" ("series:all"): it reads every
-                    // series category in full, so it waits to be picked.
-                    (cats.firstOrNull { it.id != SERIES_ALL_ID } ?: cats.firstOrNull())?.let { selectCategory(it) }
+                    // Not an "All" the server added: it reads every category in
+                    // full, so it waits to be picked.
+                    (cats.firstOrNull { it.id !in COMBINED_ALL_IDS } ?: cats.firstOrNull())?.let { selectCategory(it) }
                 }
                 .onFailure { _state.value = _state.value.copy(loadingCategories = false, error = it.message) }
         }
