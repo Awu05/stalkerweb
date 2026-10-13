@@ -109,4 +109,11 @@ dependencies {
     implementation(libs.cast.framework)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
+}
+
+// Name every unit test in the build output, so CI logs show what ran.
+tasks.withType<Test>().configureEach {
+    testLogging { events("passed", "failed", "skipped") }
 }

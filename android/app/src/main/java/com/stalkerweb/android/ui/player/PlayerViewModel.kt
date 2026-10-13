@@ -17,7 +17,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.stalkerweb.android.cast.CastManager
 import com.stalkerweb.android.data.api.Channel
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.LiveRepository
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -50,7 +50,7 @@ data class PlayerUiState(
 @OptIn(UnstableApi::class)
 class PlayerViewModel(
     application: Application,
-    private val repository: ChannelRepository,
+    private val live: LiveRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(PlayerUiState())
@@ -119,11 +119,11 @@ class PlayerViewModel(
     fun init(channelId: String) {
         // Seed from the on-disk cache so channel navigation/metadata work instantly
         // while the network refresh runs below.
-        val cached = repository.getCachedChannels()
+        val cached = live.getCachedChannels()
         _state.value = _state.value.copy(
             activeChannelId = channelId,
             channels        = if (cached.isNotEmpty()) cached else _state.value.channels,
-            logoMap         = repository.getCachedLogoMap().ifEmpty { _state.value.logoMap },
+            logoMap         = live.getCachedLogoMap().ifEmpty { _state.value.logoMap },
         )
 
         // Reuse an existing connected MediaController; if the previous one disconnected
@@ -163,9 +163,9 @@ class PlayerViewModel(
                 // portal is connected) inside runCatching's reach — without it the
                 // failure propagates to the parent job and crashes the app.
                 coroutineScope {
-                    val channels = async { repository.getChannels() }
-                    val logos    = async { repository.getLogoMap() }
-                    val favs     = async { repository.getFavoriteIds() }
+                    val channels = async { live.getChannels() }
+                    val logos    = async { live.getLogoMap() }
+                    val favs     = async { live.getFavoriteIds() }
                     Triple(channels.await(), logos.await(), favs.await())
                 }
             }.onSuccess { (channels, logos, favs) ->
@@ -189,7 +189,7 @@ class PlayerViewModel(
         // the raw-MPEG-TS channels the backend now serves.
         viewModelScope.launch {
             runCatching {
-                val info = repository.resolveStream(channelId)
+                val info = live.resolveStream(channelId)
                 val mime = when (info.type) {
                     "hls"    -> MimeTypes.APPLICATION_M3U8
                     "mpegts" -> MimeTypes.VIDEO_MP2T
@@ -203,7 +203,7 @@ class PlayerViewModel(
                 p.prepare()
                 p.playWhenReady = true
                 if (channel != null) {
-                    repository.pushWatched(channel, _state.value.logoMap[channelId])
+                    live.pushWatched(channel, _state.value.logoMap[channelId])
                 }
                 // Keep Cast session in sync with channel changes
                 castManager?.setStream(info.url, channel?.name)
@@ -248,7 +248,7 @@ class PlayerViewModel(
         )
         viewModelScope.launch {
             runCatching {
-                if (isFav) repository.removeFavorite(id) else repository.addFavorite(id)
+                if (isFav) live.removeFavorite(id) else live.addFavorite(id)
             }.onFailure {
                 _state.value = _state.value.copy(
                     favoriteIds = if (isFav) _state.value.favoriteIds + id
@@ -305,15 +305,15 @@ class PlayerViewModel(
     }
 
     fun saveStreamOverride(channelId: String, url: String?) {
-        repository.setStreamOverride(channelId, url)
+        live.setStreamOverride(channelId, url)
         _state.value = _state.value.copy(overrideSheetChannel = null)
         // Reload stream with new URL if it's the active channel
         if (channelId == _state.value.activeChannelId) loadStream(channelId)
     }
 
-    fun getStreamOverride(channelId: String): String? = repository.getStreamOverride(channelId)
+    fun getStreamOverride(channelId: String): String? = live.getStreamOverride(channelId)
 
-    fun getDefaultStreamUrl(channelId: String): String = repository.defaultStreamUrl(channelId)
+    fun getDefaultStreamUrl(channelId: String): String = live.defaultStreamUrl(channelId)
 
     private companion object {
         const val MAX_RECONNECT_ATTEMPTS = 8

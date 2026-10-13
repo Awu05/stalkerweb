@@ -15,7 +15,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.stalkerweb.android.data.api.VodEpisode
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class VodPlayerViewModel(
     application: Application,
-    private val repository: ChannelRepository,
+    private val vod: VodRepository,
 ) : AndroidViewModel(application) {
 
     private val _player = MutableStateFlow<Player?>(null)
@@ -80,7 +80,7 @@ class VodPlayerViewModel(
 
         // Preload the season so the end-of-episode dialog can be shown instantly.
         if (seasonId.isNotBlank()) {
-            viewModelScope.launch { _episodes.value = repository.getVodEpisodes(videoId, seasonId) }
+            viewModelScope.launch { _episodes.value = vod.getVodEpisodes(videoId, seasonId) }
         }
 
         val token  = SessionToken(getApplication(), ComponentName(getApplication(), PlaybackService::class.java))
@@ -100,7 +100,7 @@ class VodPlayerViewModel(
 
         viewModelScope.launch {
             runCatching {
-                repository.resolveVodStreamUrl(videoId, cmd, series, seasonId, episodeId)
+                vod.resolveVodStreamUrl(videoId, cmd, series, seasonId, episodeId)
             }.onSuccess { url ->
                 val play = { startPlayback(url, title) }
                 if (_player.value != null) play() else pendingPlay = play
@@ -144,7 +144,7 @@ class VodPlayerViewModel(
         viewModelScope.launch {
             runCatching {
                 // Episodes resolve by season/episode id; cmd is only for movies.
-                repository.resolveVodStreamUrl(
+                vod.resolveVodStreamUrl(
                     videoId   = videoId,
                     cmd       = "",
                     series    = episode.seriesNumber,

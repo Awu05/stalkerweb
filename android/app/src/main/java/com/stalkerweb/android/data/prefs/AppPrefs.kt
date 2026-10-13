@@ -30,6 +30,33 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_SHARE_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_SHARE_TOKEN, value).apply()
 
+    // The viewer this device watches as (Settings → Viewers on the web), sent as
+    // X-Viewer. Cleared when the server or access key changes, or the viewer is
+    // deleted — then "Who's watching?" asks again.
+    var viewerId: String?
+        get() = prefs.getString(KEY_VIEWER_ID, null)
+        set(value) = prefs.edit().putString(KEY_VIEWER_ID, value).apply()
+
+    // The server's message when it last refused the saved access key (or locked
+    // this address out), until a key is saved again — see AccessGuard. Kept
+    // across restarts so a relaunch goes to Setup instead of trying the key again.
+    var accessRejectedMessage: String?
+        get() = prefs.getString(KEY_ACCESS_REJECTED, null)
+        set(value) = prefs.edit().putString(KEY_ACCESS_REJECTED, value).apply()
+
+    // Whose channel list the channel cache holds: lists are filtered per viewer.
+    var channelsCacheViewer: String?
+        get() = prefs.getString(KEY_CHANNELS_VIEWER, null)
+        set(value) = prefs.edit().putString(KEY_CHANNELS_VIEWER, value).apply()
+
+    /** Forgets the logos saved with watch history — after a key change their links may carry the old token. */
+    fun clearWatchedLogos() {
+        val list = getWatchedChannels()
+        if (list.any { it.logoUrl != null }) {
+            prefs.edit().putString(KEY_WATCH_HISTORY, historyToJson(list.map { it.copy(logoUrl = null) })).apply()
+        }
+    }
+
     // ── Watch history ─────────────────────────────────────────────────────────
 
     fun pushWatchedChannel(uniqueId: String, name: String, logoUrl: String?) {
@@ -192,6 +219,9 @@ class AppPrefs(context: Context) {
         private const val KEY_SERVER_URL      = "server_url"
         private const val KEY_ACCESS_KEY      = "access_key"
         private const val KEY_SHARE_TOKEN     = "share_token"
+        private const val KEY_VIEWER_ID       = "viewer_id"
+        private const val KEY_ACCESS_REJECTED = "access_rejected_message"
+        private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"

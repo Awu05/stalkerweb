@@ -3,8 +3,13 @@ package com.stalkerweb.android
 import android.net.Uri
 
 sealed class Screen(val route: String) {
-    object Setup    : Screen("setup")
-    object Channels : Screen("channels")
+    object Setup : Screen("setup?message={message}") {
+        fun go(message: String? = null): String = "setup?message=${Uri.encode(message ?: "")}"
+    }
+    object Viewers : Screen("viewers?required={required}") {
+        fun go(required: Boolean): String = "viewers?required=$required"
+    }
+    object Shell : Screen("shell")
     object Portal   : Screen("portal")
     object Player   : Screen("player/{channelId}/{channelName}") {
         fun go(channelId: String, channelName: String): String {
@@ -12,7 +17,6 @@ sealed class Screen(val route: String) {
             return "player/$channelId/$encodedName"
         }
     }
-    object Vod      : Screen("vod")
     object VodPlayer : Screen(
         "vodplayer?videoId={videoId}&cmd={cmd}&series={series}&seasonId={seasonId}&episodeId={episodeId}&title={title}"
     ) {

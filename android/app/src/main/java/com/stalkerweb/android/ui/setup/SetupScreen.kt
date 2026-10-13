@@ -18,10 +18,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.api.ApiError
+import com.stalkerweb.android.data.api.toApiError
+import com.stalkerweb.android.data.repo.ServerRepository
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.launch
-import retrofit2.HttpException
 import java.net.URI
 
 private data class ServerAddress(val host: String, val port: String)
@@ -40,26 +41,28 @@ private fun parseUrl(raw: String): ServerAddress {
     }.getOrElse { ServerAddress(raw, "") }
 }
 
-private fun connectError(e: Throwable): String = when ((e as? HttpException)?.code()) {
-    401  -> "Wrong or missing access key"
-    403  -> "That key only allows playback — enter the access key itself, not the Xtream password"
-    429  -> "Too many wrong access keys — try again in 15 minutes"
-    else -> "Cannot reach server: ${e.message}"
+// The server's own words where it gave them — "Wrong access key — 2 tries
+// left…", "try again in 30 minutes" — and a plain hint when nothing answered.
+// 403: a playback-only key (the Xtream password) was entered.
+private fun connectError(e: Throwable): String = when (val err = e.toApiError()) {
+    is ApiError.Unreachable -> "Can't reach the server — check the address and port."
+    else -> err.message ?: "Couldn't connect."
 }
 
 @Composable
 fun SetupScreen(
-    repository: ChannelRepository,
+    server: ServerRepository,
     onConnected: () -> Unit,
+    startMessage: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
-    val initial = remember { parseUrl(repository.getServerUrl() ?: "") }
+    val initial = remember { parseUrl(server.getServerUrl() ?: "") }
     var host    by remember { mutableStateOf(initial.host) }
     var port    by remember { mutableStateOf(initial.port) }
     // Only needed when the server sets ACCESS_KEY; sent as a header, never in links.
-    var accessKey by remember { mutableStateOf(repository.getAccessKey() ?: "") }
+    var accessKey by remember { mutableStateOf(server.getAccessKey() ?: "") }
     var testing by remember { mutableStateOf(false) }
-    var error   by remember { mutableStateOf<String?>(null) }
+    var error   by remember { mutableStateOf<String?>(startMessage?.takeIf { it.isNotBlank() }) }
     val scope   = rememberCoroutineScope()
     val focus   = LocalFocusManager.current
     val hostFocusRequester = remember { FocusRequester() }
@@ -94,10 +97,10 @@ fun SetupScreen(
             runCatching {
                 // Test first; only persist the URL once it actually connects so a
                 // failed/abandoned edit never leaves the app on a broken server.
-                repository.testServerUrl(fullUrl, key)
+                server.testServerUrl(fullUrl, key)
             }.onSuccess {
                 testing = false
-                repository.setServerUrl(fullUrl, key)
+                server.setServerUrl(fullUrl, key)
                 onConnected()
             }.onFailure { e ->
                 testing = false

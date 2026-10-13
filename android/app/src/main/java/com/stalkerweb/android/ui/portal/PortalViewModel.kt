@@ -3,7 +3,7 @@ package com.stalkerweb.android.ui.portal
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalkerweb.android.data.api.Profile
-import com.stalkerweb.android.data.repository.ChannelRepository
+import com.stalkerweb.android.data.repo.ServerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,7 +25,7 @@ data class PortalUiState(
     val connectingProfileId: String? = null,
 )
 
-class PortalViewModel(private val repository: ChannelRepository) : ViewModel() {
+class PortalViewModel(private val server: ServerRepository) : ViewModel() {
 
     private val _state = MutableStateFlow(PortalUiState())
     val state: StateFlow<PortalUiState> = _state.asStateFlow()
@@ -35,9 +35,9 @@ class PortalViewModel(private val repository: ChannelRepository) : ViewModel() {
     fun refresh() {
         _state.value = _state.value.copy(loading = true, error = null)
         viewModelScope.launch {
-            val status   = runCatching { repository.testConnection() }.getOrNull()
-            val config   = repository.getPortalConfig()
-            val profiles = repository.getProfiles().profiles
+            val status   = runCatching { server.testConnection() }.getOrNull()
+            val config   = server.getPortalConfig()
+            val profiles = server.getProfiles().profiles
             val connected = status?.connected == true
             _state.value = _state.value.copy(
                 loading         = false,
@@ -62,7 +62,7 @@ class PortalViewModel(private val repository: ChannelRepository) : ViewModel() {
     fun connectProfile(profile: Profile) {
         _state.value = _state.value.copy(busy = true, error = null, connectingProfileId = profile.id)
         viewModelScope.launch {
-            runCatching { repository.connectProfile(profile) }
+            runCatching { server.connectProfile(profile) }
                 .onSuccess { resp ->
                     if (resp.success) refresh()
                     else _state.value = _state.value.copy(
@@ -82,7 +82,7 @@ class PortalViewModel(private val repository: ChannelRepository) : ViewModel() {
     fun reconnect() {
         _state.value = _state.value.copy(busy = true, error = null)
         viewModelScope.launch {
-            runCatching { repository.reconnectPortal() }
+            runCatching { server.reconnectPortal() }
                 .onSuccess { resp ->
                     if (resp.success) refresh()
                     else _state.value = _state.value.copy(busy = false, error = resp.error ?: "Reconnect failed")
@@ -96,7 +96,7 @@ class PortalViewModel(private val repository: ChannelRepository) : ViewModel() {
     fun disconnect() {
         _state.value = _state.value.copy(busy = true, error = null)
         viewModelScope.launch {
-            runCatching { repository.disconnectPortal() }
+            runCatching { server.disconnectPortal() }
                 .onSuccess { refresh() }
                 .onFailure { e ->
                     _state.value = _state.value.copy(busy = false, error = e.backendMessage("Disconnect failed"))

@@ -1,13 +1,6 @@
 package com.stalkerweb.android.data.api
 
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.*
-import java.util.concurrent.TimeUnit
 
 interface StalkerApi {
 
@@ -62,6 +55,16 @@ interface StalkerApi {
     @PUT("api/profiles/active")
     suspend fun setActiveProfile(@Body body: SetActiveProfileRequest)
 
+    // ── Viewers ───────────────────────────────────────────────────────────────
+    @GET("api/viewers")
+    suspend fun getViewers(): ViewersResponse
+
+    @POST("api/viewers")
+    suspend fun createViewer(@Body body: CreateViewerRequest): ViewerSummary
+
+    @GET("api/viewers/me")
+    suspend fun getMyViewer(): ViewerDetails
+
     // ── VOD ───────────────────────────────────────────────────────────────────
     @GET("api/vod/categories")
     suspend fun getVodCategories(@Query("type") type: String): VodCategoriesResponse
@@ -93,35 +96,8 @@ interface StalkerApi {
     ): VodStreamResponse
 
     companion object {
-        /** [accessKey]: the server's ACCESS_KEY, sent on every request when set. */
-        fun create(baseUrl: String, accessKey: String? = null): StalkerApi {
-            val moshi = Moshi.Builder()
-                .addLast(KotlinJsonAdapterFactory())
-                .build()
-
-            val client = OkHttpClient.Builder()
-                .addInterceptor { chain ->
-                    val request = chain.request()
-                    chain.proceed(
-                        if (accessKey.isNullOrBlank()) request
-                        else request.newBuilder().header("Authorization", "Bearer $accessKey").build()
-                    )
-                }
-                .addInterceptor(HttpLoggingInterceptor().apply {
-                    level = HttpLoggingInterceptor.Level.BASIC
-                })
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(20, TimeUnit.SECONDS)
-                .build()
-
-            val normalized = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
-
-            return Retrofit.Builder()
-                .baseUrl(normalized)
-                .client(client)
-                .addConverterFactory(MoshiConverterFactory.create(moshi))
-                .build()
-                .create(StalkerApi::class.java)
-        }
+        /** A client for [baseUrl] with a fixed [accessKey] and no viewer — for testing a server in Setup. */
+        fun create(baseUrl: String, accessKey: String? = null): StalkerApi =
+            ApiClient.create(baseUrl, ApiClient.httpClient({ baseUrl }, { accessKey }, { null }, guard = null, events = null))
     }
 }
