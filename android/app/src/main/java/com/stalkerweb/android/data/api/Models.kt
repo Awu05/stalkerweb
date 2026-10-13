@@ -69,8 +69,8 @@ data class NowInfo(
 
 @JsonClass(generateAdapter = false)
 data class NextInfo(
-    val title: String,
-    val startTime: Long,
+    val title: String = "",
+    val startTime: Long? = null,
 )
 
 @JsonClass(generateAdapter = false)

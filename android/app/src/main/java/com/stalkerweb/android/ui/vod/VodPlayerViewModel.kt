@@ -167,11 +167,17 @@ class VodPlayerViewModel(
         }
     }
 
+    private var loadJob: Job? = null
+
     private fun load(params: PlayerParams) {
         _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null)
-        viewModelScope.launch {
+        // Next pressed twice: only the last title's stream may start.
+        loadJob?.cancel()
+        pendingPlay = null
+        loadJob = viewModelScope.launch {
             runCatching { vod.resolveVodStreamUrl(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId) }
                 .onSuccess { url ->
+                    if (_state.value.params?.key != params.key) return@onSuccess
                     val play = { startPlayback(url, params) }
                     if (_player.value != null) play() else pendingPlay = play
                 }

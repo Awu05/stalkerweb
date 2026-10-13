@@ -21,7 +21,7 @@ class MediaLinks(private val prefs: AppPrefs, private val apis: ApiProvider) {
     /** Fetches the playback token when a key is set and it isn't known yet. */
     suspend fun ensureShareToken() {
         if (prefs.accessKey.isNullOrBlank() || prefs.shareToken != null) return
-        runCatching { apis.get().getSettings() }.getOrNull()?.let { prefs.shareToken = it.accessShareToken }
+        runCatching { apis.get().getSettings() }.getOrNull()?.let { prefs.keepShareToken(it.accessShareToken) }
     }
 
     /** The server's relative image URLs made absolute (Coil needs that). */

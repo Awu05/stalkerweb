@@ -153,7 +153,8 @@ class MainActivity : ComponentActivity() {
                 // screen for no reason.
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route && currentRoute != Screen.VodPlayer.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
-                val startDest     = if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route
+                // Worked out once: recomputed, it flips to Shell after Setup and the rebuilt graph drops "Who's watching?".
+                val startDest     = remember { if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route }
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -398,7 +399,8 @@ class MainActivity : ComponentActivity() {
                                 // navigation — so without this the user returns to
                                 // the same "Connect a portal to load channels" empty
                                 // state they just came here to fix.
-                                channelViewModel.load()
+                                // …and VOD and the Guide too, which also show the old portal's.
+                                container.viewers.sectionsChanged()
                                 if (!navController.popBackStack()) toShell()
                             },
                         )

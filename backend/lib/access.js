@@ -187,7 +187,7 @@ function createAccess({ key = '', logToken = false, logger = log, now = Date.now
     // the part after where it is mounted.
     const p = normalPath((req.baseUrl || '') + req.path);
     if (p.startsWith('/api/') || p === '/player_api.php') {
-      return res.status(status).json({ error: message, accessRequired: status === 401 });
+      return res.status(status).json({ error: message, accessRequired: status === 401, lockedOut: status === 429 });
     }
     return res.status(status).type('text/plain').send(message);
   }

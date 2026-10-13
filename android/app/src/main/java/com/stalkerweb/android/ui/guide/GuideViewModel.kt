@@ -10,6 +10,7 @@ import com.stalkerweb.android.data.repo.GuideRepository
 import com.stalkerweb.android.data.repo.LiveRepository
 import com.stalkerweb.android.data.repo.RemindersRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,10 +41,11 @@ class GuideViewModel(
     private val guide: GuideRepository,
     private val live: LiveRepository,
     val reminders: RemindersRepository,
-    viewers: ViewerRepository,
+    private val viewers: ViewerRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(GuideState())
     val state: StateFlow<GuideState> = _state.asStateFlow()
+    private var loadJob: Job? = null
 
     init {
         load()
@@ -52,9 +54,11 @@ class GuideViewModel(
 
     fun load(force: Boolean = false) {
         _state.value = _state.value.copy(loading = true, error = null)
-        viewModelScope.launch {
+        // The newest load wins: an older answer (other filters, another portal) mustn't land after it.
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             runCatching {
-                val epg = guide.guide(force)
+                val epg = guide.guide(force, viewers.changes.value)
                 val channels = live.getChannels().filter { !epg[it.uniqueId].isNullOrEmpty() }
                 _state.value = _state.value.copy(
                     channels = channels, epg = epg, groups = live.getGroups(), favoriteIds = live.getFavoriteIds(),

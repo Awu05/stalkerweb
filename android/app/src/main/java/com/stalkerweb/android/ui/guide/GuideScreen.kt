@@ -49,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,6 +77,7 @@ import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.utils.rememberIsTV
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -107,12 +109,21 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     val phoneChannel = if (wide) null else phoneChannelId?.let { id -> state.channels.firstOrNull { it.uniqueId == id } }
     BackHandler(enabled = phoneChannel != null) { phoneChannelId = null }
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val nowSecs = remember(state.epg) { System.currentTimeMillis() / 1000 }
+    // The grid's window is fixed per guide load; "now" moves every 15 s (as on the web).
+    val anchorSecs = remember(state.epg) { System.currentTimeMillis() / 1000 }
+    var nowSecs by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(Unit) { while (true) { delay(15_000); nowSecs = System.currentTimeMillis() / 1000 } }
 
     fun toggleReminder(ch: Channel, e: EpgEvent) {
-        if (Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val wasSet = reminders.any { it.id == "${ch.uniqueId}:${e.startTime}" }
+        if (!wasSet && Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         val set = viewModel.reminders.toggle(ch.uniqueId, ch.name, e)
-        Toast.makeText(context, if (set) "We'll remind you when ${e.title} starts" else "Reminder removed", Toast.LENGTH_SHORT).show()
+        val message = when {
+            set -> "We'll remind you when ${e.title} starts"
+            wasSet -> "Reminder removed"
+            else -> "${e.title} has already started"
+        }
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -134,7 +145,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
                 Button(onClick = { viewModel.load(force = true) }) { Text("Retry") }
             }
             state.shown.isEmpty() -> EmptyState(Icons.Default.GridView, "No guide data", "The portal has no programmes for these channels.")
-            wide -> GuideGrid(state, nowSecs, reminders.map { it.id }.toSet()) { ch, e -> details = ch to e }
+            wide -> GuideGrid(state, anchorSecs, nowSecs, reminders.map { it.id }.toSet()) { ch, e -> details = ch to e }
             phoneChannel == null -> LazyColumn {
                 items(state.shown, key = { it.uniqueId }) { ch ->
                     val now = eventAt(state.epg[ch.uniqueId].orEmpty(), nowSecs)
@@ -208,14 +219,14 @@ private fun Logo(url: String?, size: Dp) {
 
 /** Channels down the side, a 24-hour timeline across — every row sharing one horizontal scroll. */
 @Composable
-private fun GuideGrid(state: GuideState, nowSecs: Long, reminderIds: Set<String>, onOpen: (Channel, EpgEvent) -> Unit) {
-    val windowStart = slotStart(nowSecs) - BEFORE_SECS
+private fun GuideGrid(state: GuideState, anchorSecs: Long, nowSecs: Long, reminderIds: Set<String>, onOpen: (Channel, EpgEvent) -> Unit) {
+    val windowStart = slotStart(anchorSecs) - BEFORE_SECS
     val windowEnd = windowStart + WINDOW_SECS
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     val timelineWidth = MINUTE * (WINDOW_SECS / 60f)
     // Open at about now (a slot before it).
-    LaunchedEffect(Unit) { scroll.scrollTo(with(density) { (MINUTE * ((nowSecs - windowStart - 15 * 60) / 60f)).roundToPx() }) }
+    LaunchedEffect(windowStart) { scroll.scrollTo(with(density) { (MINUTE * ((anchorSecs - windowStart - 15 * 60) / 60f)).roundToPx() }) }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(28.dp)) {

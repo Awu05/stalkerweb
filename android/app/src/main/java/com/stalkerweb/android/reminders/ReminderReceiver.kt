@@ -22,7 +22,8 @@ class ReminderReceiver : BroadcastReceiver() {
         val channelId = intent.getStringExtra(EXTRA_CHANNEL_ID) ?: return
         val channelName = intent.getStringExtra(EXTRA_CHANNEL_NAME).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
-        (context.applicationContext as? StalkerWebApp)?.container?.reminders?.fired(id)
+        // Already handled (a repeat delivery), or another portal's channel: nothing to say.
+        if ((context.applicationContext as? StalkerWebApp)?.container?.reminders?.fired(id) == false) return
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(

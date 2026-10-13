@@ -246,9 +246,13 @@ class VodViewModel(
 
     // ── The seasons pop-up ────────────────────────────────────────────────────
 
+    // One seasons/episodes load at a time: a slow answer for another show or season mustn't land on this one.
+    private var seriesJob: Job? = null
+
     fun openSeries(item: VodItem) {
         _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true)
-        viewModelScope.launch {
+        seriesJob?.cancel()
+        seriesJob = viewModelScope.launch {
             val seasons = vod.getVodSeasons(item.id)
             _state.value = _state.value.copy(seasons = seasons, seriesLoading = false)
         }
@@ -257,15 +261,16 @@ class VodViewModel(
     fun openSeason(season: VodSeason) {
         val show = _state.value.seriesItem ?: return
         _state.value = _state.value.copy(selectedSeason = season, episodes = null, seriesLoading = true)
-        viewModelScope.launch {
+        seriesJob?.cancel()
+        seriesJob = viewModelScope.launch {
             val eps = vod.getVodEpisodes(show.id, season.id)
             _state.value = _state.value.copy(episodes = eps, seriesLoading = false)
         }
     }
 
-    fun backToSeasons() { _state.value = _state.value.copy(selectedSeason = null, episodes = null) }
+    fun backToSeasons() { seriesJob?.cancel(); _state.value = _state.value.copy(selectedSeason = null, episodes = null, seriesLoading = false) }
 
-    fun closeSeries() { _state.value = _state.value.copy(seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
+    fun closeSeries() { seriesJob?.cancel(); _state.value = _state.value.copy(seriesLoading = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
 }

@@ -14,9 +14,7 @@ import com.stalkerweb.android.data.prefs.AppPrefs
 
 /** What the Settings tabs read and change on the server. */
 class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
-    suspend fun settings(): SettingsResponse = apis.get().getSettings().also {
-        if (!prefs.accessKey.isNullOrBlank()) prefs.shareToken = it.accessShareToken
-    }
+    suspend fun settings(): SettingsResponse = apis.get().getSettings().also { prefs.keepShareToken(it.accessShareToken) }
     suspend fun save(update: SettingsUpdate) = apis.get().saveSettings(update)
 
     // Viewers

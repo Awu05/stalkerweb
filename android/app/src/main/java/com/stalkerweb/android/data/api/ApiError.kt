@@ -25,6 +25,7 @@ data class ErrorBody(
     val error: String? = null,
     val accessRequired: Boolean? = null,
     val viewerGone: Boolean? = null,
+    val lockedOut: Boolean? = null,
 )
 
 private val errorAdapter = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build().adapter(ErrorBody::class.java)
@@ -38,7 +39,9 @@ fun apiErrorFor(code: Int, body: String?): ApiError {
     return when {
         code == 409 && b.viewerGone == true -> ApiError.ViewerGone()
         code == 401 && b.accessRequired == true -> ApiError.AccessDenied(message ?: "Access key required.")
-        code == 429 -> ApiError.LockedOut(message ?: "Too many wrong access keys — try again later.")
+        // The access lockout (lib/access.js) says so; a 429 from a rate limit (connect, reconnect) is just a failure.
+        code == 429 && (b.lockedOut == true || b.accessRequired != null) -> ApiError.LockedOut(message ?: "Too many wrong access keys — try again later.")
+        code == 429 -> ApiError.Failed(message ?: "Too many requests — try again in a minute.")
         else -> ApiError.Failed(message ?: "HTTP $code")
     }
 }

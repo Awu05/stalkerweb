@@ -12,6 +12,7 @@ import com.stalkerweb.android.data.api.ViewerFiltersRequest
 import com.stalkerweb.android.data.api.ViewerSummary
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.data.repo.FiltersToSave
 import com.stalkerweb.android.data.repo.ServerRepository
 import com.stalkerweb.android.data.repo.SettingsRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
@@ -96,8 +97,8 @@ class SettingsViewModel(
         settings.deleteViewer(v.id)
         if (v.id == viewers.savedViewerId()) { viewers.forget(); onOwnDeleted() }
     }
-    fun saveFilters(hiddenGenres: List<String>, hiddenCategories: List<String>, showAdult: Boolean) = act("Saved") {
-        settings.saveFilters(ViewerFiltersRequest(hiddenGenres, hiddenCategories, showAdult))
+    fun saveFilters(f: FiltersToSave, showAdult: Boolean) = act("Saved") {
+        settings.saveFilters(ViewerFiltersRequest(f.genres, f.vodCategories, showAdult, f.languages))
         viewers.filtersSaved()
     }
 
@@ -110,7 +111,12 @@ class SettingsViewModel(
     fun deleteProfile(p: Profile) = act("Deleted") { settings.deleteProfile(p.id) }
 
     // Playback
-    fun savePlayback(update: SettingsUpdate) = act("Saved") { settings.save(update) }
+    fun savePlayback(update: SettingsUpdate) = act("Saved") {
+        val before = _state.value.settings
+        settings.save(update)
+        // VOD or the Guide switched: the shell shows or hides its section.
+        if (update.vodEnabled != before?.vodEnabled || update.epgEnabled != before?.epgEnabled) viewers.sectionsChanged()
+    }
 
     // Logos
     fun refreshLogos() = act("Logo database refreshed") { settings.refreshLogos() }

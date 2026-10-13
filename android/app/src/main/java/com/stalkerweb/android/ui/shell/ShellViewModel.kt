@@ -11,6 +11,7 @@ import com.stalkerweb.android.data.repo.connectionLabel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 data class ShellState(
@@ -28,6 +29,8 @@ class ShellViewModel(private val server: ServerRepository, val viewers: ViewerRe
     init {
         loadSettings()
         viewModelScope.launch { if (viewers.current.value == null) viewers.refresh() }
+        // Settings saved (here or on a section change): show or hide VOD and the Guide.
+        viewModelScope.launch { viewers.changes.drop(1).collect { loadSettings() } }
     }
 
     fun loadSettings() {
@@ -42,6 +45,8 @@ class ShellViewModel(private val server: ServerRepository, val viewers: ViewerRe
             .onSuccess { status ->
                 val profiles = server.getProfiles().profiles
                 _state.value = _state.value.copy(connection = connectionLabel(status, profiles), unreachable = false)
+                // The switches may have changed on the web.
+                server.getSettings()?.let { _state.value = _state.value.copy(vodEnabled = it.vodEnabled, epgEnabled = it.epgEnabled) }
             }
             .onFailure { e ->
                 _state.value = _state.value.copy(unreachable = e.toApiError() is ApiError.Unreachable)

@@ -44,4 +44,6 @@ class AppContainer(context: Context) {
     val downloads = DownloadsRepository(apis, prefs, httpClient)
     val settings = SettingsRepository(apis, prefs)
     val reminders = RemindersRepository(context.applicationContext, prefs)
+
+    init { server.onPortal = reminders::setPortal }
 }

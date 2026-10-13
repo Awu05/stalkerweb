@@ -64,10 +64,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.SettingsUpdate
 import com.stalkerweb.android.data.api.ViewerSummary
-import com.stalkerweb.android.data.repo.hiddenFrom
 import com.stalkerweb.android.data.repo.linksFor
-import com.stalkerweb.android.data.repo.mergeHidden
-import com.stalkerweb.android.data.repo.shownFrom
+import com.stalkerweb.android.data.repo.FiltersToSave
+import com.stalkerweb.android.data.repo.filtersToSave
+import com.stalkerweb.android.data.repo.shownWith
+import com.stalkerweb.android.data.repo.titleKey
+import com.stalkerweb.android.ui.channels.NameDialog
 import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.components.parseHexColor
@@ -81,6 +83,7 @@ private val VIEWER_COLORS = listOf("#5b8def", "#e5484d", "#30a46c", "#f5a524", "
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, serverUrl: String?, onOpenServer: () -> Unit, onOwnViewerDeleted: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val viewer by viewModel.viewers.current.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
 
@@ -94,7 +97,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, serverUrl: String?, onOpenServe
             when (state.tab) {
                 "viewers" -> ViewersTab(viewModel, state, onOwnViewerDeleted)
                 "connection" -> ConnectionTab(viewModel, state, serverUrl, onOpenServer)
-                "links" -> LinksTab(state, serverUrl, viewModel.viewers.savedViewerId())
+                "links" -> LinksTab(state, serverUrl, viewModel.viewers.savedViewerId(), viewer?.name)
                 "playback" -> PlaybackTab(viewModel, state)
                 "logos" -> LogosTab(viewModel, state)
             }
@@ -122,14 +125,14 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
     var deleting by remember { mutableStateOf<ViewerSummary?>(null) }
     var adding by remember { mutableStateOf(false) }
     // The filter checklists, edited here and saved together.
-    var shownGenres by remember(me?.id, state.genres) { mutableStateOf(shownFrom(state.genres, me?.disabledGenres.orEmpty())) }
+    val oldLanguages = me?.disabledLanguages.orEmpty()
+    var shownGenres by remember(me?.id, oldLanguages, state.genres) { mutableStateOf(shownWith(state.genres, me?.disabledGenres.orEmpty(), oldLanguages)) }
     val allCats = (state.movieCategories + state.seriesCategories).distinct()
-    var shownCats by remember(me?.id, allCats) { mutableStateOf(shownFrom(allCats, me?.disabledVodCategories.orEmpty())) }
+    var shownCats by remember(me?.id, oldLanguages, allCats) { mutableStateOf(shownWith(allCats, me?.disabledVodCategories.orEmpty(), oldLanguages, ::titleKey)) }
     var showAdult by remember(me?.id) { mutableStateOf(me?.showAdult == true) }
     val save = {
         viewModel.saveFilters(
-            mergeHidden(me?.disabledGenres.orEmpty(), state.genres, shownGenres),
-            mergeHidden(me?.disabledVodCategories.orEmpty(), allCats, shownCats),
+            filtersToSave(me?.disabledGenres.orEmpty(), me?.disabledVodCategories.orEmpty(), oldLanguages, state.genres, shownGenres, allCats, shownCats),
             showAdult,
         )
     }
@@ -157,6 +160,20 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
         item {
             Card("${me?.name ?: "Your"}'s filters", "What this viewer sees. Change the lists below, then save.") {
                 Button(onClick = save, enabled = !state.busy && me != null) { Text("Save ${me?.name ?: "viewer"}'s filters") }
+            }
+        }
+        // The older filter hid whole languages; each can be shown again here, as on the web.
+        if (oldLanguages.isNotEmpty()) item {
+            Card("Hidden languages", "An older filter hides everything in these languages, including categories the portal adds later.") {
+                oldLanguages.sorted().forEach { lang ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(lang, color = SwColors.Text, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = {
+                            val me0 = me ?: return@OutlinedButton
+                            viewModel.saveFilters(FiltersToSave(me0.disabledGenres, me0.disabledVodCategories, oldLanguages - lang), showAdult)
+                        }, enabled = !state.busy) { Text("Show again") }
+                    }
+                }
             }
         }
         item {
@@ -208,18 +225,6 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
         Checkbox(checked = checked, onCheckedChange = onChange)
         Text(label, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-}
-
-@Composable
-private fun NameDialog(title: String, initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
-        confirmButton = { Button(onClick = { onSave(name.trim()); onDismiss() }, enabled = name.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
@@ -299,12 +304,12 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
 // ── Links ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun LinksTab(state: SettingsState, serverUrl: String?, viewerId: String?) {
+private fun LinksTab(state: SettingsState, serverUrl: String?, viewerId: String?, viewerName: String?) {
     val context = LocalContext.current
     val isTV = rememberIsTV()
     val s = state.settings
     if (serverUrl == null) { Text("Set up a server first.", color = SwColors.Muted); return }
-    val links = linksFor(serverUrl, s?.accessShareToken?.takeIf { s.accessEnabled }, viewerId, s?.httpsPort)
+    val links = linksFor(serverUrl, s?.accessShareToken?.takeIf { s.accessEnabled }, viewerId, s?.httpsPort, viewerName)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Add StalkerWeb to Jellyfin, Plex, Emby, Stremio or any IPTV app with these links. They're this viewer's.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }
         items(links, key = { it.label }) { link ->

@@ -8,8 +8,22 @@ import com.squareup.moshi.JsonClass
 data class EpgResponse(
     val period: Int = 24,
     val channelCount: Int = 0,
-    val epg: Map<String, List<EpgEvent>> = emptyMap(),
+    val epg: Map<String, List<EpgEventJson>> = emptyMap(),
 )
+
+/** A programme as sent: the server sends null for a time or id it couldn't read (Number(undefined)). */
+@JsonClass(generateAdapter = false)
+data class EpgEventJson(
+    val id: Long? = null,
+    val title: String? = null,
+    val startTime: Long? = null,
+    val endTime: Long? = null,
+    val description: String? = null,
+) {
+    fun toEvent(): EpgEvent? =
+        if (startTime == null || endTime == null) null
+        else EpgEvent(id, title.orEmpty(), startTime, endTime, description.orEmpty())
+}
 
 // ── Downloads (backend downloads/DownloadManager.js) ──────────────────────────
 @JsonClass(generateAdapter = false)
@@ -61,6 +75,8 @@ data class ViewerFiltersRequest(
     val disabledGenres: List<String>,
     val disabledVodCategories: List<String>,
     val showAdult: Boolean,
+    /** The older whole-language filter: sent when it changes (a language released). */
+    val disabledLanguages: List<String>? = null,
 )
 
 @JsonClass(generateAdapter = false)

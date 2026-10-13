@@ -23,6 +23,10 @@ fun eventSpan(event: EpgEvent, windowStart: Long, windowEnd: Long): Span? {
 
 /** The programme airing at [timeSecs]. */
 /** A channel's programmes in time order, without duplicates (portals send some) or empty ones. */
+/** The guide as the server sent it, without programmes missing a start or end (one mustn't fail the guide). */
+fun guideEvents(raw: Map<String, List<com.stalkerweb.android.data.api.EpgEventJson>>): Map<String, List<EpgEvent>> =
+    raw.mapValues { (_, events) -> cleanEvents(events.mapNotNull { it.toEvent() }) }
+
 fun cleanEvents(events: List<EpgEvent>): List<EpgEvent> =
     events.filter { it.endTime > it.startTime }.sortedBy { it.startTime }.distinctBy { it.startTime }
 
@@ -58,7 +62,9 @@ data class AppLink(val label: String, val url: String, val hint: String = "")
  * playback-only token (/k/<token>); Stremio wants https, so with an HTTPS port
  * its link uses it.
  */
-fun linksFor(base: String, shareToken: String?, viewerId: String?, httpsPort: Int?): List<AppLink> {
+fun linksFor(base: String, shareToken: String?, viewerId: String?, httpsPort: Int?, viewerName: String? = null): List<AppLink> {
+    // The Xtream API picks the viewer by username (as the web says).
+    val user = viewerName?.takeIf { it.isNotBlank() }?.let { "the username $it" } ?: "any username"
     val origin = base.trimEnd('/')
     val k = shareToken?.takeIf { it.isNotBlank() }?.let { "/k/$it" } ?: ""
     val id = viewerId?.takeIf { it.isNotBlank() }?.let { URLEncoder.encode(it, "UTF-8") }
@@ -69,8 +75,8 @@ fun linksFor(base: String, shareToken: String?, viewerId: String?, httpsPort: In
         if (u.scheme == "http" && httpsPort != null) "https://${u.host}:$httpsPort" else origin
     }.getOrDefault(origin)
     return buildList {
-        add(AppLink("Xtream Codes Server", origin, "Server address for Xtream-compatible apps"))
-        if (k.isNotEmpty()) add(AppLink("Xtream Password", shareToken!!, "Any username; this as the password"))
+        add(AppLink("Xtream Codes Server", origin, if (k.isNotEmpty()) "The server for Xtream apps, with $user and the Xtream password" else "The server for Xtream apps, with $user and any password"))
+        if (k.isNotEmpty()) add(AppLink("Xtream Password", shareToken!!, "The password for Xtream apps, with $user. It allows playback only."))
         add(AppLink("Stremio Addon", "$stremioOrigin$k$vp/stremio/manifest.json"))
         add(AppLink("M3U Playlist", "$origin$k/api/m3u$vq"))
         add(AppLink("VLC Playlist", "$origin$k/api/xspf$vq"))
@@ -82,6 +88,40 @@ fun linksFor(base: String, shareToken: String?, viewerId: String?, httpsPort: In
 
 fun shownFrom(all: List<String>, hidden: List<String>): Set<String> { val h = hidden.toSet(); return all.filter { it !in h }.toSet() }
 fun hiddenFrom(all: List<String>, shown: Set<String>): List<String> = all.filter { it !in shown }
+
+/** How the server compares VOD category names: trimmed, any case (backend/lib/vodCategoryFilter.js). */
+fun titleKey(title: String): String = title.trim().uppercase()
+
+/** The checked names: not hidden by name (compared by [key]) nor by an old hidden language (the web's ChannelFilters). */
+fun shownWith(all: List<String>, hidden: List<String>, languages: List<String>, key: (String) -> String = { it }): Set<String> {
+    val h = hidden.map(key).toSet()
+    val l = languages.map(::languageOf).filter { it.isNotEmpty() }.toSet()
+    return all.filter { key(it) !in h && languageOf(it) !in l }.toSet()
+}
+
+data class FiltersToSave(val genres: List<String>, val vodCategories: List<String>, val languages: List<String>)
+
+/**
+ * What a viewer's checklists save. Showing a name an old hidden language covers
+ * drops that language, and the rest of it stays hidden name by name (the web's
+ * releaseLanguages). Hidden names not listed now (another portal's) are kept.
+ */
+fun filtersToSave(
+    savedGenres: List<String>, savedVod: List<String>, savedLanguages: List<String>,
+    allGenres: List<String>, shownGenres: Set<String>, allVod: List<String>, shownVod: Set<String>,
+): FiltersToSave {
+    val released = (shownGenres + shownVod).map(::languageOf).toSet()
+    val kept = savedLanguages.filter { languageOf(it) !in released }
+    val keptSet = kept.map(::languageOf).toSet()
+    fun hidden(saved: List<String>, all: List<String>, shown: Set<String>, key: (String) -> String): List<String> {
+        val savedKeys = saved.map(key).toSet()
+        val listed = all.map(key).toSet()
+        val unlisted = saved.filter { key(it) !in listed }
+        val listedHidden = all.filter { it !in shown && (key(it) in savedKeys || languageOf(it) !in keptSet) }
+        return (unlisted + listedHidden).distinctBy(key)
+    }
+    return FiltersToSave(hidden(savedGenres, allGenres, shownGenres) { it }, hidden(savedVod, allVod, shownVod, ::titleKey), kept)
+}
 /** What to save: the unchecked names, plus hidden names not listed now (another portal's, or a list still loading) — as the web keeps them. */
 fun mergeHidden(saved: List<String>, all: List<String>, shown: Set<String>): List<String> {
     val listed = all.toSet()
@@ -90,14 +130,19 @@ fun mergeHidden(saved: List<String>, all: List<String>, shown: Set<String>): Lis
 
 // ── Reminders ─────────────────────────────────────────────────────────────────
 
-data class Reminder(val id: String, val channelId: String, val channelName: String, val title: String, val startTime: Long)
+/** [portal]: the portal the channel is on (blank for reminders saved before that was kept). */
+data class Reminder(val id: String, val channelId: String, val channelName: String, val title: String, val startTime: Long, val portal: String = "")
 
 object ReminderRules {
-    fun reminderFor(channelId: String, channelName: String, e: EpgEvent) =
-        Reminder("$channelId:${e.startTime}", channelId, channelName, e.title, e.startTime)
+    fun reminderFor(channelId: String, channelName: String, e: EpgEvent, portal: String = "") =
+        Reminder("$channelId:${e.startTime}", channelId, channelName, e.title, e.startTime, portal)
     /** A minute before the start. */
     fun dueAtMs(r: Reminder): Long = (r.startTime - 60) * 1000
     /** Not started yet — a reminder for something already on is pointless. */
     fun isUpcoming(r: Reminder, nowMs: Long): Boolean = r.startTime * 1000 > nowMs
     fun upcoming(list: List<Reminder>, nowMs: Long): List<Reminder> = list.filter { isUpcoming(it, nowMs) }
+    /** Its alarm is still ahead: one firing now (or just fired) mustn't be set again. */
+    fun needsAlarm(r: Reminder, nowMs: Long): Boolean = dueAtMs(r) > nowMs
+    /** The reminders for [portal]'s channels (and older ones that didn't record a portal). */
+    fun forPortal(list: List<Reminder>, portal: String?): List<Reminder> = list.filter { it.portal.isEmpty() || it.portal == portal }
 }

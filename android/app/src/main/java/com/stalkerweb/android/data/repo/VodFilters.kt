@@ -66,7 +66,8 @@ private fun yearMatches(item: VodItem, sel: String): Boolean =
 /** The portal's "2026-10-05 10:00:00" (local time) as epoch ms, or null. */
 fun parseAdded(added: String): Long? {
     val s = added.trim().replace(' ', 'T')
-    if (s.isEmpty()) return null
+    // Empty, or the portals' "0000-00-00 00:00:00": no date (without throwing to find out).
+    if (s.isEmpty() || s.startsWith("0000")) return null
     return runCatching { LocalDateTime.parse(s).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }
         .recoverCatching { LocalDate.parse(s).atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli() }
         .getOrNull()
@@ -75,36 +76,36 @@ fun parseAdded(added: String): Long? {
 private val collator: Collator = Collator.getInstance(Locale.ROOT).apply { strength = Collator.PRIMARY }
 
 /** Names in natural order, ignoring case and accents: "Title 9" before "Title 10". */
-val naturalOrder: Comparator<String> = Comparator { a, b ->
-    val chunks = Regex("""\d+|\D+""")
-    val xs = chunks.findAll(a).map { it.value }.toList()
-    val ys = chunks.findAll(b).map { it.value }.toList()
+private val CHUNKS = Regex("""\d+|\D+""")
+private fun chunksOf(s: String): List<String> = CHUNKS.findAll(s).map { it.value }.toList()
+
+val naturalOrder: Comparator<String> = Comparator { a, b -> compareChunks(chunksOf(a), chunksOf(b)) }
+
+private fun compareChunks(xs: List<String>, ys: List<String>): Int {
     for (i in 0 until minOf(xs.size, ys.size)) {
         val x = xs[i]; val y = ys[i]
         val c = if (x[0].isDigit() && y[0].isDigit()) {
             val nx = x.trimStart('0'); val ny = y.trimStart('0')
             if (nx.length != ny.length) nx.length - ny.length else nx.compareTo(ny)
         } else collator.compare(x, y)
-        if (c != 0) return@Comparator c
+        if (c != 0) return c
     }
-    xs.size - ys.size
+    return xs.size - ys.size
 }
-
-private val byName: Comparator<VodItem> = Comparator { a, b -> naturalOrder.compare(a.name, b.name) }
 
 /** "name": A–Z; "added": newest first, undated titles last by name. */
 fun sortVodItems(items: List<VodItem>, sort: String): List<VodItem> =
-    if (sort == "added") {
-        items.sortedWith { a, b ->
-            val ta = parseAdded(a.added); val tb = parseAdded(b.added)
+    // Each title's name chunks and date worked out once, not on every comparison.
+    items.map { Triple(it, chunksOf(it.name), if (sort == "added") parseAdded(it.added) else null) }
+        .sortedWith { (_, na, ta), (_, nb, tb) ->
             when {
-                ta == null && tb == null -> byName.compare(a, b)
+                ta == null && tb == null -> compareChunks(na, nb)
                 ta == null -> 1
                 tb == null -> -1
                 else -> tb.compareTo(ta)
             }
         }
-    } else items.sortedWith(byName)
+        .map { it.first }
 
 /** The titles passing every filter. [watched]: ids started or finished; [search]: part of the name. */
 fun applyVodFilters(items: List<VodItem>, f: VodFilterState, watched: Set<String>, search: String, now: Long = System.currentTimeMillis()): List<VodItem> {
