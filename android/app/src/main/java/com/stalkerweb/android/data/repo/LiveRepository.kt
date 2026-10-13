@@ -1,6 +1,11 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.AddFavoriteRequest
+import com.stalkerweb.android.data.api.ChannelHealth
+import com.stalkerweb.android.data.api.FavoritesResponse
+import com.stalkerweb.android.data.api.LogoOverrideRequest
+import com.stalkerweb.android.data.api.NameRequest
+import com.stalkerweb.android.data.api.OrderRequest
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.Group
 import com.stalkerweb.android.data.api.NowNextEntry
@@ -78,6 +83,26 @@ class LiveRepository(
     suspend fun removeFavorite(uniqueId: String) =
         apis.get().removeFavorite(uniqueId)
 
+    /** The viewer's favorites: channels in their order, and groups (each with its channels). */
+    suspend fun getFavorites(): FavoritesResponse = apis.get().getFavorites()
+
+    suspend fun createGroup(name: String) = apis.get().createFavoriteGroup(NameRequest(name.trim()))
+    suspend fun renameGroup(id: String, name: String) = apis.get().renameFavoriteGroup(id, NameRequest(name.trim()))
+    suspend fun deleteGroup(id: String) = apis.get().deleteFavoriteGroup(id)
+    suspend fun addToGroup(groupId: String, uniqueId: String) = apis.get().addToFavoriteGroup(groupId, AddFavoriteRequest(uniqueId))
+    suspend fun removeFromGroup(groupId: String, uniqueId: String) = apis.get().removeFromFavoriteGroup(groupId, uniqueId)
+    suspend fun reorderFavorites(order: List<String>) = apis.get().reorderFavorites(OrderRequest(order))
+    suspend fun reorderGroups(order: List<String>) = apis.get().reorderFavoriteGroups(OrderRequest(order))
+
+    /** Recent stream failures per channel; empty when unknown. */
+    suspend fun getHealth(): Map<String, ChannelHealth> = runCatching { apis.get().getChannelHealth() }.getOrDefault(emptyMap())
+
+    /** The logo the server finds for [name], made absolute for Coil; null when none. */
+    suspend fun checkLogo(name: String): String? = runCatching { apis.get().checkLogo(name).logo }.getOrNull()
+        ?.takeIf { it.isNotBlank() }?.let { links.absoluteImage(it) }
+
+    suspend fun setLogoOverride(name: String, url: String) = apis.get().setLogoOverride(LogoOverrideRequest(name, url.trim()))
+
     suspend fun getNowNext(): Map<String, NowNextEntry> =
         runCatching { apis.get().getNowNext() }.getOrDefault(emptyMap())
 
@@ -128,6 +153,8 @@ class LiveRepository(
         prefs.pushWatchedChannel(channel.uniqueId, channel.name, logoUrl)
 
     fun getWatched(): List<WatchedChannel> = prefs.getWatchedChannels()
+
+    fun removeWatched(uniqueId: String) = prefs.removeWatchedChannel(uniqueId)
 
     private companion object { const val ALL_GENRES_ID = "*" }
 }

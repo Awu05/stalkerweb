@@ -1,8 +1,9 @@
 package com.stalkerweb.android.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -47,9 +49,11 @@ import com.stalkerweb.android.ui.utils.rememberIsTV
  * A channel the way the web shows it (components/ChannelCard.jsx): one fixed
  * shape everywhere — logo, "Ch N", a two-line name and a guide strip that's
  * there even without guide data, so a row of tiles lines up. The heart and
- * edit buttons show on focus (the remote's hover), once favourited, and
- * always on touch.
+ * edit buttons are for touch: they show there (and the heart once favourited),
+ * and they never take the remote's focus — long-press, a held OK, opens the
+ * tile's actions instead ([onLongClick]), so the remote reaches every one.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChannelTile(
     channel: Channel,
@@ -61,6 +65,7 @@ fun ChannelTile(
     onToggleFavorite: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val isTv = rememberIsTV()
     var focused by remember { mutableStateOf(false) }
@@ -72,7 +77,7 @@ fun ChannelTile(
             .clip(shape)
             .background(if (focused) SwColors.Surface2 else SwColors.Surface)
             .border(1.dp, SwColors.Border, shape)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = 36.dp),
@@ -119,8 +124,8 @@ fun ChannelTile(
             Icon(Icons.Default.Warning, "Recent stream failures", Modifier.align(Alignment.TopStart).padding(8.dp).size(16.dp), tint = SwColors.Warning)
         }
         Row(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
-            if (onToggleFavorite != null && (focused || isFavorite || !isTv)) {
-                IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
+            if (onToggleFavorite != null && (isFavorite || !isTv)) {
+                IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
                     Icon(
                         if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites",
@@ -129,8 +134,8 @@ fun ChannelTile(
                     )
                 }
             }
-            if (onEdit != null) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+            if (onEdit != null && !isTv) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
                     Icon(Icons.Default.Edit, "Edit ${channel.name}", Modifier.size(18.dp), tint = SwColors.Muted)
                 }
             }

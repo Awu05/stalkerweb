@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            ChannelViewModel(container.live, container.server, container.viewers) as T
+                            ChannelViewModel(container.live, container.server, container.viewers, container.prefs) as T
                     }
                 }
                 val playerVmFactory = remember {

@@ -2,6 +2,7 @@ package com.stalkerweb.android.ui.player
 
 import android.app.Application
 import android.content.ComponentName
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -249,6 +250,8 @@ class PlayerViewModel(
         viewModelScope.launch {
             runCatching {
                 if (isFav) live.removeFavorite(id) else live.addFavorite(id)
+            }.onSuccess {
+                Toast.makeText(getApplication(), if (isFav) "Removed ${channel.name} from favorites" else "Added ${channel.name} to favorites", Toast.LENGTH_SHORT).show()
             }.onFailure {
                 _state.value = _state.value.copy(
                     favoriteIds = if (isFav) _state.value.favoriteIds + id
