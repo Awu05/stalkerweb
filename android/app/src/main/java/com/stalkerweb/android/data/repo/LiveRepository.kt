@@ -103,6 +103,12 @@ class LiveRepository(
 
     suspend fun setLogoOverride(name: String, url: String) = apis.get().setLogoOverride(LogoOverrideRequest(name, url.trim()))
 
+    /** The playing channel's programmes for the next hours, in order (the player's guide). */
+    suspend fun channelGuide(channelId: String, hours: Int = 6): List<com.stalkerweb.android.data.api.EpgEvent> =
+        cleanEvents(apis.get().getChannelEpg(channelId, hours).events.mapNotNull { it.toEvent() })
+
+    suspend fun keepalive() { runCatching { apis.get().streamKeepalive() } }
+
     suspend fun getNowNext(): Map<String, NowNextEntry> =
         runCatching { apis.get().getNowNext() }.getOrDefault(emptyMap())
 
