@@ -286,3 +286,13 @@ data class LogoOverrideRequest(val name: String, val url: String)
 /** The logo the server finds for a name (backend routes/logos.js /check). */
 @JsonClass(generateAdapter = false)
 data class LogoCheck(val logo: String? = null, val name: String? = null)
+
+/** A programme in the guide (backend GuideManager.getChannelEvents); times in seconds. */
+@JsonClass(generateAdapter = false)
+data class EpgEvent(
+    val id: Long = 0,
+    val title: String = "",
+    val startTime: Long = 0,
+    val endTime: Long = 0,
+    val description: String = "",
+)
