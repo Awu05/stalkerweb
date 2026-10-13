@@ -15,11 +15,13 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.SaveWatchRequest
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
+import com.stalkerweb.android.data.repo.DownloadsRepository
 import com.stalkerweb.android.data.repo.EpisodeRef
 import com.stalkerweb.android.data.repo.MediaLinks
 import com.stalkerweb.android.data.repo.Neighbours
@@ -32,8 +34,11 @@ import com.stalkerweb.android.data.repo.isLastEpisode
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -65,6 +70,7 @@ class VodPlayerViewModel(
     private val vod: VodRepository,
     private val watch: WatchRepository,
     private val links: MediaLinks,
+    private val downloads: DownloadsRepository,
 ) : AndroidViewModel(application) {
 
     /** The viewer's watch state — the top bar's My List button reads it. */
@@ -74,6 +80,23 @@ class VodPlayerViewModel(
     val player: StateFlow<Player?> = _player.asStateFlow()
 
     private val _state = MutableStateFlow(VodPlayerState())
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    /** This movie or episode, downloaded to the server. */
+    fun download() {
+        val p = _state.value.params ?: return
+        val item = DownloadItem(
+            videoId = p.videoId, cmd = if (p.isEpisode) "" else p.cmd, series = p.series, seasonId = p.seasonId, episodeId = p.episodeId,
+            title = if (p.isEpisode) p.episodeTitle.ifBlank { p.title } else p.title, seriesTitle = if (p.isEpisode) p.title else "",
+        )
+        viewModelScope.launch {
+            runCatching { downloads.enqueue(listOf(item)) }
+                .onSuccess { _messages.tryEmit("Queued \"${item.title}\" for download") }
+                .onFailure { _messages.tryEmit(it.toApiError().message ?: "Could not queue download") }
+        }
+    }
     val state: StateFlow<VodPlayerState> = _state.asStateFlow()
 
     private var controllerFuture: ListenableFuture<MediaController>? = null

@@ -2,12 +2,14 @@ package com.stalkerweb.android.ui.vod
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.data.repo.DownloadsRepository
 import com.stalkerweb.android.data.repo.SHOW_STEP
 import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.nextVisibleCount
@@ -17,8 +19,11 @@ import com.stalkerweb.android.data.repo.WatchRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -82,10 +87,24 @@ class VodViewModel(
     private val watch: WatchRepository,
     private val viewers: ViewerRepository,
     private val prefs: AppPrefs,
+    private val downloads: DownloadsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VodUiState(sort = prefs.vodSort))
     val state: StateFlow<VodUiState> = _state.asStateFlow()
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Short messages for a toast ("Queued …"). */
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    /** Queues titles to download on the server (as the web's VOD page does). */
+    fun download(items: List<DownloadItem>, what: String) {
+        viewModelScope.launch {
+            runCatching { downloads.enqueue(items) }
+                .onSuccess { _messages.tryEmit("Queued $what for download") }
+                .onFailure { _messages.tryEmit(it.toApiError().message ?: "Could not queue download") }
+        }
+    }
 
     private var itemsJob: Job? = null
     private var categoriesJob: Job? = null
