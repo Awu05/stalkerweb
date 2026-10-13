@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, seasonWatchedLabel } from './seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, seasonWatchedLabel, watchedOfEpisodes } from './seriesProgress'
 
 const s1 = { id: 's1', name: 'Season 1', seasonNumber: '1' }
 const s2 = { id: 's2', name: 'Season 2', seasonNumber: '2' }
@@ -15,7 +15,10 @@ describe('continueTarget', () => {
 
   it('resumes the episode stopped partway through', () => {
     const history = [{ id: '200', key: '200:s1:e2', finished: false }]
-    expect(continueTarget({ ...base, history })).toEqual({ action: 'resume', season: s1, episode: e2 })
+    const progress = [{ key: '200:s1:e2' }]
+    expect(continueTarget({ ...base, history, progress })).toEqual({ action: 'resume', season: s1, episode: e2 })
+    // Its resume point gone (pushed out of the list): it plays from the start.
+    expect(continueTarget({ ...base, history })).toEqual({ action: 'play', season: s1, episode: e2 })
   })
 
   it('plays the next episode after one finished, into the next season', () => {
@@ -80,5 +83,7 @@ describe('labels', () => {
     expect(seasonWatchedLabel(2, 3)).toBe('2 of 3')
     expect(seasonWatchedLabel(3, 3)).toBe('Watched')
     expect(seasonWatchedLabel(0, 3)).toBe('')
+    // Its episodes known: only theirs count (an episode the portal dropped doesn't make it Watched).
+    expect(watchedOfEpisodes(['200:s1:e1', '200:s1:gone'], '200', 's1', [e1, e2])).toBe(1)
   })
 })

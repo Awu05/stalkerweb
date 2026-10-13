@@ -152,6 +152,12 @@ describe('Watched episodes', () => {
     expect(store.setEpisodeWatched('view_a', P, '100', true).watchedEpisodes).toEqual([])   // a movie isn't an episode
   })
 
+  it('ticking the episode last played finishes it in Recently watched', () => {
+    play('200:s1:e5', 300)
+    const w = store.setEpisodeWatched('view_a', P, '200:s1:e5', true)
+    expect(w.history[0]).toMatchObject({ key: '200:s1:e5', finished: true })
+  })
+
   it('reads as empty for data saved before episodes were kept', () => {
     expect(store.get('view_new', P).watchedEpisodes).toEqual([])
   })

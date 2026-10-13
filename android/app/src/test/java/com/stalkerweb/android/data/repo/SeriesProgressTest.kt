@@ -25,8 +25,11 @@ class SeriesProgressTest {
     @Test fun startsAShowNotWatchedYetAtItsFirstEpisode() =
         assertEquals(ContinueTarget.Play(resume = false, season = s1, episode = e1), target())
 
-    @Test fun resumesTheEpisodeStoppedPartway() =
-        assertEquals(ContinueTarget.Play(true, s1, e2), target(history = listOf(h("200:s1:e2", false))))
+    @Test fun resumesTheEpisodeStoppedPartway() {
+        assertEquals(ContinueTarget.Play(true, s1, e2), target(history = listOf(h("200:s1:e2", false)), progress = listOf(ProgressEntry("200:s1:e2"))))
+        // Its resume point gone (pushed out of the list): it plays from the start.
+        assertEquals(ContinueTarget.Play(false, s1, e2), target(history = listOf(h("200:s1:e2", false))))
+    }
 
     @Test fun playsTheNextEpisodeIntoTheNextSeason() {
         assertEquals(ContinueTarget.Play(false, s1, e3), target(history = listOf(h("200:s1:e2", true))))
@@ -69,5 +72,6 @@ class SeriesProgressTest {
         assertEquals("2 of 3", seasonWatchedLabel(2, 3))
         assertEquals("Watched", seasonWatchedLabel(3, 3))
         assertEquals("", seasonWatchedLabel(0, 3))
+        assertEquals(1, watchedOfEpisodes(listOf("200:s1:e1", "200:s1:gone"), "200", "s1", listOf(e1, e2)))
     }
 }
