@@ -25,6 +25,13 @@ fun playerList(channels: List<Channel>, query: String, favoritesOnly: Boolean, g
     }
 }
 
+// ── Which items are the live player's ────────────────────────────────────────
+// The live and VOD players drive one shared player (PlaybackService). The live
+// player's reconnects and watchdog must only ever act on its own items.
+
+fun liveMediaId(channelId: String): String = "live:$channelId"
+fun isLiveMediaId(mediaId: String?): Boolean = mediaId?.startsWith("live:") == true
+
 // ── Stall watchdog (the web's lib/stallRecovery.js watchdogTick) ─────────────
 
 data class StallState(val lastPositionMs: Long, val lastAdvanceMs: Long, val nudged: Boolean)
@@ -44,7 +51,10 @@ sealed class StallAction {
  * count as playing, so one that doesn't help never delays the reconnect.
  */
 fun stallTick(state: StallState, nowMs: Long, positionMs: Long, bufferedMs: Long, idle: Boolean): Pair<StallState, StallAction?> {
-    if (idle || positionMs > state.lastPositionMs + 250) return StallState(positionMs, nowMs, nudged = false) to null
+    // Moving, or jumped back (a live HLS window slides by a segment, a rewind, a new item): not a freeze.
+    if (idle || positionMs > state.lastPositionMs + 250) {
+        return StallState(positionMs, nowMs, nudged = false) to null
+    }
     var s = state
     val frozenFor = nowMs - s.lastAdvanceMs
     if (!s.nudged && frozenFor >= 3_000) {
