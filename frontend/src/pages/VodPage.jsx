@@ -7,7 +7,7 @@ import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, seasonWatchedLabel } from '@/lib/seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -262,6 +262,7 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   const [epLoading, setEpLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [continueFailed, setContinueFailed] = useState(false)  // a season Continue needed didn't load: no Continue, the rest works
   const [watch, setWatch] = useState(() => getWatchState())
   const loadingSeasons = useRef(new Set())
   const picked = useRef(false)     // the viewer chose a season: don't move them
@@ -281,7 +282,7 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
     loadingSeasons.current.add(seasonId)
     getVodEpisodes(item.id, seasonId)
       .then(r => setEpisodesBySeason(m => ({ ...m, [seasonId]: r.episodes || [] })))
-      .catch(e => { loadingSeasons.current.delete(seasonId); setError(e.message) })
+      .catch(() => { loadingSeasons.current.delete(seasonId); setContinueFailed(true) })
   }, [item.id])
 
   // What Continue plays — loading the seasons it has to look into.
@@ -291,7 +292,7 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   }) : null
   const needs = target?.needs
   useEffect(() => { if (needs) loadSeason(needs) }, [needs, loadSeason])
-  const next = target && !target.needs ? target : null
+  const next = target && !target.needs && !continueFailed ? target : null
 
   // Open straight at Continue's season, its episode highlighted; from Recently
   // watched, play it. (At the show's end there's nothing to continue: the
@@ -305,11 +306,12 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   function openSeason(season) {
     picked.current = true
     setSelectedSeason(season)
-    if (!episodesBySeason[season.id]) {
+    if (!episodesBySeason[season.id] && !loadingSeasons.current.has(season.id)) {
+      loadingSeasons.current.add(season.id)
       setEpLoading(true)
       getVodEpisodes(item.id, season.id)
         .then(r => { setEpisodesBySeason(m => ({ ...m, [season.id]: r.episodes || [] })); setEpLoading(false) })
-        .catch(e => { setError(e.message); setEpLoading(false) })
+        .catch(e => { loadingSeasons.current.delete(season.id); setError(e.message); setEpLoading(false) })
     }
   }
 
@@ -380,7 +382,10 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
             seasons && seasons.length > 0 ? (
               <ul>
                 {seasons.map((season, i) => {
-                  const done = seasonWatchedLabel(watchedInSeason(watch.watchedEpisodes, item.id, season.id), episodesBySeason[season.id]?.length)
+                  const listed = episodesBySeason[season.id]
+                  const done = listed
+                    ? seasonWatchedLabel(watchedOfEpisodes(watch.watchedEpisodes, item.id, season.id, listed), listed.length)
+                    : seasonWatchedLabel(watchedInSeason(watch.watchedEpisodes, item.id, season.id), null)
                   return (
                     <li key={season.id || i}>
                       <button
@@ -427,6 +432,7 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
                 highlightId={next?.season.id === selectedSeason.id ? next.episode.episodeId : null}
                 onPlay={(ep) => onPlayEpisode(item, selectedSeason, ep)}
                 onDownload={(ep) => onDownloadEpisode(item, selectedSeason, ep)}
+                onTicked={() => { picked.current = true }}
               />
             )
           )}
@@ -439,7 +445,7 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
 
 // A season's episodes: a tick on the watched ones, how far into the started
 // ones, Continue's highlighted — and a button to mark one watched or not.
-function EpisodeList({ showId, season, episodes, watch, highlightId, onPlay, onDownload }) {
+function EpisodeList({ showId, season, episodes, watch, highlightId, onPlay, onDownload, onTicked = () => {} }) {
   if (!episodes || episodes.length === 0) {
     return <p className="px-4 py-6 text-sm text-[var(--color-muted)] text-center">No episodes found.</p>
   }
@@ -476,7 +482,7 @@ function EpisodeList({ showId, season, episodes, watch, highlightId, onPlay, onD
               </div>
             </button>
             <button
-              onClick={() => setEpisodeWatched(key, !seen)}
+              onClick={() => { onTicked(); setEpisodeWatched(key, !seen) }}
               title={seen ? 'Mark as not watched' : 'Mark as watched'}
               aria-label={seen ? `Mark ${name} as not watched` : `Mark ${name} as watched`}
               aria-pressed={seen}

@@ -206,6 +206,8 @@ class WatchStore {
     if (watched) {
       b.watchedEpisodes = [k, ...b.watchedEpisodes].slice(0, WATCHED_EPISODES_MAX);
       b.progress = b.progress.filter((e) => e.key !== k);
+      // The show's tile in Recently watched moves on from it too (not "Resume").
+      for (const e of b.history) if (e.key === k) e.finished = true;
     }
     this._save(d);
     return b;

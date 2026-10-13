@@ -19,6 +19,8 @@ const parts = (key) => { const [, seasonId = '', episodeId = ''] = String(key).s
 export function continueTarget({ showId, seasons, episodesBySeason, history = [], progress = [], watchedEpisodes = [] }) {
   const id = String(showId)
   const watched = new Set(watchedEpisodes)
+  // "Resume" only where there's a point to resume from (it can drop off the list): else it plays from the start.
+  const resumable = new Set(progress.map((e) => String(e.key)))
   const locate = (key) => {
     const { seasonId, episodeId } = parts(key)
     const season = seasons.find((s) => String(s.id) === seasonId)
@@ -26,7 +28,7 @@ export function continueTarget({ showId, seasons, episodesBySeason, history = []
     const eps = episodesBySeason[season.id]
     if (!eps) return { needs: season.id }
     const episode = eps.find((e) => String(e.episodeId) === episodeId)
-    return episode ? { action: 'resume', season, episode } : null
+    return episode ? { action: resumable.has(String(key)) ? 'resume' : 'play', season, episode } : null
   }
 
   let after = null
@@ -93,6 +95,12 @@ export function historyEpisodeLabel(entry) {
 export function watchedInSeason(watchedEpisodes, showId, seasonId) {
   const prefix = `${showId}:${seasonId}:`
   return watchedEpisodes.filter((k) => String(k).startsWith(prefix)).length
+}
+
+/** How many of these episodes (a season's, as listed now) are watched. */
+export function watchedOfEpisodes(watchedEpisodes, showId, seasonId, episodes) {
+  const w = new Set(watchedEpisodes)
+  return episodes.filter((e) => w.has(`${showId}:${seasonId}:${e.episodeId}`)).length
 }
 
 /** "Watched", "2 of 3" (its episodes known), "2 watched", or nothing. */

@@ -37,12 +37,14 @@ fun continueTarget(
     watchedEpisodes: List<String>,
 ): ContinueTarget? {
     val watched = watchedEpisodes.toSet()
+    // "Resume" only where there's a point to resume from (it can drop off the list): else it plays from the start.
+    val resumable = progress.map { it.key }.toSet()
     fun locate(key: String): ContinueTarget? {
         val (seasonId, episodeId) = keyParts(key)
         val season = seasons.firstOrNull { it.id == seasonId } ?: return null
         val eps = episodesBySeason[season.id] ?: return ContinueTarget.Needs(season.id)
         val episode = eps.firstOrNull { it.episodeId == episodeId } ?: return null
-        return ContinueTarget.Play(resume = true, season = season, episode = episode)
+        return ContinueTarget.Play(resume = key in resumable, season = season, episode = episode)
     }
 
     var after: Pair<String, String>? = null
@@ -99,6 +101,12 @@ fun historyEpisodeLabel(entry: HistoryEntry): String {
 /** How many of a season's episodes are watched. */
 fun watchedInSeason(watchedEpisodes: List<String>, showId: String, seasonId: String): Int =
     watchedEpisodes.count { it.startsWith("$showId:$seasonId:") }
+
+/** How many of these episodes (a season's, as listed now) are watched. */
+fun watchedOfEpisodes(watchedEpisodes: List<String>, showId: String, seasonId: String, episodes: List<VodEpisode>): Int {
+    val w = watchedEpisodes.toSet()
+    return episodes.count { WatchRules.makeKey(showId, seasonId, it.episodeId) in w }
+}
 
 /** "Watched", "2 of 3" (its episodes known), "2 watched", or nothing. */
 fun seasonWatchedLabel(count: Int, total: Int?): String = when {
