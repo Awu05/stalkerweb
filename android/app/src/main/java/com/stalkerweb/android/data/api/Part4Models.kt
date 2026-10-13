@@ -11,6 +11,10 @@ data class EpgResponse(
     val epg: Map<String, List<EpgEventJson>> = emptyMap(),
 )
 
+/** One channel's programmes (backend GET /api/epg/:channelId). */
+@JsonClass(generateAdapter = false)
+data class ChannelEpgResponse(val events: List<EpgEventJson> = emptyList())
+
 /** A programme as sent: the server sends null for a time or id it couldn't read (Number(undefined)). */
 @JsonClass(generateAdapter = false)
 data class EpgEventJson(

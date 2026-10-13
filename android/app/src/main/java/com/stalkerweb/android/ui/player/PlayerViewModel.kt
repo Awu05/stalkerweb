@@ -18,6 +18,13 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.stalkerweb.android.cast.CastManager
 import com.stalkerweb.android.data.api.Channel
+import com.stalkerweb.android.data.api.EpgEvent
+import com.stalkerweb.android.data.api.NowNextEntry
+import com.stalkerweb.android.data.repo.StallAction
+import com.stalkerweb.android.data.repo.StallState
+import com.stalkerweb.android.data.repo.jumpTarget
+import com.stalkerweb.android.data.repo.playerList
+import com.stalkerweb.android.data.repo.stallTick
 import com.stalkerweb.android.data.repo.LiveRepository
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
@@ -27,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class PlayerUiState(
@@ -39,13 +47,21 @@ data class PlayerUiState(
     val sleepTimerEndsAt: Long?        = null,
     val overrideSheetChannel: Channel? = null,
     val isCasting: Boolean             = false,
+    // The list's search and Favorites toggle (the web's channel list).
+    val query: String                  = "",
+    val favoritesOnly: Boolean         = false,
+    // The playing channel's guide (null while loading), and now/next for the list rows.
+    val showGuide: Boolean             = true,
+    val guide: List<EpgEvent>?         = null,
+    val nowNext: Map<String, NowNextEntry> = emptyMap(),
+    /** A channel number being typed on the remote. */
+    val jumpDigits: String             = "",
 ) {
     val genres: List<String>
         get() = channels.mapNotNull { it.genre }.filter { it.isNotBlank() }.distinct().sorted()
 
     val displayedChannels: List<Channel>
-        get() = if (selectedGenre == null) channels
-                else channels.filter { it.genre == selectedGenre }
+        get() = playerList(channels, query, favoritesOnly, selectedGenre, favoriteIds)
 }
 
 @OptIn(UnstableApi::class)
@@ -72,6 +88,9 @@ class PlayerViewModel(
     // exponential backoff, capped, reset once media plays again.
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
+    private var watchdogJob: Job? = null
+    private var guideJob: Job? = null
+    private var jumpJob: Job? = null
 
     private val playerListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
@@ -81,6 +100,11 @@ class PlayerViewModel(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) reconnectAttempts = 0
+        }
+
+        // A live pipe closing shows up as the end of the stream: a drop, not the end (as on the web).
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED && _state.value.activeChannelId.isNotEmpty()) scheduleReconnect()
         }
     }
 
@@ -118,6 +142,9 @@ class PlayerViewModel(
     }
 
     fun init(channelId: String) {
+        startWatchdog()
+        loadGuide(channelId)
+        refreshNowNext()
         // Seed from the on-disk cache so channel navigation/metadata work instantly
         // while the network refresh runs below.
         val cached = live.getCachedChannels()
@@ -170,13 +197,10 @@ class PlayerViewModel(
                     Triple(channels.await(), logos.await(), favs.await())
                 }
             }.onSuccess { (channels, logos, favs) ->
-                val firstGenre = channels.mapNotNull { it.genre }
-                    .filter { it.isNotBlank() }.distinct().sorted().firstOrNull()
                 _state.value = _state.value.copy(
                     channels      = channels,
                     logoMap       = logos,
                     favoriteIds   = favs,
-                    selectedGenre = firstGenre,
                 )
             }
         }
@@ -223,13 +247,97 @@ class PlayerViewModel(
         }
     }
 
-    fun selectChannel(channelId: String) {
+    /** @param keepList leave the channel list open (TV and tablets, where it sits beside the picture). */
+    fun selectChannel(channelId: String, keepList: Boolean = false) {
         _state.value = _state.value.copy(
             activeChannelId = channelId,
-            showChannelList = false,
+            showChannelList = keepList && _state.value.showChannelList,
         )
         resetReconnect()   // a deliberate zap starts a fresh backoff sequence
         loadStream(channelId)
+        loadGuide(channelId)
+    }
+
+    fun closeChannelList() { _state.value = _state.value.copy(showChannelList = false) }
+    fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
+    fun toggleFavoritesOnly() { _state.value = _state.value.copy(favoritesOnly = !_state.value.favoritesOnly) }
+    fun toggleGuide() { _state.value = _state.value.copy(showGuide = !_state.value.showGuide) }
+
+    /** The playing channel in or out of favorites (the heart in the controls). */
+    fun toggleActiveFavorite() {
+        val s = _state.value
+        s.channels.find { it.uniqueId == s.activeChannelId }?.let(::toggleFavorite)
+    }
+
+    // ── The playing channel's guide: loaded on a channel change and every 10 minutes ──
+    private fun loadGuide(channelId: String) {
+        guideJob?.cancel()
+        _state.value = _state.value.copy(guide = null)
+        guideJob = viewModelScope.launch {
+            while (isActive) {
+                val events = runCatching { live.channelGuide(channelId) }.getOrDefault(emptyList())
+                if (_state.value.activeChannelId == channelId) _state.value = _state.value.copy(guide = events)
+                delay(10 * 60_000L)
+            }
+        }
+    }
+
+    private fun refreshNowNext() {
+        viewModelScope.launch {
+            val nowNext = live.getNowNext()
+            if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
+        }
+    }
+
+    // ── A channel number typed on the remote: tuned 1.2 s after the last digit ──
+    fun typeDigit(d: Char) {
+        val digits = (_state.value.jumpDigits + d).takeLast(4)
+        _state.value = _state.value.copy(jumpDigits = digits)
+        jumpJob?.cancel()
+        jumpJob = viewModelScope.launch {
+            delay(1_200)
+            jumpTarget(_state.value.channels, digits)?.let { selectChannel(it.uniqueId) }
+            _state.value = _state.value.copy(jumpDigits = "")
+        }
+    }
+
+    fun cancelDigits() {
+        jumpJob?.cancel()
+        _state.value = _state.value.copy(jumpDigits = "")
+    }
+
+    // ── Stall watchdog and keepalive ──────────────────────────────────────────
+    // A frozen live picture often raises no error at all: nudge it once, then
+    // reconnect (the web's stall watchdog). And ping the server every 10
+    // minutes while playing, as the web does.
+    private fun startWatchdog() {
+        if (watchdogJob?.isActive == true) return
+        watchdogJob = viewModelScope.launch {
+            var stall = StallState(0, System.currentTimeMillis(), nudged = false)
+            var lastKeepalive = System.currentTimeMillis()
+            while (isActive) {
+                delay(2_000)
+                val p = _player.value
+                val now = System.currentTimeMillis()
+                val idle = p == null || _state.value.isCasting || !p.playWhenReady || p.mediaItemCount == 0 ||
+                    p.playbackState == Player.STATE_IDLE || reconnectJob?.isActive == true
+                val (next, action) = stallTick(stall, now, p?.currentPosition ?: 0, p?.bufferedPosition ?: 0, idle)
+                stall = next
+                when (action) {
+                    is StallAction.Nudge -> p?.seekTo(action.toMs)
+                    StallAction.Reconnect -> {
+                        android.util.Log.w("PlayerViewModel", "picture frozen — reconnecting")
+                        stall = StallState(0, now, nudged = false)
+                        scheduleReconnect()
+                    }
+                    null -> {}
+                }
+                if (p?.isPlaying == true && now - lastKeepalive >= 10 * 60_000L) {
+                    lastKeepalive = now
+                    launch { live.keepalive() }
+                }
+            }
+        }
     }
 
     fun toggleChannelList() {
@@ -325,6 +433,9 @@ class PlayerViewModel(
     override fun onCleared() {
         sleepTimerJob?.cancel()
         reconnectJob?.cancel()
+        watchdogJob?.cancel()
+        guideJob?.cancel()
+        jumpJob?.cancel()
         (_player.value as? MediaController)?.removeListener(playerListener)
         castManager?.release()
         controllerFuture?.let { MediaController.releaseFuture(it) }
