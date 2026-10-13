@@ -44,7 +44,10 @@ class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
     suspend fun testServerUrl(url: String, accessKey: String? = null): StatusResponse =
         StalkerApi.create(url.trimEnd('/'), accessKey?.trim()?.ifEmpty { null }).getStatus()
 
-    suspend fun testConnection(): StatusResponse = apis.get().getStatus()
+    /** Told the portal in use whenever a status check finds one connected (reminders follow it). */
+    var onPortal: (String?) -> Unit = {}
+
+    suspend fun testConnection(): StatusResponse = apis.get().getStatus().also { if (it.connected) onPortal(it.portal) }
 
     // ── Portal management ─────────────────────────────────────────────────────
 
@@ -94,6 +97,6 @@ class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
 
     /** The server's settings (VOD and guide switches, playback token), or null when unreachable. */
     suspend fun getSettings(): SettingsResponse? = runCatching {
-        apis.get().getSettings().also { if (!prefs.accessKey.isNullOrBlank()) prefs.shareToken = it.accessShareToken }
+        apis.get().getSettings().also { prefs.keepShareToken(it.accessShareToken) }
     }.getOrNull()
 }

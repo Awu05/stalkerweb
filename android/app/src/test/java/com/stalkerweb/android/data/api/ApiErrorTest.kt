@@ -14,9 +14,16 @@ class ApiErrorTest {
     }
 
     @Test fun lockoutsKeepTheServersWait() {
-        val e = apiErrorFor(429, """{"error":"Too many wrong access keys — try again in 30 minutes."}""")
+        val e = apiErrorFor(429, """{"error":"Too many wrong access keys — try again in 30 minutes.","accessRequired":false}""")
         assertTrue(e is ApiError.LockedOut)
         assertEquals("Too many wrong access keys — try again in 30 minutes.", e.message)
+    }
+
+    @Test fun aRateLimitIsNotAKeyLockout() {
+        val e = apiErrorFor(429, """{"error":"Too many connect attempts. Try again in 1 minute."}""")
+        assertTrue(e is ApiError.Failed)
+        assertEquals("Too many connect attempts. Try again in 1 minute.", e.message)
+        assertTrue(apiErrorFor(429, """{"error":"x","lockedOut":true}""") is ApiError.LockedOut)
     }
 
     @Test fun aDeletedViewerIsViewerGone() {
@@ -39,7 +46,9 @@ class ApiErrorTest {
     @Test fun onlyAccessAndViewerProblemsBecomeAppEvents() {
         assertEquals(AppEvent.ViewerGone, appEventFor(409, """{"viewerGone":true}"""))
         assertEquals(AppEvent.AccessProblem("Access key required."), appEventFor(401, """{"error":"Access key required.","accessRequired":true}"""))
-        assertTrue(appEventFor(429, """{"error":"Too many"}""") is AppEvent.AccessProblem)
+        assertTrue(appEventFor(429, """{"error":"Too many","accessRequired":false}""") is AppEvent.AccessProblem)
+        // The connect/reconnect rate limit is a 429 too, but not about the key.
+        assertNull(appEventFor(429, """{"error":"Too many connect attempts. Try again in 1 minute."}"""))
         assertNull(appEventFor(401, """{"error":"Portal refused the MAC"}"""))
         assertNull(appEventFor(500, null))
     }

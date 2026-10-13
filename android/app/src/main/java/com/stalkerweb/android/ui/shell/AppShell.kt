@@ -15,13 +15,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -55,7 +58,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.stalkerweb.android.ui.components.EmptyState
+import com.stalkerweb.android.data.repo.Reminder
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
@@ -82,8 +85,12 @@ fun AppShell(
     vm: ShellViewModel,
     channels: @Composable () -> Unit,
     vod: @Composable () -> Unit,
+    guide: @Composable () -> Unit,
+    downloads: @Composable () -> Unit,
+    settings: @Composable () -> Unit,
+    reminders: List<Reminder>,
+    onCancelReminder: (String) -> Unit,
     onSwitchViewer: () -> Unit,
-    onOpenServer: () -> Unit,
     onOpenConnection: () -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -129,11 +136,9 @@ fun AppShell(
             NavHost(nav, startDestination = CHANNELS.route, modifier = Modifier.weight(1f)) {
                 composable(CHANNELS.route) { channels() }
                 composable(VOD.route) { vod() }
-                composable(DOWNLOADS.route) { EmptyState(Icons.Default.Download, "Downloads are coming soon", "For now they're on the web app.") }
-                composable(GUIDE.route) { EmptyState(Icons.Default.ViewList, "The guide is coming soon", "For now it's on the web app.") }
-                composable(SETTINGS) {
-                    com.stalkerweb.android.ui.settings.SettingsScreen(onOpenServer = onOpenServer, onOpenConnection = onOpenConnection)
-                }
+                composable(DOWNLOADS.route) { downloads() }
+                composable(GUIDE.route) { guide() }
+                composable(SETTINGS) { settings() }
             }
         }
     }
@@ -150,6 +155,7 @@ fun AppShell(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                RemindersBell(reminders, onCancelReminder)
                 viewer?.let { v ->
                     Box(Modifier.tvFocus(RoundedCornerShape(50)).clickable(onClick = onSwitchViewer).padding(8.dp)) {
                         ViewerAvatar(v.name, v.color, 32.dp)
@@ -181,6 +187,7 @@ fun AppShell(
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(state.connection?.name ?: "", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                RemindersBell(reminders, onCancelReminder)
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { menu = true }) { ViewerAvatar(viewer?.name ?: "?", viewer?.color, 28.dp) }
@@ -204,6 +211,34 @@ fun AppShell(
                         label = { Text(s.label) },
                     )
                 }
+            }
+        }
+    }
+}
+
+/** The pending guide reminders, as on the web's header bell. Hidden when there are none. */
+@Composable
+private fun RemindersBell(reminders: List<Reminder>, onCancel: (String) -> Unit) {
+    if (reminders.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    val time = remember { java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            BadgedBox(badge = { Badge { Text("${reminders.size}") } }) { Icon(Icons.Default.Notifications, "Reminders") }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            reminders.sortedBy { it.startTime }.forEach { r ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${r.channelName} · ${time.format(java.util.Date(r.startTime * 1000))}",
+                                style = MaterialTheme.typography.labelSmall, color = SwColors.Muted)
+                        }
+                    },
+                    trailingIcon = { Icon(Icons.Default.Close, "Cancel reminder") },
+                    onClick = { onCancel(r.id) },
+                )
             }
         }
     }

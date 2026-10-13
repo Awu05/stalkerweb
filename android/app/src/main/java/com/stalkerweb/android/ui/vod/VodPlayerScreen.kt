@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -101,6 +102,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val inMyList = watchState.list.any { it.id == p.videoId }
 
     LaunchedEffect(Unit) { viewModel.init(params) }
+    val toastContext = LocalContext.current
+    LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_SHORT).show() } }
     // Back closes the episodes panel first (the remote's Back would otherwise leave the player).
     BackHandler(enabled = panelOpen) { panelOpen = false }
     DisposableEffect(activity) {
@@ -161,6 +164,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     IconButton(onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
                     IconButton(onClick = { panelOpen = !panelOpen }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
                 }
+                IconButton(onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
                 IconButton(onClick = viewModel::toggleMyList) {
                     Icon(if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         if (inMyList) "Remove from My List" else "Add to My List", tint = Color.White)

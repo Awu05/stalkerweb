@@ -40,6 +40,15 @@ import com.stalkerweb.android.crash.CrashReporter
 import com.stalkerweb.android.data.api.AppEvent
 import com.stalkerweb.android.data.repo.PlayerParams
 import com.stalkerweb.android.data.update.UpdateManager
+import com.stalkerweb.android.reminders.ReminderReceiver
+import com.stalkerweb.android.ui.downloads.DownloadsScreen
+import com.stalkerweb.android.ui.downloads.DownloadsViewModel
+import com.stalkerweb.android.ui.guide.GuideScreen
+import com.stalkerweb.android.ui.guide.GuideViewModel
+import com.stalkerweb.android.ui.settings.SettingsScreen
+import com.stalkerweb.android.ui.settings.SettingsViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.stalkerweb.android.ui.shell.AppShell
 import com.stalkerweb.android.ui.shell.ShellViewModel
 import com.stalkerweb.android.ui.viewers.ViewerPickerScreen
@@ -71,6 +80,20 @@ class MainActivity : ComponentActivity() {
 
     // Kept so onResume can call refreshHistory() without capturing a stale reference.
     private var channelViewModel: ChannelViewModel? = null
+
+    /** A channel a reminder notification asked to open (uniqueId to name). */
+    private val pendingWatch = MutableStateFlow<Pair<String, String>?>(null)
+
+    private fun takeWatchExtra(intent: Intent?) {
+        val id = intent?.getStringExtra(ReminderReceiver.EXTRA_CHANNEL_ID) ?: return
+        pendingWatch.value = id to intent.getStringExtra(ReminderReceiver.EXTRA_CHANNEL_NAME).orEmpty()
+        intent.removeExtra(ReminderReceiver.EXTRA_CHANNEL_ID)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeWatchExtra(intent)
+    }
 
     // Launcher for ACTION_MANAGE_UNKNOWN_APP_SOURCES. Fires install as soon as
     // the user grants permission; silently does nothing if they deny.
@@ -115,6 +138,7 @@ class MainActivity : ComponentActivity() {
         val updateManager = UpdateManager(this)
 
         val isTV = BuildConfig.IS_TV
+        if (savedInstanceState == null) takeWatchExtra(intent)
 
         setContent {
             StalkerTheme {
@@ -129,7 +153,8 @@ class MainActivity : ComponentActivity() {
                 // screen for no reason.
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route && currentRoute != Screen.VodPlayer.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
-                val startDest     = if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route
+                // Worked out once: recomputed, it flips to Shell after Setup and the rebuilt graph drops "Who's watching?".
+                val startDest     = remember { if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route }
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -156,14 +181,14 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodViewModel(container.vod, container.watch, container.viewers, container.prefs) as T
+                            VodViewModel(container.vod, container.watch, container.viewers, container.prefs, container.downloads) as T
                     }
                 }
                 val vodPlayerVmFactory = remember {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodPlayerViewModel(application, container.vod, container.watch, container.links) as T
+                            VodPlayerViewModel(application, container.vod, container.watch, container.links, container.downloads) as T
                     }
                 }
                 val portalVmFactory = remember {
@@ -179,6 +204,27 @@ class MainActivity : ComponentActivity() {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
                             ShellViewModel(container.server, container.viewers) as T
+                    }
+                }
+                val guideVmFactory = remember {
+                    object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            GuideViewModel(container.guide, container.live, container.reminders, container.viewers) as T
+                    }
+                }
+                val downloadsVmFactory = remember {
+                    object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            DownloadsViewModel(container.downloads) as T
+                    }
+                }
+                val settingsVmFactory = remember {
+                    object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            SettingsViewModel(container.settings, container.server, container.viewers, container.prefs) as T
                     }
                 }
 
@@ -199,6 +245,28 @@ class MainActivity : ComponentActivity() {
                     if (container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
                     val status = runCatching { container.server.testConnection() }.getOrNull()
                     if (status?.connected == false) navController.navigate(Screen.Portal.route)
+                }
+
+                // A reminder came due while the app is open: say so here too, with Watch.
+                var dueReminder by remember { mutableStateOf<com.stalkerweb.android.data.repo.Reminder?>(null) }
+                LaunchedEffect(Unit) { container.reminders.due.collect { dueReminder = it } }
+                dueReminder?.let { r ->
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { dueReminder = null },
+                        title = { androidx.compose.material3.Text("Starting now: ${r.title}") },
+                        text = { androidx.compose.material3.Text(r.channelName) },
+                        confirmButton = { androidx.compose.material3.Button(onClick = { dueReminder = null; pendingWatch.value = r.channelId to r.channelName }) { androidx.compose.material3.Text("Watch") } },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { dueReminder = null }) { androidx.compose.material3.Text("Later") } },
+                    )
+                }
+
+                // A reminder's notification: play its channel once the app is past setup and the picker.
+                val watch by pendingWatch.collectAsStateWithLifecycle()
+                LaunchedEffect(watch, currentRoute) {
+                    val (id, name) = watch ?: return@LaunchedEffect
+                    if (currentRoute != Screen.Shell.route && currentRoute != Screen.Player.route) return@LaunchedEffect
+                    pendingWatch.value = null
+                    navController.navigate(Screen.Player.go(id, name))
                 }
 
                 // Problems any request can hit: a deleted viewer, or the access key no longer accepted.
@@ -282,6 +350,7 @@ class MainActivity : ComponentActivity() {
 
                     composable(Screen.Shell.route) {
                         val shellViewModel: ShellViewModel = viewModel(factory = shellVmFactory)
+                        val reminders by container.reminders.list.collectAsStateWithLifecycle()
                         AppShell(
                             vm = shellViewModel,
                             channels = {
@@ -298,8 +367,24 @@ class MainActivity : ComponentActivity() {
                                     onPlay = { params -> navController.navigate(Screen.VodPlayer.go(params)) },
                                 )
                             },
+                            guide = {
+                                GuideScreen(
+                                    viewModel = viewModel(factory = guideVmFactory),
+                                    onWatch = { channel -> navController.navigate(Screen.Player.go(channel.uniqueId, channel.name)) },
+                                )
+                            },
+                            downloads = { DownloadsScreen(viewModel = viewModel(factory = downloadsVmFactory)) },
+                            settings = {
+                                SettingsScreen(
+                                    viewModel = viewModel(factory = settingsVmFactory),
+                                    serverUrl = container.server.getServerUrl(),
+                                    onOpenServer = { navController.navigate(Screen.Setup.go()) },
+                                    onOwnViewerDeleted = { toPicker(required = true) },
+                                )
+                            },
+                            reminders = reminders,
+                            onCancelReminder = container.reminders::remove,
                             onSwitchViewer   = { toPicker(required = false) },
-                            onOpenServer     = { navController.navigate(Screen.Setup.go()) },
                             onOpenConnection = { navController.navigate(Screen.Portal.route) },
                         )
                     }
@@ -314,7 +399,8 @@ class MainActivity : ComponentActivity() {
                                 // navigation — so without this the user returns to
                                 // the same "Connect a portal to load channels" empty
                                 // state they just came here to fix.
-                                channelViewModel.load()
+                                // …and VOD and the Guide too, which also show the old portal's.
+                                container.viewers.sectionsChanged()
                                 if (!navController.popBackStack()) toShell()
                             },
                         )

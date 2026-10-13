@@ -24,8 +24,14 @@ class AccessGuardTest {
 
     @Test fun aLockoutLatchesToo() {
         val guard = AccessGuard(MemoryStore())
-        assertTrue(guard.onResponse(429, """{"error":"Too many wrong access keys — try again in 15 minutes."}""") is AppEvent.AccessProblem)
+        assertTrue(guard.onResponse(429, """{"error":"Too many wrong access keys — try again in 15 minutes.","accessRequired":false}""") is AppEvent.AccessProblem)
         assertTrue(guard.blocked)
+    }
+
+    @Test fun aConnectRateLimitDoesNotLatch() {
+        val guard = AccessGuard(MemoryStore())
+        assertNull(guard.onResponse(429, """{"error":"Too many connect attempts. Try again in 1 minute."}"""))
+        assertTrue(!guard.blocked)
     }
 
     @Test fun anAcceptedKeyIsVerifiedAndOtherRefusalsDoNotLatch() {

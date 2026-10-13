@@ -59,6 +59,34 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_FAVORITES_OPEN, true)
         set(value) = prefs.edit().putBoolean(KEY_FAVORITES_OPEN, value).apply()
 
+    // Guide reminders on this device (the web keeps its own).
+    var reminders: List<com.stalkerweb.android.data.repo.Reminder>
+        get() = runCatching {
+            val arr = JSONArray(prefs.getString(KEY_REMINDERS, null) ?: "[]")
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                com.stalkerweb.android.data.repo.Reminder(o.getString("id"), o.getString("channelId"), o.getString("channelName"), o.getString("title"), o.getLong("startTime"), o.optString("portal"))
+            }
+        }.getOrDefault(emptyList())
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { r -> arr.put(JSONObject().put("id", r.id).put("channelId", r.channelId).put("channelName", r.channelName).put("title", r.title).put("startTime", r.startTime).put("portal", r.portal)) }
+            prefs.edit().putString(KEY_REMINDERS, arr.toString()).apply()
+        }
+
+    // The portal last seen connected (reminders belong to it).
+    var activePortal: String?
+        get() = prefs.getString(KEY_ACTIVE_PORTAL, null)
+        set(value) = prefs.edit().putString(KEY_ACTIVE_PORTAL, value).apply()
+
+    /** The playback-only token for links — kept only while an access key is in use. */
+    fun keepShareToken(token: String?) { if (!accessKey.isNullOrBlank()) shareToken = token }
+
+    // The Settings tab last open.
+    var settingsTab: String
+        get() = prefs.getString(KEY_SETTINGS_TAB, null) ?: "viewers"
+        set(value) = prefs.edit().putString(KEY_SETTINGS_TAB, value).apply()
+
     fun removeWatchedChannel(uniqueId: String) {
         val list = getWatchedChannels().filter { it.uniqueId != uniqueId }
         prefs.edit().putString(KEY_WATCH_HISTORY, historyToJson(list)).apply()
@@ -239,6 +267,9 @@ class AppPrefs(context: Context) {
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
         private const val KEY_VOD_SORT        = "vod_sort"
         private const val KEY_FAVORITES_OPEN  = "favorites_open"
+        private const val KEY_REMINDERS = "guide_reminders"
+        private const val KEY_SETTINGS_TAB = "settings_tab"
+        private const val KEY_ACTIVE_PORTAL = "active_portal"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"
         private const val KEY_CHANNEL_CACHE   = "channel_cache"

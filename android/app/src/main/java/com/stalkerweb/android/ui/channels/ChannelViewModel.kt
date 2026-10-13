@@ -101,6 +101,7 @@ class ChannelViewModel(
             channels = _state.value.channels.ifEmpty { cached },
             logoMap = _state.value.logoMap.ifEmpty { cachedLogos },
         )
+        loadJob?.cancel()
         loadJob = viewModelScope.launch {
             runCatching {
                 // coroutineScope: a failing async is rethrown here, where runCatching catches it

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Replay
@@ -68,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stalkerweb.android.data.api.HistoryEntry
 import com.stalkerweb.android.data.api.ListEntry
 import com.stalkerweb.android.data.api.VodCategory
+import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
@@ -103,6 +105,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         watch.load()
         if (state.categories.isEmpty()) viewModel.loadCategories()
     }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_SHORT).show() } }
     LaunchedEffect(state.loadingCategories, isTV) {
         if (isTV && !state.loadingCategories && state.categories.isNotEmpty()) runCatching { firstCategory.requestFocus() }
     }
@@ -202,6 +206,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
             onOpenSeason = viewModel::openSeason,
             onBackSeasons = viewModel::backToSeasons,
             onClose = viewModel::closeSeries,
+            onDownloadEpisode = { season, ep -> downloadItem(show, season, ep).let { viewModel.download(listOf(it), "\"${it.title}\"") } },
+            onDownloadSeason = { season, eps -> viewModel.download(eps.map { ep -> downloadItem(show, season, ep) }, "${eps.size} episodes") },
             onPlay = { season, ep ->
                 viewModel.closeSeries()
                 onPlay(paramsFor(show).copy(
@@ -346,6 +352,8 @@ private fun Content(
                         title = item.name, year = item.year, posterUrl = item.screenshotUrl, isHD = item.isHD,
                         onClick = { open(item) },
                         bookmarked = item.id in myListIds, onBookmark = { viewModel.toggleMyList(item) },
+                        onDownload = if (item.isSeries || item.episodes.isNotEmpty()) null
+                            else ({ viewModel.download(listOf(DownloadItem(videoId = item.id, cmd = item.cmd, title = item.name)), "\"${item.name}\"") }),
                     )
                 }
                 if (shown.isEmpty()) full {
@@ -454,6 +462,7 @@ private fun SeriesDialog(
     show: VodItem, seasons: List<VodSeason>?, selectedSeason: VodSeason?, episodes: List<VodEpisode>?, loading: Boolean,
     inMyList: Boolean, onToggleMyList: () -> Unit, onOpenSeason: (VodSeason) -> Unit, onBackSeasons: () -> Unit,
     onClose: () -> Unit, onPlay: (VodSeason, VodEpisode) -> Unit,
+    onDownloadEpisode: (VodSeason, VodEpisode) -> Unit, onDownloadSeason: (VodSeason, List<VodEpisode>) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     Dialog(onDismissRequest = { if (selectedSeason != null) onBackSeasons() else onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -463,6 +472,7 @@ private fun SeriesDialog(
                     if (selectedSeason != null) IconButton(onClick = onBackSeasons) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Seasons") }
                     Text(selectedSeason?.let { "${show.name} · ${it.name.ifBlank { "Season ${it.seasonNumber}" }}" } ?: show.name,
                         style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (selectedSeason != null && !episodes.isNullOrEmpty()) Pill("Download season", false, { onDownloadSeason(selectedSeason, episodes) }, leading = Icons.Default.Download)
                     Pill(if (inMyList) "On My List" else "My List", inMyList, onToggleMyList, leading = if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder)
                     IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
                 }
@@ -489,9 +499,11 @@ private fun SeriesDialog(
                                     .then(if (ep.episodeId == list.first().episodeId) Modifier.focusRequester(firstFocus) else Modifier)
                                     .tvFocus(RoundedCornerShape(8.dp)).clickable { onPlay(selectedSeason, ep) }.padding(12.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(ep.seriesNumber, color = SwColors.Muted, modifier = Modifier.width(32.dp))
-                                Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = SwColors.Text)
+                                Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = SwColors.Text, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { onDownloadEpisode(selectedSeason, ep) }) { Icon(Icons.Default.Download, "Download") }
                             }
                         }
                     }
@@ -501,3 +513,9 @@ private fun SeriesDialog(
     }
     LaunchedEffect(seasons, episodes, selectedSeason) { runCatching { firstFocus.requestFocus() } }
 }
+
+/** One episode of [show], to download on the server. */
+private fun downloadItem(show: VodItem, season: VodSeason, ep: VodEpisode) = DownloadItem(
+    videoId = show.id, cmd = show.cmd, series = ep.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = ep.episodeId,
+    title = ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, seriesTitle = show.name,
+)

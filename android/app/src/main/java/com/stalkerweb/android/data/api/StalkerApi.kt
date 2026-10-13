@@ -155,6 +155,61 @@ interface StalkerApi {
     @PUT("api/vod/watch/list/{id}/completed")
     suspend fun setWatchListCompleted(@Path("id") id: String, @Body body: CompletedRequest): WatchState
 
+    // ── Part 4: guide, downloads, settings ────────────────────────────────────
+    @GET("api/epg")
+    suspend fun getEpg(@Query("period") period: Int = 24): EpgResponse
+
+    @GET("api/downloads")
+    suspend fun getDownloads(): DownloadsResponse
+
+    @POST("api/downloads")
+    suspend fun enqueueDownloads(@Body body: DownloadRequest)
+
+    @DELETE("api/downloads/{id}")
+    suspend fun removeDownload(@Path("id") id: String)
+
+    @POST("api/settings")
+    suspend fun saveSettings(@Body body: SettingsUpdate)
+
+    @PUT("api/viewers/{id}")
+    suspend fun updateViewer(@Path("id") id: String, @Body body: ViewerUpdate): ViewerSummary
+
+    @DELETE("api/viewers/{id}")
+    suspend fun deleteViewer(@Path("id") id: String)
+
+    @PUT("api/viewers/me/filters")
+    suspend fun saveMyFilters(@Body body: ViewerFiltersRequest): ViewerDetails
+
+    @GET("api/vod/categories")
+    suspend fun getPortalVodCategories(@Query("type") type: String, @Query("all") all: String = "1"): VodCategoriesResponse
+
+    @POST("api/profiles")
+    suspend fun createProfile(@Body body: Profile)
+
+    @PUT("api/profiles/{id}")
+    suspend fun updateProfile(@Path("id") id: String, @Body body: Profile)
+
+    @DELETE("api/profiles/{id}")
+    suspend fun deleteProfile(@Path("id") id: String)
+
+    @GET("api/logos")
+    suspend fun getLogos(): LogosInfo
+
+    @POST("api/logos/refresh")
+    suspend fun refreshLogos()
+
+    @DELETE("api/logos/{name}")
+    suspend fun deleteLogoOverride(@Path("name") name: String)
+
+    @GET("api/logos/strip")
+    suspend fun getStripWords(): StripWordsResponse
+
+    @POST("api/logos/strip")
+    suspend fun addStripWord(@Body body: WordRequest)
+
+    @DELETE("api/logos/strip/{word}")
+    suspend fun deleteStripWord(@Path("word") word: String)
+
     companion object {
         /** A client for [baseUrl] with a fixed [accessKey] and no viewer — for testing a server in Setup. */
         fun create(baseUrl: String, accessKey: String? = null): StalkerApi =

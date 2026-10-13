@@ -2,12 +2,14 @@ package com.stalkerweb.android.ui.vod
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.data.repo.DownloadsRepository
 import com.stalkerweb.android.data.repo.SHOW_STEP
 import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.nextVisibleCount
@@ -17,8 +19,11 @@ import com.stalkerweb.android.data.repo.WatchRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -82,10 +87,24 @@ class VodViewModel(
     private val watch: WatchRepository,
     private val viewers: ViewerRepository,
     private val prefs: AppPrefs,
+    private val downloads: DownloadsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VodUiState(sort = prefs.vodSort))
     val state: StateFlow<VodUiState> = _state.asStateFlow()
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Short messages for a toast ("Queued …"). */
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    /** Queues titles to download on the server (as the web's VOD page does). */
+    fun download(items: List<DownloadItem>, what: String) {
+        viewModelScope.launch {
+            runCatching { downloads.enqueue(items) }
+                .onSuccess { _messages.tryEmit("Queued $what for download") }
+                .onFailure { _messages.tryEmit(it.toApiError().message ?: "Could not queue download") }
+        }
+    }
 
     private var itemsJob: Job? = null
     private var categoriesJob: Job? = null
@@ -227,9 +246,13 @@ class VodViewModel(
 
     // ── The seasons pop-up ────────────────────────────────────────────────────
 
+    // One seasons/episodes load at a time: a slow answer for another show or season mustn't land on this one.
+    private var seriesJob: Job? = null
+
     fun openSeries(item: VodItem) {
         _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true)
-        viewModelScope.launch {
+        seriesJob?.cancel()
+        seriesJob = viewModelScope.launch {
             val seasons = vod.getVodSeasons(item.id)
             _state.value = _state.value.copy(seasons = seasons, seriesLoading = false)
         }
@@ -238,15 +261,16 @@ class VodViewModel(
     fun openSeason(season: VodSeason) {
         val show = _state.value.seriesItem ?: return
         _state.value = _state.value.copy(selectedSeason = season, episodes = null, seriesLoading = true)
-        viewModelScope.launch {
+        seriesJob?.cancel()
+        seriesJob = viewModelScope.launch {
             val eps = vod.getVodEpisodes(show.id, season.id)
             _state.value = _state.value.copy(episodes = eps, seriesLoading = false)
         }
     }
 
-    fun backToSeasons() { _state.value = _state.value.copy(selectedSeason = null, episodes = null) }
+    fun backToSeasons() { seriesJob?.cancel(); _state.value = _state.value.copy(selectedSeason = null, episodes = null, seriesLoading = false) }
 
-    fun closeSeries() { _state.value = _state.value.copy(seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
+    fun closeSeries() { seriesJob?.cancel(); _state.value = _state.value.copy(seriesLoading = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
 }
