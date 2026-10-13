@@ -65,6 +65,12 @@ data class VodUiState(
     val selectedSeason: VodSeason? = null,
     val episodes: List<VodEpisode>? = null,
     val seriesLoading: Boolean = false,
+    /** Every season's episodes loaded so far (Continue looks into the next ones). */
+    val seriesEpisodes: Map<String, List<VodEpisode>> = emptyMap(),
+    /** Play what Continue would, once known (a finished show from Recently watched). */
+    val seriesAutoplay: Boolean = false,
+    /** The viewer chose a season: Continue doesn't move them. */
+    val seriesPicked: Boolean = false,
 ) {
     val isMyList: Boolean get() = selected?.id == MY_LIST.id
     val isCombinedAll: Boolean get() = selected?.id in COMBINED_ALL_IDS
@@ -249,8 +255,9 @@ class VodViewModel(
     // One seasons/episodes load at a time: a slow answer for another show or season mustn't land on this one.
     private var seriesJob: Job? = null
 
-    fun openSeries(item: VodItem) {
-        _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true)
+    fun openSeries(item: VodItem, autoplay: Boolean = false) {
+        _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true,
+            seriesEpisodes = emptyMap(), seriesAutoplay = autoplay, seriesPicked = false)
         seriesJob?.cancel()
         seriesJob = viewModelScope.launch {
             val seasons = vod.getVodSeasons(item.id)
@@ -260,17 +267,42 @@ class VodViewModel(
 
     fun openSeason(season: VodSeason) {
         val show = _state.value.seriesItem ?: return
-        _state.value = _state.value.copy(selectedSeason = season, episodes = null, seriesLoading = true)
+        val cached = _state.value.seriesEpisodes[season.id]
+        _state.value = _state.value.copy(selectedSeason = season, episodes = cached, seriesLoading = cached == null, seriesPicked = true)
+        if (cached != null) return
         seriesJob?.cancel()
         seriesJob = viewModelScope.launch {
             val eps = vod.getVodEpisodes(show.id, season.id)
-            _state.value = _state.value.copy(episodes = eps, seriesLoading = false)
+            _state.value = _state.value.copy(episodes = eps, seriesLoading = false, seriesEpisodes = _state.value.seriesEpisodes + (season.id to eps))
         }
     }
 
-    fun backToSeasons() { seriesJob?.cancel(); _state.value = _state.value.copy(selectedSeason = null, episodes = null, seriesLoading = false) }
+    fun backToSeasons() { seriesJob?.cancel(); _state.value = _state.value.copy(selectedSeason = null, episodes = null, seriesLoading = false, seriesPicked = true) }
 
-    fun closeSeries() { seriesJob?.cancel(); _state.value = _state.value.copy(seriesLoading = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
+    // Continue's seasons: loaded beside the one shown, never cancelling it.
+    private val continueLoads = mutableSetOf<String>()
+
+    /** A season Continue has to look into. */
+    fun loadSeasonEpisodes(seasonId: String) {
+        val show = _state.value.seriesItem ?: return
+        if (!continueLoads.add("${show.id}:$seasonId")) return
+        viewModelScope.launch {
+            val eps = vod.getVodEpisodes(show.id, seasonId)
+            if (_state.value.seriesItem?.id == show.id) _state.value = _state.value.copy(seriesEpisodes = _state.value.seriesEpisodes + (seasonId to eps))
+        }
+    }
+
+    /** Open at Continue's season, its episodes already loaded (not the viewer's choice). */
+    fun showContinueSeason(season: VodSeason) {
+        val s = _state.value
+        if (s.seriesPicked) return
+        _state.value = s.copy(selectedSeason = season, episodes = s.seriesEpisodes[season.id], seriesLoading = s.seriesEpisodes[season.id] == null)
+    }
+
+    fun autoplayDone() { _state.value = _state.value.copy(seriesAutoplay = false) }
+
+
+    fun closeSeries() { seriesJob?.cancel(); continueLoads.clear(); _state.value = _state.value.copy(seriesLoading = false, seriesEpisodes = emptyMap(), seriesAutoplay = false, seriesPicked = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
 }

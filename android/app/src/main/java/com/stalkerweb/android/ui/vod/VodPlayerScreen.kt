@@ -1,5 +1,8 @@
 package com.stalkerweb.android.ui.vod
 
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.layout.height
 import android.app.Activity
 import android.view.View
 import android.view.WindowManager
@@ -188,6 +191,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         if (panelOpen && p.isEpisode) {
             EpisodesPanel(
                 state = state, current = p, wide = wide,
+                watched = watchState.watchedEpisodes.toSet(), progress = watchState.progress.associateBy { it.key },
                 onPick = { season, ep -> viewModel.playEpisode(season, ep) },
                 onSeason = viewModel::loadSeason,
                 onClose = { panelOpen = false },
@@ -210,6 +214,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 @Composable
 private fun EpisodesPanel(
     state: VodPlayerState, current: PlayerParams, wide: Boolean,
+    watched: Set<String>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
     onPick: (com.stalkerweb.android.data.api.VodSeason, com.stalkerweb.android.data.api.VodEpisode) -> Unit,
     onSeason: (String) -> Unit, onClose: () -> Unit, modifier: Modifier,
 ) {
@@ -248,8 +253,16 @@ private fun EpisodesPanel(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text(ep.seriesNumber, color = SwColors.Muted, modifier = Modifier.width(28.dp))
-                            Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = if (playing) SwColors.PrimaryLight else SwColors.Text,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val key = com.stalkerweb.android.data.repo.WatchRules.makeKey(current.videoId, seasonId, ep.episodeId)
+                            val seen = key in watched
+                            val frac = if (seen) null else progress[key]?.takeIf { it.duration > 0 }?.let { (it.position / it.duration).toFloat().coerceIn(0f, 1f) }
+                            Column(Modifier.weight(1f)) {
+                                Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = if (playing) SwColors.PrimaryLight else SwColors.Text,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (frac != null && frac > 0f) LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth(0.6f).padding(top = 3.dp).height(2.dp),
+                                    color = SwColors.Primary, trackColor = SwColors.Surface3)
+                            }
+                            if (seen) Icon(Icons.Default.Check, "Watched", Modifier.size(16.dp), tint = SwColors.Success)
                         }
                     }
                 }

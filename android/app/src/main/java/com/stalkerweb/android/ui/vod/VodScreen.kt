@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.vod
 
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
@@ -73,7 +77,16 @@ import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItem
 import com.stalkerweb.android.data.api.VodSeason
+import com.stalkerweb.android.data.api.ProgressEntry
+import com.stalkerweb.android.data.repo.ContinueTarget
 import com.stalkerweb.android.data.repo.PlayerParams
+import com.stalkerweb.android.data.repo.WatchRules
+import com.stalkerweb.android.data.repo.continueTarget
+import com.stalkerweb.android.data.repo.episodeLabel
+import com.stalkerweb.android.data.repo.historyEpisodeLabel
+import com.stalkerweb.android.data.repo.seasonNoOf
+import com.stalkerweb.android.data.repo.seasonWatchedLabel
+import com.stalkerweb.android.data.repo.watchedInSeason
 import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.WatchRepository
 import com.stalkerweb.android.data.repo.applyVodFilters
@@ -140,8 +153,9 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     }
     fun openHistory(entry: HistoryEntry) {
         val p = PlayerParams.parse(entry.params)
-        // A finished show opens its seasons; anything else resumes (or plays again).
-        if (entry.finished && p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl)) else onPlay(p)
+        // A finished show plays on (its seasons work out what's next, and stay open at its end);
+        // anything else resumes (or plays again).
+        if (entry.finished && p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl), autoplay = true) else onPlay(p)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -195,7 +209,34 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     }
 
     state.seriesItem?.let { show ->
+        val playEpisode = { season: VodSeason, ep: VodEpisode ->
+            viewModel.closeSeries()
+            onPlay(paramsFor(show).copy(
+                series = ep.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = ep.episodeId, season = seasonNoOf(season),
+                episodeTitle = ep.name.ifBlank { "Episode ${ep.seriesNumber}" },
+            ))
+        }
+        // What Continue plays — loading the seasons it has to look into.
+        val target = state.seasons?.let { seasons ->
+            continueTarget(show.id, seasons, state.seriesEpisodes, watchState.history, watchState.progress, watchState.watchedEpisodes)
+        }
+        LaunchedEffect(target) { (target as? ContinueTarget.Needs)?.let { viewModel.loadSeasonEpisodes(it.seasonId) } }
+        val next = target as? ContinueTarget.Play
+        // Open at Continue's season, its episode highlighted; from Recently watched, play it.
+        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) {
+            val n = next ?: return@LaunchedEffect
+            if (state.seriesAutoplay) { viewModel.autoplayDone(); playEpisode(n.season, n.episode) }
+            else viewModel.showContinueSeason(n.season)
+        }
+        // At the show's end there's nothing to continue: the seasons stay open.
+        LaunchedEffect(target == null && state.seasons != null) { if (target == null && state.seasons != null) viewModel.autoplayDone() }
+        val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
         SeriesDialog(
+            next = next,
+            watched = watchedKeys,
+            progress = watchState.progress.associateBy { it.key },
+            episodeCount = { id -> state.seriesEpisodes[id]?.size },
+            onToggleWatched = { season, ep, seen -> watch.setEpisodeWatched(WatchRules.makeKey(show.id, season.id, ep.episodeId), seen) },
             show = show,
             seasons = state.seasons,
             selectedSeason = state.selectedSeason,
@@ -208,13 +249,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
             onClose = viewModel::closeSeries,
             onDownloadEpisode = { season, ep -> downloadItem(show, season, ep).let { viewModel.download(listOf(it), "\"${it.title}\"") } },
             onDownloadSeason = { season, eps -> viewModel.download(eps.map { ep -> downloadItem(show, season, ep) }, "${eps.size} episodes") },
-            onPlay = { season, ep ->
-                viewModel.closeSeries()
-                onPlay(paramsFor(show).copy(
-                    series = ep.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = ep.episodeId,
-                    episodeTitle = ep.name.ifBlank { "Episode ${ep.seriesNumber}" },
-                ))
-            },
+            onPlay = playEpisode,
         )
     }
 }
@@ -385,7 +420,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
                 Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
-                        title = e.title, year = e.episodeTitle, posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
+                        title = e.title, year = historyEpisodeLabel(e), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
                     )
                     // Below the tile, not on it: the remote's focus search can't reach a button inside a tile.
@@ -456,13 +491,20 @@ private fun ListTile(e: ListEntry, done: Boolean, myListIds: Set<String>, open: 
     }
 }
 
-/** A show's seasons and episodes (in order), with My List; a full dialog on TV and phones alike. */
+/**
+ * A show's seasons and episodes (in order), with My List and Continue; a full
+ * dialog on TV and phones alike. Watched episodes are ticked (and can be
+ * ticked or unticked by hand), started ones show how far in, and each season
+ * how much of it is watched.
+ */
 @Composable
 private fun SeriesDialog(
     show: VodItem, seasons: List<VodSeason>?, selectedSeason: VodSeason?, episodes: List<VodEpisode>?, loading: Boolean,
     inMyList: Boolean, onToggleMyList: () -> Unit, onOpenSeason: (VodSeason) -> Unit, onBackSeasons: () -> Unit,
     onClose: () -> Unit, onPlay: (VodSeason, VodEpisode) -> Unit,
     onDownloadEpisode: (VodSeason, VodEpisode) -> Unit, onDownloadSeason: (VodSeason, List<VodEpisode>) -> Unit,
+    next: ContinueTarget.Play?, watched: Set<String>, progress: Map<String, ProgressEntry>,
+    episodeCount: (String) -> Int?, onToggleWatched: (VodSeason, VodEpisode, Boolean) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     Dialog(onDismissRequest = { if (selectedSeason != null) onBackSeasons() else onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -476,6 +518,18 @@ private fun SeriesDialog(
                     Pill(if (inMyList) "On My List" else "My List", inMyList, onToggleMyList, leading = if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder)
                     IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
                 }
+                // Continue: resume the episode stopped partway, or play the next one not watched.
+                if (next != null) {
+                    val label = episodeLabel(seasonNoOf(next.season), next.episode.seriesNumber, next.episode.name)
+                    Button(
+                        onClick = { onPlay(next.season, next.episode) },
+                        modifier = Modifier.fillMaxWidth().focusRequester(firstFocus).tvFocus(RoundedCornerShape(50)),
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("${if (next.resume) "Resume" else "Play"} $label", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
                 HorizontalDivider(color = SwColors.Border)
                 when {
                     loading -> Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) { CircularProgressIndicator() }
@@ -483,26 +537,51 @@ private fun SeriesDialog(
                         val list = seasons.orEmpty()
                         if (list.isEmpty()) item { Text("No seasons found.", color = SwColors.Muted) }
                         items(list, key = { it.id }) { s ->
-                            Row(
+                            val done = seasonWatchedLabel(watchedInSeason(watched.toList(), show.id, s.id), episodeCount(s.id))
+                            Column(
                                 Modifier.fillMaxWidth()
-                                    .then(if (s.id == list.first().id) Modifier.focusRequester(firstFocus) else Modifier)
+                                    .then(if (next == null && s.id == list.first().id) Modifier.focusRequester(firstFocus) else Modifier)
                                     .tvFocus(RoundedCornerShape(8.dp)).clickable { onOpenSeason(s) }.padding(12.dp),
-                            ) { Text(s.name.ifBlank { "Season ${s.seasonNumber}" }, color = SwColors.Text) }
+                            ) {
+                                Text(s.name.ifBlank { "Season ${s.seasonNumber}" }, color = SwColors.Text)
+                                if (done.isNotEmpty()) WatchedNote(done)
+                            }
                         }
                     }
                     else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         val list = episodes.orEmpty()
                         if (list.isEmpty()) item { Text("No episodes found.", color = SwColors.Muted) }
                         items(list, key = { it.episodeId }) { ep ->
+                            val key = WatchRules.makeKey(show.id, selectedSeason.id, ep.episodeId)
+                            val seen = key in watched
+                            val point = if (seen) null else progress[key]
+                            val frac = point?.takeIf { it.duration > 0 }?.let { (it.position / it.duration).toFloat().coerceIn(0f, 1f) }
+                            val highlighted = next != null && next.season.id == selectedSeason.id && next.episode.episodeId == ep.episodeId
                             Row(
                                 Modifier.fillMaxWidth()
-                                    .then(if (ep.episodeId == list.first().episodeId) Modifier.focusRequester(firstFocus) else Modifier)
-                                    .tvFocus(RoundedCornerShape(8.dp)).clickable { onPlay(selectedSeason, ep) }.padding(12.dp),
+                                    .then(if (next == null && ep.episodeId == list.first().episodeId) Modifier.focusRequester(firstFocus) else Modifier)
+                                    .background(if (highlighted) SwColors.Surface3 else Color.Transparent, RoundedCornerShape(8.dp))
+                                    .tvFocus(RoundedCornerShape(8.dp)).clickable { onPlay(selectedSeason, ep) }.padding(horizontal = 12.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(ep.seriesNumber, color = SwColors.Muted, modifier = Modifier.width(32.dp))
-                                Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = SwColors.Text, modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f)) {
+                                    Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = SwColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (seen) WatchedNote("Watched")
+                                    else if (frac != null && frac > 0f) LinearProgressIndicator(
+                                        progress = { frac }, modifier = Modifier.fillMaxWidth(0.6f).padding(top = 4.dp).height(3.dp),
+                                        color = SwColors.Primary, trackColor = SwColors.Surface3,
+                                    )
+                                }
+                                // Tick by hand: watched elsewhere, or not really watched.
+                                IconButton(onClick = { onToggleWatched(selectedSeason, ep, !seen) }) {
+                                    Icon(
+                                        if (seen) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                        if (seen) "Mark as not watched" else "Mark as watched",
+                                        tint = if (seen) SwColors.Success else SwColors.Muted,
+                                    )
+                                }
                                 IconButton(onClick = { onDownloadEpisode(selectedSeason, ep) }) { Icon(Icons.Default.Download, "Download") }
                             }
                         }
@@ -511,7 +590,16 @@ private fun SeriesDialog(
             }
         }
     }
-    LaunchedEffect(seasons, episodes, selectedSeason) { runCatching { firstFocus.requestFocus() } }
+    LaunchedEffect(seasons, episodes, selectedSeason, next != null) { runCatching { firstFocus.requestFocus() } }
+}
+
+/** "✓ Watched", "✓ 3 of 10" under a season or episode. */
+@Composable
+private fun WatchedNote(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.Default.Check, null, Modifier.size(12.dp), tint = SwColors.Success)
+        Text(text, style = MaterialTheme.typography.labelSmall, color = SwColors.Success)
+    }
 }
 
 /** One episode of [show], to download on the server. */

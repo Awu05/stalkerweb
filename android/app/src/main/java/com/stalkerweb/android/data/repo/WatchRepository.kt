@@ -76,6 +76,17 @@ class WatchRepository(private val apis: ApiProvider, private val links: MediaLin
         request(local = true) { setWatchListCompleted(id, CompletedRequest(completed)) }
     }
 
+    /** An episode ticked as watched, or not, by hand. Watched, it has no resume point left. */
+    fun setEpisodeWatched(key: String, watched: Boolean) {
+        val s = _state.value
+        val rest = s.watchedEpisodes.filter { it != key }
+        set(s.copy(
+            watchedEpisodes = if (watched) listOf(key) + rest else rest,
+            progress = if (watched) s.progress.filter { it.key != key } else s.progress,
+        ))
+        request(local = true) { setEpisodeWatched(key, com.stalkerweb.android.data.api.EpisodeWatchedRequest(watched)) }
+    }
+
     fun progressFor(key: String): ProgressEntry? = _state.value.progress.firstOrNull { it.key == key }
 
     /** Ids of titles started or finished — for the "Not watched" filter. */
