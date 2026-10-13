@@ -56,4 +56,10 @@ describe('/api/vod/watch', () => {
   it('refuses a deleted viewer rather than writing to the default one', async () => {
     expect((await call('PUT', '', { key: '1', position: 600, duration: 6000 }, 'view_gone')).status).toBe(409)
   })
+
+  it('marks an episode watched or not', async () => {
+    const key = encodeURIComponent('300:s1:e4')
+    expect((await call('PUT', '/episodes/' + key, { watched: true }, andy)).body.watchedEpisodes).toEqual(['300:s1:e4'])
+    expect((await call('PUT', '/episodes/' + key, { watched: false }, andy)).body.watchedEpisodes).toEqual([])
+  })
 })
