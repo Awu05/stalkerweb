@@ -80,6 +80,11 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/debug.keystore
 
+      # The app's unit tests first (ci.yml no longer runs on pull requests).
+      - name: Android unit tests
+        working-directory: android
+        run: gradle :app:testMobileDebugUnitTest
+
       - name: Build APKs (mobile + tv)
         working-directory: android
         run: |
