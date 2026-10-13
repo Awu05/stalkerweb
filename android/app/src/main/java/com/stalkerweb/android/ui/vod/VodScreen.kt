@@ -156,9 +156,9 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     }
     fun openHistory(entry: HistoryEntry) {
         val p = PlayerParams.parse(entry.params)
-        // A finished show plays on (its seasons work out what's next, and stay open at its end);
-        // anything else resumes (or plays again).
-        if (entry.finished && p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl), autoplay = true) else onPlay(p)
+        // A show opens its seasons and episodes, at the episode Continue would play (nothing plays
+        // until picked); a movie resumes, or plays again once finished.
+        if (p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl)) else onPlay(p)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -225,14 +225,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         }
         LaunchedEffect(target) { (target as? ContinueTarget.Needs)?.let { viewModel.loadSeasonEpisodes(it.seasonId) } }
         val next = target as? ContinueTarget.Play
-        // Open at Continue's season, its episode highlighted; from Recently watched, play it.
-        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) {
-            val n = next ?: return@LaunchedEffect
-            if (state.seriesAutoplay) { viewModel.autoplayDone(); playEpisode(n.season, n.episode) }
-            else viewModel.showContinueSeason(n.season)
-        }
-        // At the show's end there's nothing to continue: the seasons stay open.
-        LaunchedEffect(target == null && state.seasons != null) { if (target == null && state.seasons != null) viewModel.autoplayDone() }
+        // Open at Continue's season, its episode highlighted (at the show's end, the seasons list).
+        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) { next?.let { viewModel.showContinueSeason(it.season) } }
         val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
         SeriesDialog(
             next = next,

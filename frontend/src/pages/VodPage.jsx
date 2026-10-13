@@ -20,8 +20,8 @@ import { showToast } from '@/lib/toast'
 // ── Recently watched ─────────────────────────────────────────────────────
 // The viewer's last titles, newest first (backend viewers/WatchStore.js): a
 // show once, with the episode played last. Unfinished ones show how far they
-// got and resume; finished ones are ticked — a movie plays again, a show
-// opens its seasons.
+// got, finished ones are ticked. A movie resumes (or plays again); a show opens
+// its seasons, at the episode Continue would play.
 function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
   if (!entries.length) return null
   return (
@@ -255,7 +255,7 @@ function VodCard({ item, onClick, onDownload }) {
 // TV-show drill-down: show → seasons → episodes. Selecting a season fetches its
 // episodes; selecting an episode resolves and plays it (passing season/episode
 // ids so the backend can drill to the concrete file).
-function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
+function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
   const [seasons, setSeasons] = useState(null)
   const [selectedSeason, setSelectedSeason] = useState(null)
   const [episodesBySeason, setEpisodesBySeason] = useState({})   // seasonId → episodes, as loaded
@@ -266,7 +266,6 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   const [watch, setWatch] = useState(() => getWatchState())
   const loadingSeasons = useRef(new Set())
   const picked = useRef(false)     // the viewer chose a season: don't move them
-  const played = useRef(false)     // autoplay done (once)
 
   useEffect(() => onWatchChange(setWatch), [])
 
@@ -294,12 +293,10 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   useEffect(() => { if (needs) loadSeason(needs) }, [needs, loadSeason])
   const next = target && !target.needs && !continueFailed ? target : null
 
-  // Open straight at Continue's season, its episode highlighted; from Recently
-  // watched, play it. (At the show's end there's nothing to continue: the
-  // seasons stay open.)
+  // Open straight at Continue's season, its episode highlighted. (At the
+  // show's end there's nothing to continue: the seasons list shows.)
   useEffect(() => {
     if (!next || picked.current) return
-    if (autoplay && !played.current) { played.current = true; onPlayEpisode(item, next.season, next.episode); return }
     setSelectedSeason(next.season)
   }, [next?.season?.id, next?.episode?.episodeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -555,7 +552,6 @@ export default function VodPage() {
 
   const [search, setSearch]           = useState('')
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
-  const [seriesAutoplay, setSeriesAutoplay] = useState(false) // play what Continue would, once known
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
   const [myList, setMyList]   = useState(() => getMyList())     // My List
 
@@ -581,12 +577,12 @@ export default function VodPage() {
     return stop
   }, [])
 
-  // A title in Recently watched: unfinished ones resume; a finished show plays
-  // its next episode (its seasons sheet works that out, and stays open at the
-  // show's end); a finished movie plays again.
+  // A title in Recently watched: a show opens its seasons and episodes (at the
+  // episode Continue would play — nothing plays until picked); a movie resumes,
+  // or plays again once finished.
   function openHistoryEntry(entry) {
     const isEpisode = /(?:^|&)(?:seasonId|episodeId)=/.test(entry.params)
-    if (entry.finished && isEpisode) { setSeriesAutoplay(true); setSeriesSheet(itemFromParams(entry.params)) }
+    if (isEpisode) setSeriesSheet(itemFromParams(entry.params))
     else navigate(`/vod-player?${entry.params}`)
   }
 
@@ -771,7 +767,6 @@ export default function VodPage() {
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
     if (hasSeries) {
-      setSeriesAutoplay(false)
       setSeriesSheet(item)
     } else {
       navigate(`/vod-player?${buildPlayerParams(item)}`)
@@ -1048,7 +1043,6 @@ export default function VodPage() {
       {seriesSheet && (
         <SeasonsSheet
           item={seriesSheet}
-          autoplay={seriesAutoplay}
           onClose={() => setSeriesSheet(null)}
           onPlayEpisode={handlePlayEpisode}
           onDownloadEpisode={downloadEpisode}
