@@ -246,6 +246,19 @@ class MainActivity : ComponentActivity() {
                     if (status?.connected == false) navController.navigate(Screen.Portal.route)
                 }
 
+                // A reminder came due while the app is open: say so here too, with Watch.
+                var dueReminder by remember { mutableStateOf<com.stalkerweb.android.data.repo.Reminder?>(null) }
+                LaunchedEffect(Unit) { container.reminders.due.collect { dueReminder = it } }
+                dueReminder?.let { r ->
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { dueReminder = null },
+                        title = { androidx.compose.material3.Text("Starting now: ${r.title}") },
+                        text = { androidx.compose.material3.Text(r.channelName) },
+                        confirmButton = { androidx.compose.material3.Button(onClick = { dueReminder = null; pendingWatch.value = r.channelId to r.channelName }) { androidx.compose.material3.Text("Watch") } },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { dueReminder = null }) { androidx.compose.material3.Text("Later") } },
+                    )
+                }
+
                 // A reminder's notification: play its channel once the app is past setup and the picker.
                 val watch by pendingWatch.collectAsStateWithLifecycle()
                 LaunchedEffect(watch, currentRoute) {

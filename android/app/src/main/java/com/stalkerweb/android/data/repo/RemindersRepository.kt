@@ -7,7 +7,10 @@ import android.content.Intent
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.prefs.AppPrefs
 import com.stalkerweb.android.reminders.ReminderReceiver
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -15,6 +18,12 @@ import kotlinx.coroutines.flow.asStateFlow
 class RemindersRepository(private val context: Context, private val prefs: AppPrefs) {
     private val _list = MutableStateFlow(ReminderRules.upcoming(prefs.reminders, System.currentTimeMillis()))
     val list: StateFlow<List<Reminder>> = _list.asStateFlow()
+    private val _due = MutableSharedFlow<Reminder>(extraBufferCapacity = 4)
+    /** A reminder came due while the app is running: shown in the app too (TVs show no heads-up notifications). */
+    val due: SharedFlow<Reminder> = _due.asSharedFlow()
+
+    // Alarms don't survive a reboot or a force-stop: set them again whenever the app starts (BootReceiver starts it).
+    init { _list.value.forEach { runCatching { schedule(it) } } }
 
     fun isSet(channelId: String, event: EpgEvent): Boolean = _list.value.any { it.id == "$channelId:${event.startTime}" }
 
@@ -34,7 +43,10 @@ class RemindersRepository(private val context: Context, private val prefs: AppPr
     }
 
     /** The alarm went off: it's no longer pending. */
-    fun fired(id: String) = save(_list.value.filter { it.id != id })
+    fun fired(id: String) {
+        _list.value.firstOrNull { it.id == id }?.let { _due.tryEmit(it) }
+        save(_list.value.filter { it.id != id })
+    }
 
     private fun save(list: List<Reminder>) {
         prefs.reminders = list

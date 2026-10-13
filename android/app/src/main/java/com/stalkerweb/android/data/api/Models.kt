@@ -297,7 +297,7 @@ data class LogoCheck(val logo: String? = null, val name: String? = null)
 /** A programme in the guide (backend GuideManager.getChannelEvents); times in seconds. */
 @JsonClass(generateAdapter = false)
 data class EpgEvent(
-    val id: Long = 0,
+    val id: Long? = null,
     val title: String = "",
     val startTime: Long = 0,
     val endTime: Long = 0,

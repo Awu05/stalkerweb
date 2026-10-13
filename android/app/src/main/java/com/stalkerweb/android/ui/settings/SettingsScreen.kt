@@ -66,6 +66,7 @@ import com.stalkerweb.android.data.api.SettingsUpdate
 import com.stalkerweb.android.data.api.ViewerSummary
 import com.stalkerweb.android.data.repo.hiddenFrom
 import com.stalkerweb.android.data.repo.linksFor
+import com.stalkerweb.android.data.repo.mergeHidden
 import com.stalkerweb.android.data.repo.shownFrom
 import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.ViewerAvatar
@@ -121,10 +122,17 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
     var deleting by remember { mutableStateOf<ViewerSummary?>(null) }
     var adding by remember { mutableStateOf(false) }
     // The filter checklists, edited here and saved together.
-    var shownGenres by remember(me, state.genres) { mutableStateOf(shownFrom(state.genres, me?.disabledGenres.orEmpty())) }
+    var shownGenres by remember(me?.id, state.genres) { mutableStateOf(shownFrom(state.genres, me?.disabledGenres.orEmpty())) }
     val allCats = (state.movieCategories + state.seriesCategories).distinct()
-    var shownCats by remember(me, allCats) { mutableStateOf(shownFrom(allCats, me?.disabledVodCategories.orEmpty())) }
-    var showAdult by remember(me) { mutableStateOf(me?.showAdult == true) }
+    var shownCats by remember(me?.id, allCats) { mutableStateOf(shownFrom(allCats, me?.disabledVodCategories.orEmpty())) }
+    var showAdult by remember(me?.id) { mutableStateOf(me?.showAdult == true) }
+    val save = {
+        viewModel.saveFilters(
+            mergeHidden(me?.disabledGenres.orEmpty(), state.genres, shownGenres),
+            mergeHidden(me?.disabledVodCategories.orEmpty(), allCats, shownCats),
+            showAdult,
+        )
+    }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -145,8 +153,14 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                 OutlinedButton(onClick = { adding = true }) { Icon(Icons.Default.Add, null); Text(" Add viewer") }
             }
         }
+        // Save first: the checklists below can run to hundreds of rows.
         item {
-            Card("${me?.name ?: "Your"}'s channels", "Live TV genres shown to this viewer.") {
+            Card("${me?.name ?: "Your"}'s filters", "What this viewer sees. Change the lists below, then save.") {
+                Button(onClick = save, enabled = !state.busy && me != null) { Text("Save ${me?.name ?: "viewer"}'s filters") }
+            }
+        }
+        item {
+            Card("${me?.name ?: "Your"}'s channels", if (state.genres.isEmpty()) "Connect to a portal to choose genres." else "Live TV genres shown to this viewer.") {
                 Row { TextButton(onClick = { shownGenres = state.genres.toSet() }) { Text("All") }; TextButton(onClick = { shownGenres = emptySet() }) { Text("None") } }
             }
         }
@@ -154,7 +168,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
             CheckRow(g, g in shownGenres) { on -> shownGenres = if (on) shownGenres + g else shownGenres - g }
         }
         item {
-            Card("Movies & Series", "Portal categories shown to this viewer.") {
+            Card("Movies & Series", if (allCats.isEmpty()) "Connect to a portal to choose categories." else "Portal categories shown to this viewer.") {
                 Row { TextButton(onClick = { shownCats = allCats.toSet() }) { Text("All") }; TextButton(onClick = { shownCats = emptySet() }) { Text("None") } }
             }
         }
@@ -167,7 +181,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                     Text("Show adult channels and categories", color = SwColors.Text, modifier = Modifier.weight(1f))
                     Switch(checked = showAdult, onCheckedChange = { showAdult = it })
                 }
-                Button(onClick = { viewModel.saveFilters(hiddenFrom(state.genres, shownGenres), hiddenFrom(allCats, shownCats), showAdult) }, enabled = !state.busy) {
+                Button(onClick = save, enabled = !state.busy && me != null) {
                     Text("Save ${me?.name ?: "viewer"}'s filters")
                 }
             }

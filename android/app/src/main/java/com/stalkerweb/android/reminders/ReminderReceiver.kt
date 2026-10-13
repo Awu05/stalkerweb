@@ -13,7 +13,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.stalkerweb.android.MainActivity
-import com.stalkerweb.android.R
 import com.stalkerweb.android.StalkerWebApp
 
 /** A guide reminder came due: "Starting now: <title> on <channel>"; tapping it opens that channel. */
@@ -39,7 +38,8 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // Not the adaptive launcher icon: as a small icon it crashes Android 8.0 and is a blank square elsewhere.
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle("Starting now: $title")
             .setContentText(channelName)
             .setContentIntent(open)

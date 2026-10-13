@@ -57,6 +57,9 @@ class ViewerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
         _changes.value += 1
     }
 
+    /** The portal changed (Settings → Connection): have every section reload. */
+    fun sectionsChanged() { _changes.value += 1 }
+
     /** The viewer's filters changed (Settings): read them, and have every section reload. */
     suspend fun filtersSaved() {
         refresh()

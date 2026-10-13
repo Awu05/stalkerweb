@@ -88,7 +88,7 @@ class VodPlayerViewModel(
     fun download() {
         val p = _state.value.params ?: return
         val item = DownloadItem(
-            videoId = p.videoId, cmd = if (p.isEpisode) "" else p.cmd, series = p.series, seasonId = p.seasonId, episodeId = p.episodeId,
+            videoId = p.videoId, cmd = p.cmd, series = p.series, seasonId = p.seasonId, episodeId = p.episodeId,
             title = if (p.isEpisode) p.episodeTitle.ifBlank { p.title } else p.title, seriesTitle = if (p.isEpisode) p.title else "",
         )
         viewModelScope.launch {

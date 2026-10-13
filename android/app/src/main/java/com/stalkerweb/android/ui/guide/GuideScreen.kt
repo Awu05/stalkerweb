@@ -3,6 +3,7 @@ package com.stalkerweb.android.ui.guide
 import android.Manifest
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ScrollState
@@ -50,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,7 +103,9 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     val context = LocalContext.current
     var details by remember { mutableStateOf<Pair<Channel, EpgEvent>?>(null) }
-    var phoneChannel by remember { mutableStateOf<Channel?>(null) }
+    var phoneChannelId by rememberSaveable { mutableStateOf<String?>(null) }
+    val phoneChannel = if (wide) null else phoneChannelId?.let { id -> state.channels.firstOrNull { it.uniqueId == id } }
+    BackHandler(enabled = phoneChannel != null) { phoneChannelId = null }
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val nowSecs = remember(state.epg) { System.currentTimeMillis() / 1000 }
 
@@ -113,7 +117,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!wide && phoneChannel != null) IconButton(onClick = { phoneChannel = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Channels") }
+            if (!wide && phoneChannel != null) IconButton(onClick = { phoneChannelId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Channels") }
             Text(phoneChannel?.name ?: "Guide", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.weight(1f))
             IconButton(onClick = { viewModel.load(force = true) }) { Icon(Icons.Default.Refresh, "Refresh guide") }
         }
@@ -134,7 +138,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
             phoneChannel == null -> LazyColumn {
                 items(state.shown, key = { it.uniqueId }) { ch ->
                     val now = eventAt(state.epg[ch.uniqueId].orEmpty(), nowSecs)
-                    Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { phoneChannel = ch }.padding(12.dp),
+                    Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { phoneChannelId = ch.uniqueId }.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Logo(state.logoMap[ch.uniqueId], 40.dp)
                         Column(Modifier.weight(1f)) {
@@ -145,7 +149,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
                 }
             }
             else -> {
-                val ch = phoneChannel!!
+                val ch = phoneChannel
                 val events = state.epg[ch.uniqueId].orEmpty().filter { it.endTime > nowSecs }
                 LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(events, key = { it.startTime }) { e ->

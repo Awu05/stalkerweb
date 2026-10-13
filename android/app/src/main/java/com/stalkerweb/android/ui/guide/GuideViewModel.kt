@@ -47,7 +47,7 @@ class GuideViewModel(
 
     init {
         load()
-        viewModelScope.launch { viewers.changes.drop(1).collect { load() } }
+        viewModelScope.launch { viewers.changes.drop(1).collect { load(force = true) } }
     }
 
     fun load(force: Boolean = false) {

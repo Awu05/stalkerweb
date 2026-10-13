@@ -61,12 +61,14 @@ class SettingsViewModel(
             val s = _state.value
             runCatching {
                 when (s.tab) {
-                    "viewers" -> _state.value = _state.value.copy(
-                        viewers = viewers.list(),
-                        genres = settings.allGenres().map { it.name },
-                        movieCategories = settings.portalCategories("vod"),
-                        seriesCategories = settings.portalCategories("series"),
-                    ).also { if (viewers.current.value == null) viewers.refresh() }
+                    // Each list on its own: with no portal connected the checklists fail, the viewers don't.
+                    "viewers" -> {
+                        _state.value = _state.value.copy(viewers = viewers.list())
+                        if (viewers.current.value == null) viewers.refresh()
+                        runCatching { settings.allGenres().map { it.name }.distinct() }.onSuccess { _state.value = _state.value.copy(genres = it) }
+                        runCatching { settings.portalCategories("vod") }.onSuccess { _state.value = _state.value.copy(movieCategories = it) }
+                        runCatching { settings.portalCategories("series") }.onSuccess { _state.value = _state.value.copy(seriesCategories = it) }
+                    }
                     "connection" -> _state.value = _state.value.copy(profiles = server.getProfiles(), status = server.testConnection(), settings = settings.settings())
                     "links", "playback" -> _state.value = _state.value.copy(settings = settings.settings())
                     "logos" -> _state.value = _state.value.copy(logos = settings.logos(), stripWords = settings.stripWords())
@@ -88,7 +90,7 @@ class SettingsViewModel(
     // Viewers
     fun rename(v: ViewerSummary, name: String) = act { settings.renameViewer(v.id, name); viewers.refresh() }
     fun recolor(v: ViewerSummary, color: String) = act { settings.recolorViewer(v.id, color); viewers.refresh() }
-    fun addViewer(name: String) = act("Added $name") { viewers.create(name) }
+    fun addViewer(name: String) = act("Added $name") { settings.createViewer(name) }
     /** Deletes a viewer; [onOwnDeleted] when it was this device's (the picker asks again). */
     fun deleteViewer(v: ViewerSummary, onOwnDeleted: () -> Unit) = act("Deleted ${v.name}") {
         settings.deleteViewer(v.id)
@@ -100,9 +102,10 @@ class SettingsViewModel(
     }
 
     // Connection
-    fun connect(p: Profile) = act { val r = server.connectProfile(p); if (!r.success) throw IllegalStateException(r.error ?: "Couldn't connect") }
-    fun disconnect() = act("Disconnected") { server.disconnectPortal() }
-    fun reconnect() = act { val r = server.reconnectPortal(); if (!r.success) throw IllegalStateException(r.error ?: "Couldn't reconnect") }
+    // A portal change reloads Channels, VOD and the Guide (as the Portal screen does on Back).
+    fun connect(p: Profile) = act { val r = server.connectProfile(p); viewers.sectionsChanged(); if (!r.success) throw IllegalStateException(r.error ?: "Couldn't connect") }
+    fun disconnect() = act("Disconnected") { server.disconnectPortal(); viewers.sectionsChanged() }
+    fun reconnect() = act { val r = server.reconnectPortal(); viewers.sectionsChanged(); if (!r.success) throw IllegalStateException(r.error ?: "Couldn't reconnect") }
     fun saveProfile(p: Profile) = act("Saved") { if (p.id.isBlank()) settings.createProfile(p) else settings.updateProfile(p) }
     fun deleteProfile(p: Profile) = act("Deleted") { settings.deleteProfile(p.id) }
 

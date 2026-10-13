@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.CreateViewerRequest
 import com.stalkerweb.android.data.api.Group
 import com.stalkerweb.android.data.api.LogoOverrideRequest
 import com.stalkerweb.android.data.api.LogosInfo
@@ -22,6 +23,8 @@ class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPr
     suspend fun renameViewer(id: String, name: String) = apis.get().updateViewer(id, ViewerUpdate(name = name.trim()))
     suspend fun recolorViewer(id: String, color: String) = apis.get().updateViewer(id, ViewerUpdate(color = color))
     suspend fun deleteViewer(id: String) = apis.get().deleteViewer(id)
+    /** Adds a viewer without switching this device to it (as the web's Viewers card). */
+    suspend fun createViewer(name: String) = apis.get().createViewer(CreateViewerRequest(name.trim()))
     suspend fun saveFilters(f: ViewerFiltersRequest) = apis.get().saveMyFilters(f)
     /** Every channel genre (unfiltered), for the viewer's checklist. */
     suspend fun allGenres(): List<Group> = apis.get().getGroups().groups.filter { it.id != "*" }
