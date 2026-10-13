@@ -18,6 +18,8 @@ data class PlayerParams(
     val series: String = "0",
     val seasonId: String = "",
     val episodeId: String = "",
+    /** The season's number, for labels ("S2 · E5"); links saved before it was kept have none. */
+    val season: String = "",
     val episodeTitle: String = "",
     val year: String = "",
     val durationMin: Int = 0,
@@ -34,6 +36,7 @@ data class PlayerParams(
         add("videoId" to videoId); add("title" to title); add("cmd" to cmd); add("series" to series)
         if (seasonId.isNotEmpty()) add("seasonId" to seasonId)
         if (episodeId.isNotEmpty()) add("episodeId" to episodeId)
+        if (season.isNotEmpty()) add("season" to season)
         if (episodeTitle.isNotEmpty()) add("episodeTitle" to episodeTitle)
         if (year.isNotEmpty()) add("year" to year)
         if (durationMin > 0) add("durationMin" to durationMin.toString())
@@ -54,7 +57,7 @@ data class PlayerParams(
             fun inner(k: String) = decodeURIComponent(s(k))
             return PlayerParams(
                 videoId = s("videoId"), title = s("title"), cmd = s("cmd"), series = q["series"] ?: "0",
-                seasonId = s("seasonId"), episodeId = s("episodeId"), episodeTitle = s("episodeTitle"),
+                seasonId = s("seasonId"), episodeId = s("episodeId"), season = s("season"), episodeTitle = s("episodeTitle"),
                 year = s("year"), durationMin = s("durationMin").toIntOrNull() ?: 0, isHD = s("isHD") == "true",
                 screenshotUrl = inner("screenshotUrl"), description = inner("description"),
                 director = inner("director"), actors = inner("actors"),

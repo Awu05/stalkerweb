@@ -155,6 +155,9 @@ interface StalkerApi {
     @PUT("api/vod/watch/list/{id}/completed")
     suspend fun setWatchListCompleted(@Path("id") id: String, @Body body: CompletedRequest): WatchState
 
+    @PUT("api/vod/watch/episodes/{key}")
+    suspend fun setEpisodeWatched(@Path("key") key: String, @Body body: EpisodeWatchedRequest): WatchState
+
     // ── The live player ───────────────────────────────────────────────────────
     @GET("api/epg/{channelId}")
     suspend fun getChannelEpg(@Path("channelId") channelId: String, @Query("period") period: Int = 6): ChannelEpgResponse

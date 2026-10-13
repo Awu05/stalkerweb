@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check, Bookmark, RotateCcw } from 'lucide-react'
+import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check, CheckCircle2, Circle, Bookmark, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
-import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted } from '@/lib/vodProgress'
+import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -32,11 +33,12 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
       <div className={TILE_ROW}>
         {entries.map(e => {
           const pct = !e.finished && e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
+          const episode = historyEpisodeLabel(e)
           return (
             <div key={e.id} className="group relative min-w-0">
               <button
                 onClick={() => onOpen(e)}
-                aria-label={`${e.finished ? 'Watched' : 'Resume'}: ${e.title}${e.episodeTitle ? `, ${e.episodeTitle}` : ''}`}
+                aria-label={`${e.finished ? 'Watched' : 'Resume'}: ${e.title}${episode ? `, ${episode}` : ''}`}
                 className="block w-full text-left rounded-[var(--radius-sm)] overflow-hidden"
               >
                 <div className="relative w-full aspect-[2/3] bg-[var(--color-surface-2)] overflow-hidden rounded-[var(--radius-sm)]">
@@ -61,7 +63,7 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
                   )}
                 </div>
                 <p className="text-xs font-medium text-[var(--color-text)] truncate leading-tight mt-1">{e.title}</p>
-                {e.episodeTitle && <p className="text-[11px] text-[var(--color-muted)] truncate leading-tight">{e.episodeTitle}</p>}
+                {episode && <p className="text-[11px] text-[var(--color-muted)] truncate leading-tight">{episode}</p>}
               </button>
               <button
                 onClick={() => onRemove(e.id)}
@@ -253,13 +255,20 @@ function VodCard({ item, onClick, onDownload }) {
 // TV-show drill-down: show → seasons → episodes. Selecting a season fetches its
 // episodes; selecting an episode resolves and plays it (passing season/episode
 // ids so the backend can drill to the concrete file).
-function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
+function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
   const [seasons, setSeasons] = useState(null)
   const [selectedSeason, setSelectedSeason] = useState(null)
-  const [episodes, setEpisodes] = useState(null)
+  const [episodesBySeason, setEpisodesBySeason] = useState({})   // seasonId → episodes, as loaded
   const [epLoading, setEpLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [continueFailed, setContinueFailed] = useState(false)  // a season Continue needed didn't load: no Continue, the rest works
+  const [watch, setWatch] = useState(() => getWatchState())
+  const loadingSeasons = useRef(new Set())
+  const picked = useRef(false)     // the viewer chose a season: don't move them
+  const played = useRef(false)     // autoplay done (once)
+
+  useEffect(() => onWatchChange(setWatch), [])
 
   useEffect(() => {
     setLoading(true)
@@ -268,14 +277,47 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
       .catch(e => { setError(e.message); setLoading(false) })
   }, [item.id])
 
+  const loadSeason = useCallback((seasonId) => {
+    if (!seasonId || loadingSeasons.current.has(seasonId)) return
+    loadingSeasons.current.add(seasonId)
+    getVodEpisodes(item.id, seasonId)
+      .then(r => setEpisodesBySeason(m => ({ ...m, [seasonId]: r.episodes || [] })))
+      .catch(() => { loadingSeasons.current.delete(seasonId); setContinueFailed(true) })
+  }, [item.id])
+
+  // What Continue plays — loading the seasons it has to look into.
+  const target = seasons ? continueTarget({
+    showId: item.id, seasons, episodesBySeason,
+    history: watch.history, progress: watch.progress, watchedEpisodes: watch.watchedEpisodes,
+  }) : null
+  const needs = target?.needs
+  useEffect(() => { if (needs) loadSeason(needs) }, [needs, loadSeason])
+  const next = target && !target.needs && !continueFailed ? target : null
+
+  // Open straight at Continue's season, its episode highlighted; from Recently
+  // watched, play it. (At the show's end there's nothing to continue: the
+  // seasons stay open.)
+  useEffect(() => {
+    if (!next || picked.current) return
+    if (autoplay && !played.current) { played.current = true; onPlayEpisode(item, next.season, next.episode); return }
+    setSelectedSeason(next.season)
+  }, [next?.season?.id, next?.episode?.episodeId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function openSeason(season) {
+    picked.current = true
     setSelectedSeason(season)
-    setEpisodes(null)
-    setEpLoading(true)
-    getVodEpisodes(item.id, season.id)
-      .then(r => { setEpisodes(r.episodes || []); setEpLoading(false) })
-      .catch(e => { setError(e.message); setEpLoading(false) })
+    if (!episodesBySeason[season.id] && !loadingSeasons.current.has(season.id)) {
+      loadingSeasons.current.add(season.id)
+      setEpLoading(true)
+      getVodEpisodes(item.id, season.id)
+        .then(r => { setEpisodesBySeason(m => ({ ...m, [season.id]: r.episodes || [] })); setEpLoading(false) })
+        .catch(e => { loadingSeasons.current.delete(season.id); setError(e.message); setEpLoading(false) })
+    }
   }
+
+  const episodes = selectedSeason ? episodesBySeason[selectedSeason.id] : null
+  const waiting = selectedSeason && (epLoading || !episodes)
+  const continueLabel = next && episodeLabel({ season: seasonNoOf(next.season), episode: next.episode.seriesNumber, name: next.episode.name })
 
   // Portalled to <body> so no page ancestor (transforms, filters, overflow)
   // can trap the fixed overlay. Solid surface rather than .glass-strong: its 7%
@@ -288,7 +330,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
           {selectedSeason && (
-            <button onClick={() => { setSelectedSeason(null); setEpisodes(null) }} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">
+            <button onClick={() => { picked.current = true; setSelectedSeason(null) }} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors" aria-label="Seasons">
               <ChevronLeft size={18} />
             </button>
           )}
@@ -308,10 +350,23 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
               <Download size={13} /> Season
             </button>
           )}
-          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1">
+          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1" aria-label="Close">
             <X size={16} />
           </button>
         </div>
+
+        {/* Continue: resume the episode stopped partway, or play the next one not watched */}
+        {next && (
+          <div className="px-4 py-2.5 border-b border-[var(--color-border)]">
+            <button
+              onClick={() => onPlayEpisode(item, next.season, next.episode)}
+              className="w-full flex items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] px-3 py-2 text-sm font-medium hover:bg-[var(--color-primary-hover)] transition-colors"
+            >
+              <Play size={14} fill="currentColor" />
+              <span className="truncate">{next.action === 'resume' ? 'Resume' : 'Play'} {continueLabel}</span>
+            </button>
+          </div>
+        )}
 
         {/* Content — min-h-0 lets this flex child shrink below its content so
             it scrolls instead of growing the sheet past max-h. */}
@@ -326,28 +381,37 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           {!loading && !error && !selectedSeason && (
             seasons && seasons.length > 0 ? (
               <ul>
-                {seasons.map((season, i) => (
-                  <li key={season.id || i}>
-                    <button
-                      onClick={() => openSeason(season)}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)] transition-colors"
-                    >
-                      <div className="w-10 h-10 rounded bg-[var(--color-surface-2)] shrink-0 overflow-hidden">
-                        {season.screenshotUrl ? (
-                          <img src={season.screenshotUrl} alt={season.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Tv2 size={18} className="text-[var(--color-muted)]" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[var(--color-text)] truncate">{season.name}</p>
-                      </div>
-                      <ChevronRight size={16} className="text-[var(--color-muted)] shrink-0" />
-                    </button>
-                  </li>
-                ))}
+                {seasons.map((season, i) => {
+                  const listed = episodesBySeason[season.id]
+                  const done = listed
+                    ? seasonWatchedLabel(watchedOfEpisodes(watch.watchedEpisodes, item.id, season.id, listed), listed.length)
+                    : seasonWatchedLabel(watchedInSeason(watch.watchedEpisodes, item.id, season.id), null)
+                  return (
+                    <li key={season.id || i}>
+                      <button
+                        onClick={() => openSeason(season)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)] transition-colors"
+                      >
+                        <div className="w-10 h-10 rounded bg-[var(--color-surface-2)] shrink-0 overflow-hidden">
+                          {season.screenshotUrl ? (
+                            <img src={season.screenshotUrl} alt={season.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Tv2 size={18} className="text-[var(--color-muted)]" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-[var(--color-text)] truncate">{season.name}</p>
+                          {done && (
+                            <p className="flex items-center gap-1 text-xs text-[var(--color-success)]"><Check size={12} /> {done}</p>
+                          )}
+                        </div>
+                        <ChevronRight size={16} className="text-[var(--color-muted)] shrink-0" />
+                      </button>
+                    </li>
+                  )
+                })}
               </ul>
             ) : (
               <p className="px-4 py-6 text-sm text-[var(--color-muted)] text-center">No seasons found.</p>
@@ -355,15 +419,20 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           )}
 
           {!loading && !error && selectedSeason && (
-            epLoading ? (
+            waiting ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
               </div>
             ) : (
               <EpisodeList
+                showId={item.id}
+                season={selectedSeason}
                 episodes={episodes}
+                watch={watch}
+                highlightId={next?.season.id === selectedSeason.id ? next.episode.episodeId : null}
                 onPlay={(ep) => onPlayEpisode(item, selectedSeason, ep)}
                 onDownload={(ep) => onDownloadEpisode(item, selectedSeason, ep)}
+                onTicked={() => { picked.current = true }}
               />
             )
           )}
@@ -374,46 +443,72 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
   )
 }
 
-function EpisodeList({ episodes, onPlay, onDownload }) {
+// A season's episodes: a tick on the watched ones, how far into the started
+// ones, Continue's highlighted — and a button to mark one watched or not.
+function EpisodeList({ showId, season, episodes, watch, highlightId, onPlay, onDownload, onTicked = () => {} }) {
   if (!episodes || episodes.length === 0) {
     return <p className="px-4 py-6 text-sm text-[var(--color-muted)] text-center">No episodes found.</p>
   }
+  const watched = new Set(watch.watchedEpisodes)
   return (
     <ul>
-      {episodes.map((ep) => (
-        <li key={ep.episodeId} className="flex items-center group">
-          <button
-            onClick={() => onPlay(ep)}
-            className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)] transition-colors"
-          >
-            <div className="w-14 h-8 rounded bg-[var(--color-surface-2)] shrink-0 overflow-hidden relative flex items-center justify-center border border-[var(--color-border)]">
-              {ep.screenshotUrl ? (
-                <img src={ep.screenshotUrl} alt={ep.name} className="w-full h-full object-cover" loading="lazy" />
-              ) : (
-                <Play size={12} className="text-[var(--color-muted)] group-hover:text-[var(--color-primary-light)] transition-colors" fill="currentColor" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-[var(--color-text)] truncate">{ep.name || `Episode ${ep.seriesNumber}`}</p>
-            </div>
-          </button>
-          <button
-            onClick={() => onDownload(ep)}
-            title="Download to server"
-            className="shrink-0 p-2 mr-2 rounded-md text-[var(--color-muted)] hover:text-[var(--color-primary-light)] hover:bg-[var(--color-surface-2)] transition-colors"
-          >
-            <Download size={14} />
-          </button>
-        </li>
-      ))}
+      {episodes.map((ep) => {
+        const key = `${showId}:${season.id}:${ep.episodeId}`
+        const seen = watched.has(key)
+        const point = seen ? null : watch.progress.find((e) => e.key === key)
+        const pct = point && point.duration > 0 ? Math.min(100, (point.position / point.duration) * 100) : 0
+        const name = ep.name || `Episode ${ep.seriesNumber}`
+        return (
+          <li key={ep.episodeId} className={cn('flex items-center group', ep.episodeId === highlightId && 'bg-[var(--color-primary)]/10')}>
+            <button
+              onClick={() => onPlay(ep)}
+              className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)] transition-colors"
+            >
+              <div className="w-14 h-8 rounded bg-[var(--color-surface-2)] shrink-0 overflow-hidden relative flex items-center justify-center border border-[var(--color-border)]">
+                {ep.screenshotUrl ? (
+                  <img src={ep.screenshotUrl} alt={ep.name} className="w-full h-full object-cover" loading="lazy" />
+                ) : (
+                  <Play size={12} className="text-[var(--color-muted)] group-hover:text-[var(--color-primary-light)] transition-colors" fill="currentColor" />
+                )}
+                {pct > 0 && (
+                  <div className="absolute bottom-0 inset-x-0 h-1 bg-black/50">
+                    <div className="h-full bg-[var(--color-primary-light)]" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-[var(--color-text)] truncate">{name}</p>
+                {seen && <p className="flex items-center gap-1 text-[11px] text-[var(--color-success)]"><Check size={11} /> Watched</p>}
+              </div>
+            </button>
+            <button
+              onClick={() => { onTicked(); setEpisodeWatched(key, !seen) }}
+              title={seen ? 'Mark as not watched' : 'Mark as watched'}
+              aria-label={seen ? `Mark ${name} as not watched` : `Mark ${name} as watched`}
+              aria-pressed={seen}
+              className={cn('shrink-0 p-2 rounded-md hover:bg-[var(--color-surface-2)] transition-colors',
+                seen ? 'text-[var(--color-success)]' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]')}
+            >
+              {seen ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+            </button>
+            <button
+              onClick={() => onDownload(ep)}
+              title="Download to server"
+              className="shrink-0 p-2 mr-2 rounded-md text-[var(--color-muted)] hover:text-[var(--color-primary-light)] hover:bg-[var(--color-surface-2)] transition-colors"
+            >
+              <Download size={14} />
+            </button>
+          </li>
+        )
+      })}
     </ul>
   )
 }
 
 // Build URLSearchParams for the VOD player, including metadata for the sidebar.
-// extra: { seriesNo, episodeTitle, seasonId, episodeId } for TV-show episodes.
+// extra: { seriesNo, seasonNo, episodeTitle, seasonId, episodeId } for TV-show episodes.
 function buildPlayerParams(item, extra = {}) {
-  const { seriesNo = 0, episodeTitle = '', seasonId = '', episodeId = '' } = extra
+  const { seriesNo = 0, seasonNo = '', episodeTitle = '', seasonId = '', episodeId = '' } = extra
   const p = new URLSearchParams({
     videoId: item.id,
     title:   item.name,
@@ -422,6 +517,7 @@ function buildPlayerParams(item, extra = {}) {
   })
   if (seasonId)          p.set('seasonId', String(seasonId))
   if (episodeId)         p.set('episodeId', String(episodeId))
+  if (seasonNo)          p.set('season', String(seasonNo))
   if (episodeTitle)      p.set('episodeTitle', episodeTitle)
   if (item.year)         p.set('year', item.year)
   if (item.durationMin)  p.set('durationMin', String(item.durationMin))
@@ -459,6 +555,7 @@ export default function VodPage() {
 
   const [search, setSearch]           = useState('')
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
+  const [seriesAutoplay, setSeriesAutoplay] = useState(false) // play what Continue would, once known
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
   const [myList, setMyList]   = useState(() => getMyList())     // My List
 
@@ -484,11 +581,12 @@ export default function VodPage() {
     return stop
   }, [])
 
-  // A title in Recently watched: unfinished ones resume; a finished show opens
-  // its seasons, a finished movie plays again.
+  // A title in Recently watched: unfinished ones resume; a finished show plays
+  // its next episode (its seasons sheet works that out, and stays open at the
+  // show's end); a finished movie plays again.
   function openHistoryEntry(entry) {
     const isEpisode = /(?:^|&)(?:seasonId|episodeId)=/.test(entry.params)
-    if (entry.finished && isEpisode) setSeriesSheet(itemFromParams(entry.params))
+    if (entry.finished && isEpisode) { setSeriesAutoplay(true); setSeriesSheet(itemFromParams(entry.params)) }
     else navigate(`/vod-player?${entry.params}`)
   }
 
@@ -673,6 +771,7 @@ export default function VodPage() {
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
     if (hasSeries) {
+      setSeriesAutoplay(false)
       setSeriesSheet(item)
     } else {
       navigate(`/vod-player?${buildPlayerParams(item)}`)
@@ -684,6 +783,7 @@ export default function VodPage() {
     setSeriesSheet(null)
     navigate(`/vod-player?${buildPlayerParams(show, {
       seriesNo:     ep.seriesNumber,
+      seasonNo:     seasonNoOf(season),
       seasonId:     season.id,
       episodeId:    ep.episodeId,
       episodeTitle: ep.name || `Episode ${ep.seriesNumber}`,
@@ -948,6 +1048,7 @@ export default function VodPage() {
       {seriesSheet && (
         <SeasonsSheet
           item={seriesSheet}
+          autoplay={seriesAutoplay}
           onClose={() => setSeriesSheet(null)}
           onPlayEpisode={handlePlayEpisode}
           onDownloadEpisode={downloadEpisode}

@@ -44,6 +44,8 @@ data class WatchState(
     val progress: List<ProgressEntry> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
     val watched: List<String> = emptyList(),
+    /** Keys of episodes finished, or ticked by hand (newer servers). */
+    val watchedEpisodes: List<String> = emptyList(),
     val list: List<ListEntry> = emptyList(),
 )
 
@@ -62,6 +64,9 @@ data class SaveWatchRequest(
 
 @JsonClass(generateAdapter = false)
 data class CompletedRequest(val completed: Boolean)
+
+@JsonClass(generateAdapter = false)
+data class EpisodeWatchedRequest(val watched: Boolean)
 
 /** A category's whole listing, as read so far (backend routes/vod.js /listing). */
 @JsonClass(generateAdapter = false)

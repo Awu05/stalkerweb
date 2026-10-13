@@ -6,6 +6,8 @@
 //   history:  the last titles played, a show once with the episode played last,
 //             finished ones included — the VOD page's "Recently watched" row
 //   watched:  ids of titles finished, for the "Not watched" filter
+//   watchedEpisodes: keys of episodes finished (or marked by hand), for the
+//             ticks in a show's seasons and episodes
 //   list:     My List — titles saved to watch later, newest first; each moves
 //             to Completed (completedAt) when finished: a movie at its end, a
 //             show at its last episode — or by hand
@@ -22,6 +24,7 @@ const DONE_FRACTION   = 0.95;  // more is finished
 const PROGRESS_MAX = 50;
 const HISTORY_MAX  = 20;
 const WATCHED_MAX  = 2000;
+const WATCHED_EPISODES_MAX = 5000;
 const LIST_MAX     = 500;
 
 // What My List keeps of a title: enough to show its tile, filter it and play
@@ -31,7 +34,8 @@ const LIST_FIELDS = ['id', 'name', 'year', 'isHD', 'isSeries', 'episodes', 'genr
   'screenshotUrl', 'cmd', 'description', 'director', 'actors'];
 const listItem = (item) => Object.fromEntries(LIST_FIELDS.filter((k) => item[k] !== undefined).map((k) => [k, item[k]]));
 
-const empty = () => ({ progress: [], history: [], watched: [], list: [] });
+const empty = () => ({ progress: [], history: [], watched: [], watchedEpisodes: [], list: [] });
+const isEpisodeKey = (key) => String(key).includes(':');
 const titleIdOf = (key) => String(key).split(':')[0];
 
 class WatchStore {
@@ -102,7 +106,7 @@ class WatchStore {
       d[viewerId][p] = empty();
     }
     const b = d[viewerId][p];
-    for (const k of ['progress', 'history', 'watched', 'list']) if (!Array.isArray(b[k])) b[k] = [];
+    for (const k of ['progress', 'history', 'watched', 'watchedEpisodes', 'list']) if (!Array.isArray(b[k])) b[k] = [];
     return b;
   }
 
@@ -138,6 +142,7 @@ class WatchStore {
       b.history = [{ id, key, ...info, position, duration, finished, updatedAt }, ...b.history.filter((e) => e.id !== id)].slice(0, HISTORY_MAX);
     }
     if (finished) b.watched = [id, ...b.watched.filter((x) => x !== id)].slice(0, WATCHED_MAX);
+    if (finished && isEpisodeKey(key)) b.watchedEpisodes = [key, ...b.watchedEpisodes.filter((x) => x !== key)].slice(0, WATCHED_EPISODES_MAX);
 
     // My List: a movie is done at its end; a show at its last episode (the
     // player says so — it knows the show's seasons).
@@ -187,6 +192,23 @@ class WatchStore {
     const d = this._load();
     const b = this._bucket(d, viewerId, portal, true);
     this._apply(b, entry, Date.now());
+    this._save(d);
+    return b;
+  }
+
+  /** An episode ticked as watched, or not, by hand. Watched, it has no resume point left. */
+  setEpisodeWatched(viewerId, portal, key, watched) {
+    const k = String(key ?? '');
+    if (!isEpisodeKey(k)) return this.get(viewerId, portal);
+    const d = this._load();
+    const b = this._bucket(d, viewerId, portal, true);
+    b.watchedEpisodes = b.watchedEpisodes.filter((x) => x !== k);
+    if (watched) {
+      b.watchedEpisodes = [k, ...b.watchedEpisodes].slice(0, WATCHED_EPISODES_MAX);
+      b.progress = b.progress.filter((e) => e.key !== k);
+      // The show's tile in Recently watched moves on from it too (not "Resume").
+      for (const e of b.history) if (e.key === k) e.finished = true;
+    }
     this._save(d);
     return b;
   }

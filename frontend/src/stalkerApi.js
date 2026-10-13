@@ -186,6 +186,7 @@ export const clearWatchHistory = ()      => _delete('/vod/watch/history')
 export const addToWatchList        = (item)          => _put('/vod/watch/list', item)
 export const removeFromWatchList   = (id)            => _delete(`/vod/watch/list/${encodeURIComponent(id)}`)
 export const setWatchListCompleted = (id, completed) => _put(`/vod/watch/list/${encodeURIComponent(id)}/completed`, { completed })
+export const setWatchedEpisode     = (key, watched)  => _put(`/vod/watch/episodes/${encodeURIComponent(key)}`, { watched })
 
 // ── VOD ───────────────────────────────────────────────────────────────────
 export const getVodCategories = (type = 'vod') =>

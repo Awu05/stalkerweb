@@ -5,18 +5,18 @@
 // on a viewer switch, when the VOD page opens), and each save answers with the
 // viewer's lists, which replace it.
 
-import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory, addToWatchList, removeFromWatchList, setWatchListCompleted } from '../stalkerApi'
+import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory, addToWatchList, removeFromWatchList, setWatchListCompleted, setWatchedEpisode } from '../stalkerApi'
 
 // Mirrors backend viewers/WatchStore.js.
 export const VOD_RESUME_MIN_SECS = 30     // less is "only just started"
 export const VOD_DONE_FRACTION   = 0.95   // more is finished
 
-let watch = { progress: [], history: [], watched: [], list: [] }
+let watch = { progress: [], history: [], watched: [], watchedEpisodes: [], list: [] }
 const listeners = new Set()
 
 function set(next) {
   if (!next || !Array.isArray(next.progress)) return
-  watch = { list: [], ...next }
+  watch = { list: [], watchedEpisodes: [], ...next }
   listeners.forEach((fn) => fn(watch))
 }
 
@@ -42,6 +42,23 @@ function request(call, { local = false } = {}) {
 export function onWatchChange(fn) {
   listeners.add(fn)
   return () => listeners.delete(fn)
+}
+
+/** The viewer's lists as they are now (progress, history, watched, watchedEpisodes, list). */
+export function getWatchState() {
+  return watch
+}
+
+/** An episode ticked as watched, or not, by hand (key: makeVodKey of the episode). */
+export function setEpisodeWatched(key, watched) {
+  const k = String(key)
+  const rest = watch.watchedEpisodes.filter((x) => x !== k)
+  set({
+    ...watch,
+    watchedEpisodes: watched ? [k, ...rest] : rest,
+    progress: watched ? watch.progress.filter((e) => e.key !== k) : watch.progress,
+  })
+  request(() => setWatchedEpisode(k, watched), { local: true }).catch(() => loadWatch())
 }
 
 export async function loadWatch() {

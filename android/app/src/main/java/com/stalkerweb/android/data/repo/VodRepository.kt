@@ -33,6 +33,12 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
             apis.get().getVodEpisodes(showId, seasonId).episodes.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) }
         }.getOrDefault(emptyList())
 
+    /** A season's episodes, or null when they couldn't be read (not the same as a season with none). */
+    suspend fun getVodEpisodesOrNull(showId: String, seasonId: String): List<VodEpisode>? =
+        runCatching {
+            apis.get().getVodEpisodes(showId, seasonId).episodes.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) }
+        }.getOrNull()
+
     /** Resolves a VOD stream and returns the absolute, playable proxy URL. */
     suspend fun resolveVodStreamUrl(
         videoId: String,

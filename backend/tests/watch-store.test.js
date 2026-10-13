@@ -38,7 +38,7 @@ describe('WatchStore', () => {
 
   it('ignores a title only just started', () => {
     const w = play('300', 5)
-    expect(w).toEqual({ progress: [], history: [], watched: [], list: [] })
+    expect(w).toEqual({ progress: [], history: [], watched: [], watchedEpisodes: [], list: [] })
   })
 
   it('keeps the newest 20 in the history', () => {
@@ -129,5 +129,36 @@ describe('My List', () => {
   it('belongs to the viewer', () => {
     store.addToList('view_a', P, heat)
     expect(store.get('view_b', P).list).toEqual([])
+  })
+})
+
+describe('Watched episodes', () => {
+  it('remembers each finished episode, not movies', () => {
+    play('200:s1:e1', 5900)
+    play('200:s1:e2', 300)
+    play('100', 5900)
+    const w = store.get('view_a', P)
+    expect(w.watchedEpisodes).toEqual(['200:s1:e1'])
+    expect(w.history[0]).toMatchObject({ id: '100' })
+  })
+
+  it('can mark an episode watched or not by hand', () => {
+    play('200:s1:e3', 300)
+    let w = store.setEpisodeWatched('view_a', P, '200:s1:e3', true)
+    expect(w.watchedEpisodes).toEqual(['200:s1:e3'])
+    expect(w.progress).toEqual([])                    // watched: no resume point left
+    w = store.setEpisodeWatched('view_a', P, '200:s1:e3', false)
+    expect(w.watchedEpisodes).toEqual([])
+    expect(store.setEpisodeWatched('view_a', P, '100', true).watchedEpisodes).toEqual([])   // a movie isn't an episode
+  })
+
+  it('ticking the episode last played finishes it in Recently watched', () => {
+    play('200:s1:e5', 300)
+    const w = store.setEpisodeWatched('view_a', P, '200:s1:e5', true)
+    expect(w.history[0]).toMatchObject({ key: '200:s1:e5', finished: true })
+  })
+
+  it('reads as empty for data saved before episodes were kept', () => {
+    expect(store.get('view_new', P).watchedEpisodes).toEqual([])
   })
 })

@@ -267,6 +267,7 @@ class VodPlayerViewModel(
         mediaKey = null
         load(params.copy(
             series = episode.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = episode.episodeId,
+            season = com.stalkerweb.android.data.repo.seasonNoOf(season),
             episodeTitle = episode.name.ifBlank { "Episode ${episode.seriesNumber}" },
         ))
         loadSeason(season.id)
