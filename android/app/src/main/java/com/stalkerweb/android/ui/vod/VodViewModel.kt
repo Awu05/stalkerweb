@@ -71,6 +71,8 @@ data class VodUiState(
     val seriesPicked: Boolean = false,
     /** A season Continue needed didn't load: no Continue; the seasons still work. */
     val seriesContinueFailed: Boolean = false,
+    /** Season numbers for Recently watched entries saved before the season was kept ("showId:seasonId" → number). */
+    val seasonNos: Map<String, String> = emptyMap(),
 ) {
     val isMyList: Boolean get() = selected?.id == MY_LIST.id
     val isCombinedAll: Boolean get() = selected?.id in COMBINED_ALL_IDS
@@ -327,4 +329,21 @@ class VodViewModel(
     fun closeSeries() { seriesJob?.cancel(); continueLoads.clear(); _state.value = _state.value.copy(seriesLoading = false, seriesEpisodes = emptyMap(), seriesPicked = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
+
+    // Each show's seasons asked once, for the tiles' "S2 · E3".
+    private val seasonsAsked = mutableSetOf<String>()
+
+    /** Looks up the seasons of shows in Recently watched saved without the season number. */
+    fun lookUpSeasons(history: List<com.stalkerweb.android.data.api.HistoryEntry>) {
+        for (e in history) {
+            val show = com.stalkerweb.android.data.repo.seasonLookupFor(e) ?: continue
+            if (!seasonsAsked.add(show)) continue
+            viewModelScope.launch {
+                val seasons = vod.getVodSeasons(show)
+                if (seasons.isEmpty()) { seasonsAsked.remove(show); return@launch }
+                _state.value = _state.value.copy(seasonNos = _state.value.seasonNos +
+                    seasons.associate { "$show:${it.id}" to com.stalkerweb.android.data.repo.seasonNoOf(it) })
+            }
+        }
+    }
 }

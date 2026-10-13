@@ -133,6 +133,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     val myListIds = remember(watchState) { watchState.list.map { it.id }.toSet() }
     // This tab's My List and history: movies, or shows.
     val tabList = remember(watchState, isSeries) { watchState.list.filter { it.item.isSeries == isSeries } }
+    LaunchedEffect(watchState.history) { viewModel.lookUpSeasons(watchState.history) }
     val tabHistory = remember(watchState, isSeries) {
         watchState.history.filter { PlayerParams.parse(it.params).isEpisode == isSeries }
     }
@@ -359,7 +360,7 @@ private fun Content(
         modifier = Modifier.fillMaxSize(),
     ) {
         if (browsing && history.isNotEmpty()) {
-            full { HistoryRow(history, progress, openHistory, watch) }
+            full { HistoryRow(history, progress, openHistory, watch, state.seasonNos) }
         }
         if (browsing) {
             val toWatch = tabList.filter { it.completedAt == null }
@@ -407,7 +408,7 @@ private fun LazyGridScope.full(content: @Composable () -> Unit) = item(span = { 
 
 @Composable
 private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
-                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository) {
+                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository, seasonNos: Map<String, String> = emptyMap()) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(Icons.Default.History, "Recently watched", entries.size)
@@ -419,7 +420,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
                 Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
-                        title = e.title, year = historyEpisodeLabel(e), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
+                        title = e.title, year = historyEpisodeLabel(e, seasonNos), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
                     )
                     // Below the tile, not on it: the remote's focus search can't reach a button inside a tile.

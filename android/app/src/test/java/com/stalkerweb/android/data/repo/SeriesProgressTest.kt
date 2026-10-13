@@ -60,6 +60,12 @@ class SeriesProgressTest {
         assertEquals("S2 · E5", historyEpisodeLabel(HistoryEntry(id = "200", params = "videoId=200&series=5&seasonId=s2&episodeId=e5&season=2", episodeTitle = "Episode 5")))
         assertEquals("Episode 5", historyEpisodeLabel(HistoryEntry(id = "200", params = "videoId=200&series=5&seasonId=s2&episodeId=e5", episodeTitle = "Episode 5")))
         assertEquals("", historyEpisodeLabel(HistoryEntry(id = "100", params = "videoId=100")))
+        // Saved without it: the season looked up from the show's seasons (seasonId → number).
+        val old = HistoryEntry(id = "200", params = "videoId=200&series=3&seasonId=s2&episodeId=e3", episodeTitle = "Episode 3")
+        assertEquals("S2 · E3", historyEpisodeLabel(old, mapOf("200:s2" to "2")))
+        assertEquals("200", seasonLookupFor(old))
+        assertNull(seasonLookupFor(HistoryEntry(id = "200", params = "videoId=200&series=3&seasonId=s2&episodeId=e3&season=2")))
+        assertNull(seasonLookupFor(HistoryEntry(id = "100", params = "videoId=100")))
         assertEquals("3", seasonNoOf(VodSeason("x", "x", "3")))
         assertEquals("4", seasonNoOf(VodSeason("x", "Season 4", "")))
         assertEquals("", seasonNoOf(VodSeason("x", "Specials", "")))

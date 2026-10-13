@@ -91,11 +91,22 @@ fun episodeLabel(season: String, episode: String, name: String): String {
     return out.joinToString(" · ").ifEmpty { name.trim() }
 }
 
-/** A Recently watched entry's episode, from its player link (as before for links saved without the season). */
-fun historyEpisodeLabel(entry: HistoryEntry): String {
+/**
+ * A Recently watched entry's episode, from its player link. Links saved before
+ * the season was kept are looked up in [seasonNos] ("showId:seasonId" →
+ * number, from the show's seasons); not found, the episode as before.
+ */
+fun historyEpisodeLabel(entry: HistoryEntry, seasonNos: Map<String, String> = emptyMap()): String {
     val p = PlayerParams.parse(entry.params)
-    if (p.season.isEmpty()) return entry.episodeTitle
-    return episodeLabel(p.season, p.series, entry.episodeTitle)
+    val season = p.season.ifEmpty { seasonNos["${p.videoId}:${p.seasonId}"].orEmpty() }
+    if (season.isEmpty()) return entry.episodeTitle
+    return episodeLabel(season, p.series, entry.episodeTitle)
+}
+
+/** The show whose seasons a Recently watched entry needs looked up (an episode saved without its season), or null. */
+fun seasonLookupFor(entry: HistoryEntry): String? {
+    val p = PlayerParams.parse(entry.params)
+    return if (p.seasonId.isNotEmpty() && p.season.isEmpty()) p.videoId.ifEmpty { null } else null
 }
 
 /** How many of a season's episodes are watched. */

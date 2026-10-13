@@ -7,7 +7,7 @@ import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -22,7 +22,7 @@ import { showToast } from '@/lib/toast'
 // show once, with the episode played last. Unfinished ones show how far they
 // got, finished ones are ticked. A movie resumes (or plays again); a show opens
 // its seasons, at the episode Continue would play.
-function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
+function RecentlyWatched({ entries, seasonNos = {}, onOpen, onRemove, onClear }) {
   if (!entries.length) return null
   return (
     <section className="mb-6" aria-label="Recently watched">
@@ -33,7 +33,7 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
       <div className={TILE_ROW}>
         {entries.map(e => {
           const pct = !e.finished && e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
-          const episode = historyEpisodeLabel(e)
+          const episode = historyEpisodeLabel(e, seasonNos)
           return (
             <div key={e.id} className="group relative min-w-0">
               <button
@@ -554,6 +554,20 @@ export default function VodPage() {
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
   const [myList, setMyList]   = useState(() => getMyList())     // My List
+  // Season numbers for Recently watched entries saved before the season was kept
+  // ("showId:seasonId" → number), from each show's seasons — asked once per show.
+  const [seasonNos, setSeasonNos] = useState({})
+  const seasonsAsked = useRef(new Set())
+  useEffect(() => {
+    for (const e of history) {
+      const show = seasonLookupFor(e)
+      if (!show || seasonsAsked.current.has(show)) continue
+      seasonsAsked.current.add(show)
+      getVodSeasons(show)
+        .then((r) => setSeasonNos((m) => ({ ...m, ...Object.fromEntries((r.seasons || []).map((s) => [`${show}:${s.id}`, seasonNoOf(s)])) })))
+        .catch(() => seasonsAsked.current.delete(show))
+    }
+  }, [history])
 
   const searchTimer = useRef(null)
   // Bumped on every category/search/type change so a slow, stale getVodItems()
@@ -952,7 +966,7 @@ export default function VodPage() {
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
           {!filtersActive(filters) && !search && !isMyList && (
             <>
-              <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
+              <RecentlyWatched entries={history} seasonNos={seasonNos} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
               <MyListRow entries={myList.filter((e) => !e.completedAt)} onOpen={handleItemClick} onSeeAll={() => selectCategory(MY_LIST)} onDownload={downloadMovie} />
             </>
           )}

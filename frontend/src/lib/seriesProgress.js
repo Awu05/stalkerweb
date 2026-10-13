@@ -83,10 +83,14 @@ export function episodeLabel({ season = '', episode = '', name = '' }) {
   return out.join(' · ') || String(name || '').trim()
 }
 
-/** A Recently watched entry's episode, from its player link (as before for links saved without the season). */
-export function historyEpisodeLabel(entry) {
+/**
+ * A Recently watched entry's episode, from its player link. Links saved before
+ * the season was kept are looked up in `seasonNos` ("showId:seasonId" →
+ * number, from the show's seasons); not found, the episode as before.
+ */
+export function historyEpisodeLabel(entry, seasonNos = {}) {
   const q = new URLSearchParams(entry?.params || '')
-  const season = q.get('season') || ''
+  const season = q.get('season') || seasonNos[`${q.get('videoId')}:${q.get('seasonId')}`] || ''
   if (!season) return entry?.episodeTitle || ''
   return episodeLabel({ season, episode: q.get('series') || '', name: entry.episodeTitle || '' })
 }
@@ -108,4 +112,10 @@ export function seasonWatchedLabel(count, total) {
   if (!count) return ''
   if (total) return count >= total ? 'Watched' : `${count} of ${total}`
   return `${count} watched`
+}
+
+/** The show whose seasons a Recently watched entry needs looked up (an episode saved without its season), or null. */
+export function seasonLookupFor(entry) {
+  const q = new URLSearchParams(entry?.params || '')
+  return q.get('seasonId') && !q.get('season') ? q.get('videoId') || null : null
 }
