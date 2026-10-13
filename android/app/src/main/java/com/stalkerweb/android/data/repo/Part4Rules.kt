@@ -22,6 +22,10 @@ fun eventSpan(event: EpgEvent, windowStart: Long, windowEnd: Long): Span? {
 }
 
 /** The programme airing at [timeSecs]. */
+/** A channel's programmes in time order, without duplicates (portals send some) or empty ones. */
+fun cleanEvents(events: List<EpgEvent>): List<EpgEvent> =
+    events.filter { it.endTime > it.startTime }.sortedBy { it.startTime }.distinctBy { it.startTime }
+
 fun eventAt(events: List<EpgEvent>, timeSecs: Long): EpgEvent? = events.firstOrNull { it.startTime <= timeSecs && it.endTime > timeSecs }
 
 /** How far through [event] [nowSecs] is, 0–1. */
@@ -78,6 +82,11 @@ fun linksFor(base: String, shareToken: String?, viewerId: String?, httpsPort: In
 
 fun shownFrom(all: List<String>, hidden: List<String>): Set<String> { val h = hidden.toSet(); return all.filter { it !in h }.toSet() }
 fun hiddenFrom(all: List<String>, shown: Set<String>): List<String> = all.filter { it !in shown }
+/** What to save: the unchecked names, plus hidden names not listed now (another portal's, or a list still loading) — as the web keeps them. */
+fun mergeHidden(saved: List<String>, all: List<String>, shown: Set<String>): List<String> {
+    val listed = all.toSet()
+    return (saved.filter { it !in listed } + hiddenFrom(all, shown)).distinct()
+}
 
 // ── Reminders ─────────────────────────────────────────────────────────────────
 

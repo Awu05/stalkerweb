@@ -9,7 +9,7 @@ class GuideRepository(private val apis: ApiProvider) {
     suspend fun guide(force: Boolean = false): Map<String, List<EpgEvent>> {
         val now = System.currentTimeMillis()
         cache?.let { (at, epg) -> if (!force && now - at < 10 * 60_000L) return epg }
-        val epg = apis.get().getEpg(24).epg.mapValues { (_, events) -> events.sortedBy { it.startTime } }
+        val epg = apis.get().getEpg(24).epg.mapValues { (_, events) -> cleanEvents(events) }
         cache = now to epg
         return epg
     }
