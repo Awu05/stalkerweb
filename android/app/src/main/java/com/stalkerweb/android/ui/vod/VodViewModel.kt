@@ -10,7 +10,10 @@ import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
 import com.stalkerweb.android.data.repo.DownloadsRepository
+import com.stalkerweb.android.data.repo.COMBINED_ALL_IDS
 import com.stalkerweb.android.data.repo.SHOW_STEP
+import com.stalkerweb.android.data.repo.categoryAfterRefresh
+import com.stalkerweb.android.data.repo.defaultCategory
 import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.nextVisibleCount
 import com.stalkerweb.android.data.repo.VodRepository
@@ -30,9 +33,6 @@ import kotlinx.coroutines.launch
 
 /** My List, shown as the first category (its titles come from the watch state, not the portal). */
 val MY_LIST = VodCategory(id = "mylist", title = "My List")
-
-/** The "All" the server adds when the portal's own can't be shown (backend routes/vod.js). */
-private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
 
 
 /** A category's whole listing, read a part at a time (/api/vod/listing). */
@@ -67,12 +67,12 @@ data class VodUiState(
     val seriesLoading: Boolean = false,
     /** Every season's episodes loaded so far (Continue looks into the next ones). */
     val seriesEpisodes: Map<String, List<VodEpisode>> = emptyMap(),
-    /** Play what Continue would, once known (a finished show from Recently watched). */
-    val seriesAutoplay: Boolean = false,
     /** The viewer chose a season: Continue doesn't move them. */
     val seriesPicked: Boolean = false,
-    /** A season Continue needed didn't load: no Continue (and no autoplay); the seasons still work. */
+    /** A season Continue needed didn't load: no Continue; the seasons still work. */
     val seriesContinueFailed: Boolean = false,
+    /** Season numbers for Recently watched entries saved before the season was kept ("showId:seasonId" → number). */
+    val seasonNos: Map<String, String> = emptyMap(),
 ) {
     val isMyList: Boolean get() = selected?.id == MY_LIST.id
     val isCombinedAll: Boolean get() = selected?.id in COMBINED_ALL_IDS
@@ -145,10 +145,24 @@ class VodViewModel(
             val cats = runCatching { vod.getVodCategories(type) }.getOrDefault(emptyList())
             if (_state.value.type != type) return@launch
             _state.value = _state.value.copy(categories = cats, loadingCategories = false)
-            // The portal's "All" opens first; never an added one (it reads every category in full).
-            val real = cats.filter { it.id !in COMBINED_ALL_IDS }
-            val first = real.firstOrNull { it.id == "*" } ?: real.firstOrNull { it.title.trim().equals("all", true) } ?: real.firstOrNull() ?: cats.firstOrNull()
-            first?.let(::selectCategory)
+            defaultCategory(cats)?.let(::selectCategory)
+        }
+    }
+
+    /**
+     * The categories read again each time VOD opens (as the web does): the
+     * view model lives as long as the app, and the server's list changes —
+     * an update (a new "All"), categories hidden, another portal. What's
+     * open stays open while it's still listed.
+     */
+    fun refreshCategories() {
+        val type = _state.value.type
+        categoriesJob?.cancel()
+        categoriesJob = viewModelScope.launch {
+            val cats = runCatching { vod.getVodCategories(type) }.getOrDefault(emptyList())
+            if (_state.value.type != type || cats.isEmpty()) return@launch   // unreadable just now: keep what's shown
+            _state.value = _state.value.copy(categories = cats)
+            categoryAfterRefresh(_state.value.selected, cats, keep = setOf(MY_LIST.id))?.let(::selectCategory)
         }
     }
 
@@ -257,9 +271,9 @@ class VodViewModel(
     // One seasons/episodes load at a time: a slow answer for another show or season mustn't land on this one.
     private var seriesJob: Job? = null
 
-    fun openSeries(item: VodItem, autoplay: Boolean = false) {
+    fun openSeries(item: VodItem) {
         _state.value = _state.value.copy(seriesItem = item, seasons = null, selectedSeason = null, episodes = null, seriesLoading = true,
-            seriesEpisodes = emptyMap(), seriesAutoplay = autoplay, seriesPicked = false, seriesContinueFailed = false)
+            seriesEpisodes = emptyMap(), seriesPicked = false, seriesContinueFailed = false)
         seriesJob?.cancel()
         seriesJob = viewModelScope.launch {
             val seasons = vod.getVodSeasons(item.id)
@@ -296,7 +310,7 @@ class VodViewModel(
             if (eps != null) _state.value = _state.value.copy(seriesEpisodes = _state.value.seriesEpisodes + (seasonId to eps))
             else {
                 continueLoads.remove("${show.id}:$seasonId")
-                _state.value = _state.value.copy(seriesContinueFailed = true, seriesAutoplay = false)
+                _state.value = _state.value.copy(seriesContinueFailed = true)
             }
         }
     }
@@ -308,13 +322,28 @@ class VodViewModel(
         _state.value = s.copy(selectedSeason = season, episodes = s.seriesEpisodes[season.id], seriesLoading = s.seriesEpisodes[season.id] == null)
     }
 
-    fun autoplayDone() { _state.value = _state.value.copy(seriesAutoplay = false) }
-
     /** The viewer acted on a season (a tick): Continue doesn't move them elsewhere. */
     fun markSeriesPicked() { _state.value = _state.value.copy(seriesPicked = true) }
 
 
-    fun closeSeries() { seriesJob?.cancel(); continueLoads.clear(); _state.value = _state.value.copy(seriesLoading = false, seriesEpisodes = emptyMap(), seriesAutoplay = false, seriesPicked = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
+    fun closeSeries() { seriesJob?.cancel(); continueLoads.clear(); _state.value = _state.value.copy(seriesLoading = false, seriesEpisodes = emptyMap(), seriesPicked = false, seriesItem = null, seasons = null, selectedSeason = null, episodes = null) }
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
+
+    // Each show's seasons asked once, for the tiles' "S2 · E3".
+    private val seasonsAsked = mutableSetOf<String>()
+
+    /** Looks up the seasons of shows in Recently watched saved without the season number. */
+    fun lookUpSeasons(history: List<com.stalkerweb.android.data.api.HistoryEntry>) {
+        for (e in history) {
+            val show = com.stalkerweb.android.data.repo.seasonLookupFor(e) ?: continue
+            if (!seasonsAsked.add(show)) continue
+            viewModelScope.launch {
+                val seasons = vod.getVodSeasons(show)
+                if (seasons.isEmpty()) { seasonsAsked.remove(show); return@launch }
+                _state.value = _state.value.copy(seasonNos = _state.value.seasonNos +
+                    seasons.associate { "$show:${it.id}" to com.stalkerweb.android.data.repo.seasonNoOf(it) })
+            }
+        }
+    }
 }

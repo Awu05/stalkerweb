@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, seasonWatchedLabel, watchedOfEpisodes } from './seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonLookupFor, seasonNoOf, watchedInSeason, seasonWatchedLabel, watchedOfEpisodes } from './seriesProgress'
 
 const s1 = { id: 's1', name: 'Season 1', seasonNumber: '1' }
 const s2 = { id: 's2', name: 'Season 2', seasonNumber: '2' }
@@ -68,6 +68,12 @@ describe('labels', () => {
     // Saved before the season was kept: as before.
     expect(historyEpisodeLabel({ params: 'videoId=200&series=5&seasonId=s2&episodeId=e5', episodeTitle: 'Episode 5' })).toBe('Episode 5')
     expect(historyEpisodeLabel({ params: 'videoId=100', episodeTitle: '' })).toBe('')
+    // Saved without it: the season looked up from the show's seasons (seasonId → number).
+    const old = { params: 'videoId=200&series=3&seasonId=s2&episodeId=e3', episodeTitle: 'Episode 3' }
+    expect(historyEpisodeLabel(old, { '200:s2': '2' })).toBe('S2 · E3')
+    expect(seasonLookupFor(old)).toBe('200')
+    expect(seasonLookupFor({ params: 'videoId=200&series=3&seasonId=s2&episodeId=e3&season=2' })).toBe(null)
+    expect(seasonLookupFor({ params: 'videoId=100' })).toBe(null)
   })
 
   it("finds a season's number in its name when the portal leaves it out", () => {

@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodItem
 import java.text.Collator
 import java.time.LocalDate
@@ -144,3 +145,21 @@ fun filterOptions(items: List<VodItem>): FilterOptions {
                       else decades.sortedByDescending(::decadeRank)
     return FilterOptions(genres.sortedWith(collator), yearChoices, hasRating, hasHD, hasAdded)
 }
+
+// ── Categories ────────────────────────────────────────────────────────────────
+
+/** The "All"s the server adds to Movies or Series when the portal's own can't be shown (backend routes/vod.js). */
+val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
+
+/** Where a tab opens: the portal's "All", else the first real category — never an added "All" (it reads every category in full). */
+fun defaultCategory(cats: List<VodCategory>): VodCategory? {
+    val real = cats.filter { it.id !in COMBINED_ALL_IDS }
+    return real.firstOrNull { it.id == "*" } ?: real.firstOrNull { it.title.trim().equals("all", true) } ?: real.firstOrNull() ?: cats.firstOrNull()
+}
+
+/**
+ * The list read again (the server's can change: an update, categories hidden, another portal):
+ * null keeps what's open — it's still listed, or it's My List ([keep]) — else where the tab opens.
+ */
+fun categoryAfterRefresh(selected: VodCategory?, cats: List<VodCategory>, keep: Set<String> = emptySet()): VodCategory? =
+    if (selected != null && (selected.id in keep || cats.any { it.id == selected.id })) null else defaultCategory(cats)

@@ -7,7 +7,7 @@ import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -20,9 +20,9 @@ import { showToast } from '@/lib/toast'
 // ── Recently watched ─────────────────────────────────────────────────────
 // The viewer's last titles, newest first (backend viewers/WatchStore.js): a
 // show once, with the episode played last. Unfinished ones show how far they
-// got and resume; finished ones are ticked — a movie plays again, a show
-// opens its seasons.
-function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
+// got, finished ones are ticked. A movie resumes (or plays again); a show opens
+// its seasons, at the episode Continue would play.
+function RecentlyWatched({ entries, seasonNos = {}, onOpen, onRemove, onClear }) {
   if (!entries.length) return null
   return (
     <section className="mb-6" aria-label="Recently watched">
@@ -33,7 +33,7 @@ function RecentlyWatched({ entries, onOpen, onRemove, onClear }) {
       <div className={TILE_ROW}>
         {entries.map(e => {
           const pct = !e.finished && e.duration > 0 ? Math.min(100, (e.position / e.duration) * 100) : 0
-          const episode = historyEpisodeLabel(e)
+          const episode = historyEpisodeLabel(e, seasonNos)
           return (
             <div key={e.id} className="group relative min-w-0">
               <button
@@ -255,7 +255,7 @@ function VodCard({ item, onClick, onDownload }) {
 // TV-show drill-down: show → seasons → episodes. Selecting a season fetches its
 // episodes; selecting an episode resolves and plays it (passing season/episode
 // ids so the backend can drill to the concrete file).
-function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
+function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownloadSeason }) {
   const [seasons, setSeasons] = useState(null)
   const [selectedSeason, setSelectedSeason] = useState(null)
   const [episodesBySeason, setEpisodesBySeason] = useState({})   // seasonId → episodes, as loaded
@@ -266,7 +266,6 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   const [watch, setWatch] = useState(() => getWatchState())
   const loadingSeasons = useRef(new Set())
   const picked = useRef(false)     // the viewer chose a season: don't move them
-  const played = useRef(false)     // autoplay done (once)
 
   useEffect(() => onWatchChange(setWatch), [])
 
@@ -294,12 +293,10 @@ function SeasonsSheet({ item, autoplay = false, onClose, onPlayEpisode, onDownlo
   useEffect(() => { if (needs) loadSeason(needs) }, [needs, loadSeason])
   const next = target && !target.needs && !continueFailed ? target : null
 
-  // Open straight at Continue's season, its episode highlighted; from Recently
-  // watched, play it. (At the show's end there's nothing to continue: the
-  // seasons stay open.)
+  // Open straight at Continue's season, its episode highlighted. (At the
+  // show's end there's nothing to continue: the seasons list shows.)
   useEffect(() => {
     if (!next || picked.current) return
-    if (autoplay && !played.current) { played.current = true; onPlayEpisode(item, next.season, next.episode); return }
     setSelectedSeason(next.season)
   }, [next?.season?.id, next?.episode?.episodeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -555,9 +552,22 @@ export default function VodPage() {
 
   const [search, setSearch]           = useState('')
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
-  const [seriesAutoplay, setSeriesAutoplay] = useState(false) // play what Continue would, once known
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
   const [myList, setMyList]   = useState(() => getMyList())     // My List
+  // Season numbers for Recently watched entries saved before the season was kept
+  // ("showId:seasonId" → number), from each show's seasons — asked once per show.
+  const [seasonNos, setSeasonNos] = useState({})
+  const seasonsAsked = useRef(new Set())
+  useEffect(() => {
+    for (const e of history) {
+      const show = seasonLookupFor(e)
+      if (!show || seasonsAsked.current.has(show)) continue
+      seasonsAsked.current.add(show)
+      getVodSeasons(show)
+        .then((r) => setSeasonNos((m) => ({ ...m, ...Object.fromEntries((r.seasons || []).map((s) => [`${show}:${s.id}`, seasonNoOf(s)])) })))
+        .catch(() => seasonsAsked.current.delete(show))
+    }
+  }, [history])
 
   const searchTimer = useRef(null)
   // Bumped on every category/search/type change so a slow, stale getVodItems()
@@ -581,12 +591,12 @@ export default function VodPage() {
     return stop
   }, [])
 
-  // A title in Recently watched: unfinished ones resume; a finished show plays
-  // its next episode (its seasons sheet works that out, and stays open at the
-  // show's end); a finished movie plays again.
+  // A title in Recently watched: a show opens its seasons and episodes (at the
+  // episode Continue would play — nothing plays until picked); a movie resumes,
+  // or plays again once finished.
   function openHistoryEntry(entry) {
     const isEpisode = /(?:^|&)(?:seasonId|episodeId)=/.test(entry.params)
-    if (entry.finished && isEpisode) { setSeriesAutoplay(true); setSeriesSheet(itemFromParams(entry.params)) }
+    if (isEpisode) setSeriesSheet(itemFromParams(entry.params))
     else navigate(`/vod-player?${entry.params}`)
   }
 
@@ -771,7 +781,6 @@ export default function VodPage() {
   function handleItemClick(item) {
     const hasSeries = item.isSeries || item.episodes?.length > 0
     if (hasSeries) {
-      setSeriesAutoplay(false)
       setSeriesSheet(item)
     } else {
       navigate(`/vod-player?${buildPlayerParams(item)}`)
@@ -957,7 +966,7 @@ export default function VodPage() {
         <div ref={gridScrollRef} className="flex-1 overflow-y-auto p-4">
           {!filtersActive(filters) && !search && !isMyList && (
             <>
-              <RecentlyWatched entries={history} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
+              <RecentlyWatched entries={history} seasonNos={seasonNos} onOpen={openHistoryEntry} onRemove={removeFromVodHistory} onClear={clearVodHistory} />
               <MyListRow entries={myList.filter((e) => !e.completedAt)} onOpen={handleItemClick} onSeeAll={() => selectCategory(MY_LIST)} onDownload={downloadMovie} />
             </>
           )}
@@ -1048,7 +1057,6 @@ export default function VodPage() {
       {seriesSheet && (
         <SeasonsSheet
           item={seriesSheet}
-          autoplay={seriesAutoplay}
           onClose={() => setSeriesSheet(null)}
           onPlayEpisode={handlePlayEpisode}
           onDownloadEpisode={downloadEpisode}

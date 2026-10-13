@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -100,5 +101,25 @@ class VodFilterChoicesTest {
         assertEquals(280, nextVisibleCount(140, 500))
         assertEquals(140, nextVisibleCount(140, 90))   // fewer than shown: nothing more to show
         assertEquals(140, nextVisibleCount(140, 140))
+    }
+
+    private val portalAll = VodCategory("*", "All")
+    private val action = VodCategory("10", "Action")
+    private val addedAll = VodCategory("movies:all", "All")
+
+    @Test fun aTabOpensOnThePortalsAllNotAnAddedOne() {
+        assertEquals(portalAll, defaultCategory(listOf(action, portalAll)))
+        assertEquals(action, defaultCategory(listOf(addedAll, action)))
+        assertEquals(addedAll, defaultCategory(listOf(addedAll)))
+        assertNull(defaultCategory(emptyList()))
+    }
+
+    @Test fun readingTheListAgainKeepsWhatIsOpen() {
+        // The server now adds an "All" (an update): it shows, and Action stays open.
+        assertNull(categoryAfterRefresh(action, listOf(addedAll, action)))
+        assertNull(categoryAfterRefresh(VodCategory("mylist", "My List"), listOf(action), keep = setOf("mylist")))
+        // What was open isn't listed any more (hidden, another portal): where the tab opens.
+        assertEquals(action, categoryAfterRefresh(VodCategory("99", "Gone"), listOf(addedAll, action)))
+        assertEquals(action, categoryAfterRefresh(null, listOf(addedAll, action)))
     }
 }

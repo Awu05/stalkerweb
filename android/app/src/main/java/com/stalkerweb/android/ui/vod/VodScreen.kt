@@ -119,7 +119,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     LaunchedEffect(Unit) {
         // What was watched elsewhere (the phone, the web) since — and resume points with it.
         watch.load()
-        if (state.categories.isEmpty()) viewModel.loadCategories()
+        // The list again each time (the server's changes); the first time, from scratch.
+        if (state.categories.isEmpty()) viewModel.loadCategories() else viewModel.refreshCategories()
     }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_SHORT).show() } }
@@ -132,6 +133,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     val myListIds = remember(watchState) { watchState.list.map { it.id }.toSet() }
     // This tab's My List and history: movies, or shows.
     val tabList = remember(watchState, isSeries) { watchState.list.filter { it.item.isSeries == isSeries } }
+    LaunchedEffect(watchState.history) { viewModel.lookUpSeasons(watchState.history) }
     val tabHistory = remember(watchState, isSeries) {
         watchState.history.filter { PlayerParams.parse(it.params).isEpisode == isSeries }
     }
@@ -156,9 +158,9 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     }
     fun openHistory(entry: HistoryEntry) {
         val p = PlayerParams.parse(entry.params)
-        // A finished show plays on (its seasons work out what's next, and stay open at its end);
-        // anything else resumes (or plays again).
-        if (entry.finished && p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl), autoplay = true) else onPlay(p)
+        // A show opens its seasons and episodes, at the episode Continue would play (nothing plays
+        // until picked); a movie resumes, or plays again once finished.
+        if (p.isEpisode) viewModel.openSeries(itemFrom(p, entry.screenshotUrl)) else onPlay(p)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -225,14 +227,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         }
         LaunchedEffect(target) { (target as? ContinueTarget.Needs)?.let { viewModel.loadSeasonEpisodes(it.seasonId) } }
         val next = target as? ContinueTarget.Play
-        // Open at Continue's season, its episode highlighted; from Recently watched, play it.
-        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) {
-            val n = next ?: return@LaunchedEffect
-            if (state.seriesAutoplay) { viewModel.autoplayDone(); playEpisode(n.season, n.episode) }
-            else viewModel.showContinueSeason(n.season)
-        }
-        // At the show's end there's nothing to continue: the seasons stay open.
-        LaunchedEffect(target == null && state.seasons != null) { if (target == null && state.seasons != null) viewModel.autoplayDone() }
+        // Open at Continue's season, its episode highlighted (at the show's end, the seasons list).
+        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) { next?.let { viewModel.showContinueSeason(it.season) } }
         val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
         SeriesDialog(
             next = next,
@@ -364,7 +360,7 @@ private fun Content(
         modifier = Modifier.fillMaxSize(),
     ) {
         if (browsing && history.isNotEmpty()) {
-            full { HistoryRow(history, progress, openHistory, watch) }
+            full { HistoryRow(history, progress, openHistory, watch, state.seasonNos) }
         }
         if (browsing) {
             val toWatch = tabList.filter { it.completedAt == null }
@@ -412,7 +408,7 @@ private fun LazyGridScope.full(content: @Composable () -> Unit) = item(span = { 
 
 @Composable
 private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
-                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository) {
+                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository, seasonNos: Map<String, String> = emptyMap()) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(Icons.Default.History, "Recently watched", entries.size)
@@ -424,7 +420,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
                 Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
-                        title = e.title, year = historyEpisodeLabel(e), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
+                        title = e.title, year = historyEpisodeLabel(e, seasonNos), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
                     )
                     // Below the tile, not on it: the remote's focus search can't reach a button inside a tile.
