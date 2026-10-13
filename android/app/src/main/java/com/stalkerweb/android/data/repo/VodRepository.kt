@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.ListingResponse
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItemsResponse
@@ -11,8 +12,14 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
     suspend fun getVodCategories(type: String): List<VodCategory> =
         runCatching { apis.get().getVodCategories(type).categories }.getOrDefault(emptyList())
 
-    suspend fun getVodItems(type: String, category: String, page: Int, search: String): VodItemsResponse {
-        val resp = apis.get().getVodItems(type, category, page, search)
+    suspend fun getVodItems(type: String, category: String, page: Int, search: String, sort: String = "name"): VodItemsResponse {
+        val resp = apis.get().getVodItems(type, category, page, search, sort)
+        return resp.copy(items = resp.items.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) })
+    }
+
+    /** A category's whole listing from [from] on, as read so far (for the filters and an added "All"). */
+    suspend fun getListing(type: String, category: String, from: Int): ListingResponse {
+        val resp = apis.get().getVodListing(type, category, from)
         return resp.copy(items = resp.items.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) })
     }
 

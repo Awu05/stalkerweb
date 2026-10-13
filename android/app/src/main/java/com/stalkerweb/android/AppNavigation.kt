@@ -17,20 +17,8 @@ sealed class Screen(val route: String) {
             return "player/$channelId/$encodedName"
         }
     }
-    object VodPlayer : Screen(
-        "vodplayer?videoId={videoId}&cmd={cmd}&series={series}&seasonId={seasonId}&episodeId={episodeId}&title={title}"
-    ) {
-        fun go(
-            videoId: String,
-            cmd: String = "",
-            series: String = "",
-            seasonId: String = "",
-            episodeId: String = "",
-            title: String = "",
-        ): String {
-            fun e(s: String) = Uri.encode(s)
-            return "vodplayer?videoId=${e(videoId)}&cmd=${e(cmd)}&series=${e(series)}" +
-                "&seasonId=${e(seasonId)}&episodeId=${e(episodeId)}&title=${e(title)}"
-        }
+    object VodPlayer : Screen("vodplayer?params={params}") {
+        fun go(params: com.stalkerweb.android.data.repo.PlayerParams): String =
+            "vodplayer?params=${Uri.encode(params.toQuery())}"
     }
 }

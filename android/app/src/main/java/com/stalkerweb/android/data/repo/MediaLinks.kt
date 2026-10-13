@@ -30,4 +30,11 @@ class MediaLinks(private val prefs: AppPrefs, private val apis: ApiProvider) {
         url.startsWith("http", ignoreCase = true) -> url
         else -> "${imageBase()}$url"
     }
+
+    /** An image URL as the server's own path — what history and My List store, so the web can show it too. */
+    fun relativeImage(url: String?): String {
+        if (url.isNullOrBlank()) return ""
+        val base = imageBase()
+        return if (base.isNotEmpty() && url.startsWith(base)) url.removePrefix(base) else url
+    }
 }

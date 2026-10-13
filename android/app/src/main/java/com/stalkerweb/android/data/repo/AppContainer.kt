@@ -34,9 +34,10 @@ class AppContainer(context: Context) {
     )
 
     val apis = ApiProvider(prefs, httpClient)
-    private val links = MediaLinks(prefs, apis)
+    val links = MediaLinks(prefs, apis)
     val server = ServerRepository(prefs, apis, guard)
     val viewers = ViewerRepository(prefs, apis)
     val live = LiveRepository(prefs, apis, links, viewers)
     val vod = VodRepository(apis, links)
+    val watch = WatchRepository(apis, links, viewers)
 }
