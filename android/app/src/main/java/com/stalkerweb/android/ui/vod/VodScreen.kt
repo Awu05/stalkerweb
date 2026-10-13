@@ -119,7 +119,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     LaunchedEffect(Unit) {
         // What was watched elsewhere (the phone, the web) since — and resume points with it.
         watch.load()
-        if (state.categories.isEmpty()) viewModel.loadCategories()
+        // The list again each time (the server's changes); the first time, from scratch.
+        if (state.categories.isEmpty()) viewModel.loadCategories() else viewModel.refreshCategories()
     }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_SHORT).show() } }

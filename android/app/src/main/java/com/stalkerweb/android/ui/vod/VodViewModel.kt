@@ -10,7 +10,10 @@ import com.stalkerweb.android.data.api.VodSeason
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.prefs.AppPrefs
 import com.stalkerweb.android.data.repo.DownloadsRepository
+import com.stalkerweb.android.data.repo.COMBINED_ALL_IDS
 import com.stalkerweb.android.data.repo.SHOW_STEP
+import com.stalkerweb.android.data.repo.categoryAfterRefresh
+import com.stalkerweb.android.data.repo.defaultCategory
 import com.stalkerweb.android.data.repo.VodFilterState
 import com.stalkerweb.android.data.repo.nextVisibleCount
 import com.stalkerweb.android.data.repo.VodRepository
@@ -30,9 +33,6 @@ import kotlinx.coroutines.launch
 
 /** My List, shown as the first category (its titles come from the watch state, not the portal). */
 val MY_LIST = VodCategory(id = "mylist", title = "My List")
-
-/** The "All" the server adds when the portal's own can't be shown (backend routes/vod.js). */
-private val COMBINED_ALL_IDS = setOf("movies:all", "series:all")
 
 
 /** A category's whole listing, read a part at a time (/api/vod/listing). */
@@ -143,10 +143,24 @@ class VodViewModel(
             val cats = runCatching { vod.getVodCategories(type) }.getOrDefault(emptyList())
             if (_state.value.type != type) return@launch
             _state.value = _state.value.copy(categories = cats, loadingCategories = false)
-            // The portal's "All" opens first; never an added one (it reads every category in full).
-            val real = cats.filter { it.id !in COMBINED_ALL_IDS }
-            val first = real.firstOrNull { it.id == "*" } ?: real.firstOrNull { it.title.trim().equals("all", true) } ?: real.firstOrNull() ?: cats.firstOrNull()
-            first?.let(::selectCategory)
+            defaultCategory(cats)?.let(::selectCategory)
+        }
+    }
+
+    /**
+     * The categories read again each time VOD opens (as the web does): the
+     * view model lives as long as the app, and the server's list changes —
+     * an update (a new "All"), categories hidden, another portal. What's
+     * open stays open while it's still listed.
+     */
+    fun refreshCategories() {
+        val type = _state.value.type
+        categoriesJob?.cancel()
+        categoriesJob = viewModelScope.launch {
+            val cats = runCatching { vod.getVodCategories(type) }.getOrDefault(emptyList())
+            if (_state.value.type != type || cats.isEmpty()) return@launch   // unreadable just now: keep what's shown
+            _state.value = _state.value.copy(categories = cats)
+            categoryAfterRefresh(_state.value.selected, cats, keep = setOf(MY_LIST.id))?.let(::selectCategory)
         }
     }
 
