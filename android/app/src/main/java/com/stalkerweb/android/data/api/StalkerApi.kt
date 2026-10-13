@@ -158,6 +158,14 @@ interface StalkerApi {
     @PUT("api/vod/watch/episodes/{key}")
     suspend fun setEpisodeWatched(@Path("key") key: String, @Body body: EpisodeWatchedRequest): WatchState
 
+    // ── The live player ───────────────────────────────────────────────────────
+    @GET("api/epg/{channelId}")
+    suspend fun getChannelEpg(@Path("channelId") channelId: String, @Query("period") period: Int = 6): ChannelEpgResponse
+
+    /** Keeps the portal session awake while watching (the web pings it every 10 minutes). */
+    @GET("api/stream/keepalive")
+    suspend fun streamKeepalive()
+
     // ── Part 4: guide, downloads, settings ────────────────────────────────────
     @GET("api/epg")
     suspend fun getEpg(@Query("period") period: Int = 24): EpgResponse
