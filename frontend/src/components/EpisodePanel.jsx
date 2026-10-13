@@ -1,10 +1,12 @@
-import { Loader2, Play } from 'lucide-react'
+import { Loader2, Play, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // A show's episodes in the VOD player: pick a season, play any episode. The one
 // playing is highlighted. Used in the player's side panel, and in a pop-up on
 // screens too narrow for it.
-export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, playingSeasonId, playingEpisodeId, onPlay }) {
+// showId, watchedEpisodes (keys) and progressOf(key) → fraction: the ticks and progress bars.
+export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, playingSeasonId, playingEpisodeId, onPlay, showId, watchedEpisodes = [], progressOf = () => 0 }) {
+  const watched = new Set(watchedEpisodes)
   if (!seasons) {
     return <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" /></div>
   }
@@ -34,6 +36,9 @@ export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, pl
         <ul className="flex flex-col gap-0.5">
           {episodes.map((ep) => {
             const playing = seasonId === playingSeasonId && ep.episodeId === playingEpisodeId
+            const key = `${showId}:${seasonId}:${ep.episodeId}`
+            const seen = watched.has(key)
+            const pct = seen ? 0 : progressOf(key)
             return (
               <li key={ep.episodeId}>
                 <button
@@ -48,7 +53,9 @@ export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, pl
                   )}
                 >
                   <Play size={11} className={cn('shrink-0', playing ? 'opacity-100' : 'opacity-40')} fill="currentColor" />
-                  <span className="truncate">{ep.name || `Episode ${ep.seriesNumber}`}</span>
+                  <span className="truncate flex-1">{ep.name || `Episode ${ep.seriesNumber}`}</span>
+                  {seen && <Check size={12} className="shrink-0 text-[var(--color-success)]" aria-label="Watched" />}
+                  {pct > 0 && <span className="shrink-0 w-8 h-1 rounded-full bg-[var(--color-surface-3)] overflow-hidden" aria-label={`${Math.round(pct * 100)}% watched`}><span className="block h-full bg-[var(--color-primary-light)]" style={{ width: `${pct * 100}%` }} /></span>}
                 </button>
               </li>
             )

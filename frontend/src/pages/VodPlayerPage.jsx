@@ -12,8 +12,9 @@ import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import EpisodePanel from '@/components/EpisodePanel'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
+import { seasonNoOf } from '@/lib/seriesProgress'
 import {
-  makeVodKey, getVodProgress, saveVodProgress,
+  makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
@@ -90,6 +91,10 @@ export default function VodPlayerPage() {
   const [panelSeason, setPanelSeason]   = useState(seasonId)
   const [episodesOpen, setEpisodesOpen] = useState(false)  // the pop-up list on narrow screens
   const [upNext, setUpNext]             = useState(null)   // { season, episode } after the end
+  // What's watched, for the panel's ticks and progress bars.
+  const [watchState, setWatchState]     = useState(() => getWatchState())
+  useEffect(() => onWatchChange(setWatchState), [])
+  const progressOf = (key) => { const p = watchState.progress.find((e) => e.key === key); return p && p.duration > 0 ? Math.min(1, p.position / p.duration) : 0 }
   const loadingSeasons = useRef(new Set())
 
   useEffect(() => {
@@ -130,6 +135,8 @@ export default function VodPlayerPage() {
     next.set('series', String(ep.seriesNumber || '0'))
     next.set('seasonId', String(season.id))
     next.set('episodeId', String(ep.episodeId))
+    const seasonNo = seasonNoOf(season)
+    if (seasonNo) next.set('season', seasonNo); else next.delete('season')
     next.set('episodeTitle', ep.name || `Episode ${ep.seriesNumber}`)
     setUpNext(null)
     setEpisodesOpen(false)
@@ -492,7 +499,8 @@ export default function VodPlayerPage() {
                 <button onClick={() => setEpisodesOpen(false)} className="ml-auto p-1 text-[var(--color-muted)] hover:text-[var(--color-text)]" aria-label="Close"><X size={16} /></button>
               </div>
               <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
-                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode} />
+                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode}
+                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} />
             </div>
           </div>
         )}
@@ -625,7 +633,8 @@ export default function VodPlayerPage() {
           {isEpisode && (
             <div className="pt-3 border-t border-[var(--color-border)]">
               <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
-                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode} />
+                playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode}
+                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} />
             </div>
           )}
         </div>
