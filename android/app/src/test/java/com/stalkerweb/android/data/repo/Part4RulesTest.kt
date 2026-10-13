@@ -5,6 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 class Part4RulesTest {
     private val e = EpgEvent(id = 1, title = "News", startTime = 10_800, endTime = 14_400)   // 03:00–04:00
@@ -62,5 +64,27 @@ class Part4RulesTest {
         assertTrue(ReminderRules.isUpcoming(r, nowMs = 10_000_000))
         assertTrue(!ReminderRules.isUpcoming(r, nowMs = 10_800_000))      // started: dropped
         assertEquals(listOf(r), ReminderRules.upcoming(listOf(r, r.copy(id = "old", startTime = 1)), nowMs = 1_000_000))
+    }
+
+    // Review fixes
+
+    @Test fun savingFiltersKeepsHiddenNamesNotListed() {
+        // Hidden on another portal (or while the list was still loading): kept, as the web does.
+        assertEquals(listOf("ADULT", "SPORTS"), mergeHidden(saved = listOf("ADULT", "NEWS"), all = listOf("NEWS", "SPORTS"), shown = setOf("NEWS")))
+        assertEquals(listOf("ADULT"), mergeHidden(saved = listOf("ADULT"), all = emptyList(), shown = emptySet()))
+    }
+
+    @Test fun guideEventsAreCleaned() {
+        val a = EpgEvent(id = 1, title = "A", startTime = 100, endTime = 200)
+        val dup = a.copy(id = 2, title = "A again")
+        val b = EpgEvent(id = 3, title = "B", startTime = 200, endTime = 300)
+        val empty = EpgEvent(id = 4, title = "Zero", startTime = 300, endTime = 300)
+        assertEquals(listOf(a, b), cleanEvents(listOf(b, empty, a, dup)))
+    }
+
+    @Test fun aProgrammeWithNoIdStillParses() {
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val e = moshi.adapter(EpgEvent::class.java).fromJson("""{"id":null,"title":"News","startTime":10,"endTime":20,"description":""}""")
+        assertEquals("News", e?.title)
     }
 }
