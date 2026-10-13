@@ -22,7 +22,9 @@ import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
 import com.stalkerweb.android.data.repo.StallAction
 import com.stalkerweb.android.data.repo.StallState
+import com.stalkerweb.android.data.repo.isLiveMediaId
 import com.stalkerweb.android.data.repo.jumpTarget
+import com.stalkerweb.android.data.repo.liveMediaId
 import com.stalkerweb.android.data.repo.playerList
 import com.stalkerweb.android.data.repo.stallTick
 import com.stalkerweb.android.data.repo.LiveRepository
@@ -94,6 +96,7 @@ class PlayerViewModel(
 
     private val playerListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
+            if (!playingLive()) return   // a movie or episode on the shared player: not ours to reconnect
             android.util.Log.w("PlayerViewModel", "playback error (${error.errorCodeName}) — reconnecting", error)
             scheduleReconnect()
         }
@@ -104,9 +107,12 @@ class PlayerViewModel(
 
         // A live pipe closing shows up as the end of the stream: a drop, not the end (as on the web).
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED && _state.value.activeChannelId.isNotEmpty()) scheduleReconnect()
+            if (playbackState == Player.STATE_ENDED && playingLive()) scheduleReconnect()
         }
     }
+
+    /** The shared player is on one of this player's live channels (not VOD). */
+    private fun playingLive(): Boolean = isLiveMediaId(_player.value?.currentMediaItem?.mediaId)
 
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
@@ -142,9 +148,6 @@ class PlayerViewModel(
     }
 
     fun init(channelId: String) {
-        startWatchdog()
-        loadGuide(channelId)
-        refreshNowNext()
         // Seed from the on-disk cache so channel navigation/metadata work instantly
         // while the network refresh runs below.
         val cached = live.getCachedChannels()
@@ -153,6 +156,8 @@ class PlayerViewModel(
             channels        = if (cached.isNotEmpty()) cached else _state.value.channels,
             logoMap         = live.getCachedLogoMap().ifEmpty { _state.value.logoMap },
         )
+        startWatchdog()
+        loadGuide(channelId)
 
         // Reuse an existing connected MediaController; if the previous one disconnected
         // (PlaybackService was stopped while the app was in the background) fall through
@@ -222,6 +227,7 @@ class PlayerViewModel(
                 }
                 val builder = MediaItem.Builder()
                     .setUri(info.url)
+                    .setMediaId(liveMediaId(channelId))
                     .setMediaMetadata(MediaMetadata.Builder().setTitle(channel?.name).build())
                 if (mime != null) builder.setMimeType(mime)
                 p.setMediaItem(builder.build())
@@ -258,6 +264,14 @@ class PlayerViewModel(
         loadGuide(channelId)
     }
 
+    /** The player screen closed: stop watching over the shared player (VOD may use it next). */
+    fun leave() {
+        watchdogJob?.cancel()
+        guideJob?.cancel()
+        cancelDigits()
+        resetReconnect()
+    }
+
     fun closeChannelList() { _state.value = _state.value.copy(showChannelList = false) }
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
     fun toggleFavoritesOnly() { _state.value = _state.value.copy(favoritesOnly = !_state.value.favoritesOnly) }
@@ -277,6 +291,7 @@ class PlayerViewModel(
             while (isActive) {
                 val events = runCatching { live.channelGuide(channelId) }.getOrDefault(emptyList())
                 if (_state.value.activeChannelId == channelId) _state.value = _state.value.copy(guide = events)
+                refreshNowNext()   // the list rows' "now" too
                 delay(10 * 60_000L)
             }
         }
@@ -319,7 +334,7 @@ class PlayerViewModel(
                 delay(2_000)
                 val p = _player.value
                 val now = System.currentTimeMillis()
-                val idle = p == null || _state.value.isCasting || !p.playWhenReady || p.mediaItemCount == 0 ||
+                val idle = p == null || _state.value.isCasting || !p.playWhenReady || !isLiveMediaId(p.currentMediaItem?.mediaId) ||
                     p.playbackState == Player.STATE_IDLE || reconnectJob?.isActive == true
                 val (next, action) = stallTick(stall, now, p?.currentPosition ?: 0, p?.bufferedPosition ?: 0, idle)
                 stall = next

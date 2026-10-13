@@ -212,6 +212,7 @@ fun PlayerScreen(
         // multitasking gesture to trigger it usefully, and it just gets in the way.
         if (!isTV) onSetPipEnabled(true)
         onDispose {
+            viewModel.leave()
             onSetPipEnabled(false)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
@@ -239,7 +240,8 @@ fun PlayerScreen(
     }
 
     // Back: first a number being typed, then the list, then out of the player.
-    BackHandler(enabled = state.jumpDigits.isNotEmpty() || state.showChannelList) {
+    // (The list is only on screen in landscape and on TV; portrait shows its own.)
+    BackHandler(enabled = state.jumpDigits.isNotEmpty() || (state.showChannelList && (isLandscape || isTV))) {
         if (state.jumpDigits.isNotEmpty()) viewModel.cancelDigits() else viewModel.closeChannelList()
     }
 
@@ -587,7 +589,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
         HorizontalDivider()
 
         // Genre filter chips
-        val genres = s.genres
+        val genres = remember(s.channels) { s.genres }
         if (genres.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -834,7 +836,10 @@ private fun LiveBadge() {
 @Composable
 private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onClose: (() -> Unit)?) {
     val s        = c.state
-    val channels = s.displayedChannels
+    // Worked out when its inputs change, not on every 15 s tick (thousands of channels).
+    val channels = remember(s.channels, s.query, s.favoritesOnly, s.selectedGenre, s.favoriteIds) { s.displayedChannels }
+    val genres   = remember(s.channels) { s.genres }
+    val activeIdx = channels.indexOfFirst { it.uniqueId == c.activeId }
     val bg       = if (dark) Color.Black.copy(alpha = 0.9f) else Color.Transparent
     val textCol  = if (dark) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurface
     val mutedCol = if (dark) Color.White.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -842,13 +847,12 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
 
     // Opens on the playing channel; on TV the highlight starts there too.
     val listState = rememberLazyListState()
+    // The playing channel, or the first row when a filter leaves it out.
     val activeFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        val idx = channels.indexOfFirst { it.uniqueId == c.activeId }
-        if (idx >= 0) {
-            listState.scrollToItem((idx - 3).coerceAtLeast(0))
-            if (c.isTV && dark) runCatching { delay(50); activeFocus.requestFocus() }
-        }
+    LaunchedEffect(channels.isNotEmpty()) {
+        if (channels.isEmpty()) return@LaunchedEffect
+        listState.scrollToItem((activeIdx - 3).coerceAtLeast(0))
+        if (c.isTV && dark) runCatching { delay(50); activeFocus.requestFocus() }
     }
 
     Surface(
@@ -894,7 +898,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                 }
             }
             // Beside the picture, the genre is a picker (on a phone's portrait list it's the chips above).
-            if (dark && s.genres.isNotEmpty()) {
+            if (dark && genres.isNotEmpty()) {
                 var open by remember { mutableStateOf(false) }
                 Box(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
                     Row(
@@ -908,7 +912,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     }
                     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                         DropdownMenuItem(text = { Text("All genres") }, onClick = { open = false; a.onSelectGenre(null) })
-                        s.genres.forEach { g -> DropdownMenuItem(text = { Text(g) }, onClick = { open = false; a.onSelectGenre(g) }) }
+                        genres.forEach { g -> DropdownMenuItem(text = { Text(g) }, onClick = { open = false; a.onSelectGenre(g) }) }
                     }
                 }
             }
@@ -918,14 +922,14 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             }
             LazyColumn(state = listState) {
-                itemsIndexed(channels, key = { _, ch -> ch.uniqueId }) { _, ch ->
+                itemsIndexed(channels, key = { _, ch -> ch.uniqueId }) { index, ch ->
                     val isActive = ch.uniqueId == c.activeId
                     val isFav    = ch.uniqueId in s.favoriteIds
                     var focused  by remember { mutableStateOf(false) }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .then(if (isActive) Modifier.focusRequester(activeFocus) else Modifier)
+                            .then(if (isActive || (activeIdx < 0 && index == 0)) Modifier.focusRequester(activeFocus) else Modifier)
                             .onFocusChanged { focused = it.isFocused }
                             .border(
                                 width = if (focused) 2.dp else 0.dp,

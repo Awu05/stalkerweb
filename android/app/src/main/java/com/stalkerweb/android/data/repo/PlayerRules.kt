@@ -52,7 +52,7 @@ sealed class StallAction {
  */
 fun stallTick(state: StallState, nowMs: Long, positionMs: Long, bufferedMs: Long, idle: Boolean): Pair<StallState, StallAction?> {
     // Moving, or jumped back (a live HLS window slides by a segment, a rewind, a new item): not a freeze.
-    if (idle || positionMs > state.lastPositionMs + 250) {
+    if (idle || positionMs > state.lastPositionMs + 250 || positionMs < state.lastPositionMs - 1_000) {
         return StallState(positionMs, nowMs, nudged = false) to null
     }
     var s = state
