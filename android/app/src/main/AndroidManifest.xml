@@ -27,6 +27,8 @@
             </intent-filter>
         </service>
 
+        <receiver android:name=".reminders.ReminderReceiver" android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

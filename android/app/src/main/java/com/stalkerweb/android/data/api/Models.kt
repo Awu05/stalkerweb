@@ -87,6 +87,13 @@ data class SettingsResponse(
     @param:Json(name = "vod_enabled") val vodEnabled: Boolean = true,
     // With ACCESS_KEY set on the server: the playback-only token for links.
     @param:Json(name = "access_share_token") val accessShareToken: String? = null,
+    @param:Json(name = "download_dir") val downloadDir: String = "",
+    @param:Json(name = "idle_timeout_minutes") val idleTimeoutMinutes: Int? = null,
+    @param:Json(name = "https_port") val httpsPort: Int? = null,
+    @param:Json(name = "live_buffer_seconds") val liveBufferSeconds: Int = 0,
+    @param:Json(name = "access_enabled") val accessEnabled: Boolean = false,
+    @param:Json(name = "stbemu_stb_model") val stbModel: String = "",
+    @param:Json(name = "stbemu_firmware") val firmware: String = "",
 )
 
 // ── VOD ───────────────────────────────────────────────────────────────────────
