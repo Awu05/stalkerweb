@@ -52,4 +52,19 @@ class PlayerRulesTest {
         assertNull(a)
         assertEquals(StallAction.Reconnect, stallTick(n, nowMs = 13_000, positionMs = 1_000, bufferedMs = 1_100, idle = false).second)
     }
+
+    @Test fun aJumpBackIsNotAFreeze() {
+        // A live HLS window slides (the position drops a segment), a rewind, or a new item: start counting again.
+        val s = StallState(lastPositionMs = 50_000, lastAdvanceMs = 0, nudged = false)
+        val (n, a) = stallTick(s, nowMs = 5_000, positionMs = 42_000, bufferedMs = 60_000, idle = false)
+        assertNull(a)
+        assertEquals(StallState(42_000, 5_000, nudged = false), n)
+    }
+
+    @Test fun onlyTheLivePlayersOwnItemsCount() {
+        assertEquals("live:42", liveMediaId("42"))
+        assertEquals(true, isLiveMediaId("live:42"))
+        assertEquals(false, isLiveMediaId("vod:9:0::"))
+        assertEquals(false, isLiveMediaId(null))
+    }
 }
