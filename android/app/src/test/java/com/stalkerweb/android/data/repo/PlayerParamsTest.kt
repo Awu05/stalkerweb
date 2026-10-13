@@ -34,4 +34,13 @@ class PlayerParamsTest {
         val odd = movie.copy(title = "Tom + Jerry ~ 50% (redux)!", description = "a+b c&d=e")
         assertEquals(odd, PlayerParams.parse(odd.toQuery()))
     }
+
+    // The web's link for an episode, with its season number (buildPlayerParams' seasonNo).
+    private val webSeasonEpisode = "videoId=7&title=Bluey&cmd=&series=2&seasonId=s1&episodeId=e2&season=1&episodeTitle=Hospital"
+
+    @Test fun carriesTheSeasonNumber() {
+        val ep = PlayerParams.parse(webSeasonEpisode)
+        assertEquals("1", ep.season)
+        assertEquals(webSeasonEpisode, ep.toQuery())
+    }
 }
