@@ -279,17 +279,40 @@ class VodManager {
   //   episode: movie_id=<showId> season_id=<s> episode_id=<e>→ the file record
   // create_link then uses /media/file_<fileId>.mpg with series=<series_number>.
 
+  // Every page of a show's seasons, or of a season's episodes: portals send 14
+  // a page, newest first, so reading only the first left a long season without
+  // its early episodes (11–24 of 24), and a long-running show without its first
+  // seasons. Read until the portal's total is reached or a page comes back
+  // empty; an entry on two pages is listed once.
+  async _allPages(showId, seasonId) {
+    const MAX_PAGES = 30;   // 420 entries at 14 a page — far past any show
+    const data = [];
+    const seen = new Set();
+    for (let p = 1; p <= MAX_PAGES; p++) {
+      const r = await this.client._stalkerCall({
+        type:       'vod',
+        action:     'get_ordered_list',
+        movie_id:   String(showId),
+        season_id:  String(seasonId),
+        episode_id: '0',
+        sortby:     'added',
+        p:          String(p),
+      });
+      const js = r?.js || {};
+      const page = Array.isArray(js.data) ? js.data : [];
+      for (const e of page) {
+        const id = String(e.id);
+        if (!seen.has(id)) { seen.add(id); data.push(e); }
+      }
+      const total   = parseInt(js.total_items || '0', 10) || data.length;
+      const perPage = parseInt(js.max_page_items || '0', 10) || page.length || 14;
+      if (!page.length || data.length >= total || p >= Math.ceil(total / perPage)) break;
+    }
+    return data;
+  }
+
   async getSeasons(showId) {
-    const r = await this.client._stalkerCall({
-      type:       'vod',
-      action:     'get_ordered_list',
-      movie_id:   String(showId),
-      season_id:  '0',
-      episode_id: '0',
-      sortby:     'added',
-      p:          '1',
-    });
-    const data = Array.isArray(r?.js?.data) ? r.js.data : [];
+    const data = await this._allPages(showId, '0');
     return data.map(s => ({
       id:            String(s.id),
       name:          s.season_name || s.name || s.o_name || `Season ${s.season_number || s.id}`,
@@ -299,16 +322,7 @@ class VodManager {
   }
 
   async getEpisodes(showId, seasonId) {
-    const r = await this.client._stalkerCall({
-      type:       'vod',
-      action:     'get_ordered_list',
-      movie_id:   String(showId),
-      season_id:  String(seasonId),
-      episode_id: '0',
-      sortby:     'added',
-      p:          '1',
-    });
-    const data = Array.isArray(r?.js?.data) ? r.js.data : [];
+    const data = await this._allPages(showId, seasonId);
     return data.map(e => ({
       episodeId:     String(e.id),
       seriesNumber:  e.series_number != null ? String(e.series_number) : '',
