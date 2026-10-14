@@ -20,6 +20,7 @@ import { useFavorites } from '@/lib/useFavorites'
 import { showToast } from '@/lib/toast'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
+import { releaseMedia } from '@/lib/mediaRelease'
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -713,6 +714,9 @@ export default function PlayerPage() {
   useEffect(() => {
     if (!streamUrl || !videoRef.current) return
     const video = videoRef.current
+    // False once this stream is left (another channel, or the page): a play()
+    // still on its way mustn't start it again.
+    let active = true
 
     const teardown = () => {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
@@ -743,10 +747,11 @@ export default function PlayerPage() {
     // unmuted) — never from a previous channel's forced-for-autoplay mute.
     setMuted(userMutedRef.current)
 
-    const tryPlay = () =>
+    const tryPlay = () => !active ? Promise.resolve() :
       video.play()
         .then(() => { setStatus('playing'); setPlaying(true) })
         .catch(() => {
+          if (!active) return
           // Unmuted autoplay was blocked (no user activation yet). Start muted so
           // the stream isn't stuck — but do NOT persist this as a preference.
           video.muted = true
@@ -902,9 +907,13 @@ export default function PlayerPage() {
     }
 
     return () => {
+      active = false
       video.removeEventListener('playing', onPlaying)
       video.removeEventListener('ended', onEnded)
       teardown()
+      // Paused, its source and connection let go — or a direct stream plays on
+      // with nothing on screen (lib/mediaRelease.js).
+      releaseMedia(video)
     }
   }, [streamUrl, streamType, reloadKey, recoverStream])
 
