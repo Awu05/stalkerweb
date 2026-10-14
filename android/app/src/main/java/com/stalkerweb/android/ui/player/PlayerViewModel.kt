@@ -265,11 +265,31 @@ class PlayerViewModel(
     }
 
     /** The player screen closed: stop watching over the shared player (VOD may use it next). */
-    fun leave() {
+    // Each visit to the player screen is numbered: opening a channel from a
+    // reminder starts the new screen before the old one is gone, and the old
+    // one's leave() mustn't stop the new one.
+    private var visit = 0
+
+    /** The player screen opened: its number, for [leave]. */
+    fun enter(): Int = ++visit
+
+    /**
+     * The player screen [closed] went away. Unless another opened since: stop
+     * watching over the shared player, and stop the live stream itself — this
+     * view model lives as long as the app, so nothing else would, and it kept
+     * playing behind the next screen. (A movie or episode playing now is the
+     * VOD player's; casting carries on on the TV.)
+     */
+    fun leave(closed: Int) {
+        if (closed != visit) return
         watchdogJob?.cancel()
         guideJob?.cancel()
         cancelDigits()
         resetReconnect()
+        _player.value?.takeIf { playingLive() }?.let { p ->
+            p.stop()
+            p.clearMediaItems()
+        }
     }
 
     fun closeChannelList() { _state.value = _state.value.copy(showChannelList = false) }

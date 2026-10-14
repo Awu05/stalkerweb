@@ -206,13 +206,14 @@ fun PlayerScreen(
     }
 
     DisposableEffect(Unit) {
+        val visit = viewModel.enter()
         viewModel.init(channelId)
         // PIP is a touch/phone convenience (shrink to a floating window while
         // multitasking) — meaningless on a TV where there's no home-screen
         // multitasking gesture to trigger it usefully, and it just gets in the way.
         if (!isTV) onSetPipEnabled(true)
         onDispose {
-            viewModel.leave()
+            viewModel.leave(visit)
             onSetPipEnabled(false)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
