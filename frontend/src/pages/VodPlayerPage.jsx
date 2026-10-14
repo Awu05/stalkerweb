@@ -13,6 +13,7 @@ import EpisodePanel from '@/components/EpisodePanel'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf } from '@/lib/seriesProgress'
+import { releaseMedia } from '@/lib/mediaRelease'
 import {
   makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
@@ -261,10 +262,11 @@ export default function VodPlayerPage() {
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
-    const tryPlay = () =>
+    const tryPlay = () => leftRef.current ? Promise.resolve() :
       video.play()
         .then(() => { setStatus('playing'); setPlaying(true) })
         .catch(() => {
+          if (leftRef.current) return
           video.muted = true; setMuted(true)
           return video.play()
             .then(() => { setStatus('playing'); setPlaying(true) })
@@ -339,8 +341,14 @@ export default function VodPlayerPage() {
     }
   }, [])
 
-  // Cleanup HLS on unmount
-  useEffect(() => () => { hlsRef.current?.destroy() }, [])
+  // Leaving the player: hls.js gone, and the video paused with its source and
+  // connection let go (a movie or episode played straight from its file would
+  // otherwise carry on with nothing on screen — lib/mediaRelease.js).
+  const leftRef = useRef(false)
+  useEffect(() => {
+    const video = videoRef.current
+    return () => { leftRef.current = true; hlsRef.current?.destroy(); releaseMedia(video) }
+  }, [])
 
   // Auto-hide controls when playing fullscreen
   const resetHideTimer = useCallback(() => {
