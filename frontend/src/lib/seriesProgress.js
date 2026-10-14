@@ -83,6 +83,14 @@ export function episodeLabel({ season = '', episode = '', name = '' }) {
   return out.join(' · ') || String(name || '').trim()
 }
 
+/** An episode in a list: "E11 · Narrow-Minded" — its number too, so the right one is picked; "Episode 11" with no title of its own. */
+export function episodeRowLabel(ep) {
+  const n = String(ep?.seriesNumber ?? '').trim()
+  const name = String(ep?.name ?? '').trim()
+  if (isPlaceholder(name, n)) return n ? `Episode ${n}` : name
+  return n ? `E${n} · ${name}` : name
+}
+
 /**
  * A Recently watched entry's episode, from its player link. Links saved before
  * the season was kept are looked up in `seasonNos` ("showId:seasonId" →

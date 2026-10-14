@@ -85,6 +85,7 @@ import com.stalkerweb.android.data.repo.PlayerParams
 import com.stalkerweb.android.data.repo.WatchRules
 import com.stalkerweb.android.data.repo.continueTarget
 import com.stalkerweb.android.data.repo.episodeLabel
+import com.stalkerweb.android.data.repo.episodeRowLabel
 import com.stalkerweb.android.data.repo.historyEpisodeLabel
 import com.stalkerweb.android.data.repo.seasonNoOf
 import com.stalkerweb.android.data.repo.seasonWatchedLabel
@@ -569,9 +570,8 @@ private fun SeriesDialog(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(ep.seriesNumber, color = SwColors.Muted, modifier = Modifier.width(32.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = SwColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(episodeRowLabel(ep), color = SwColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     if (seen) WatchedNote("Watched")
                                     else if (frac != null && frac > 0f) LinearProgressIndicator(
                                         progress = { frac }, modifier = Modifier.fillMaxWidth(0.6f).padding(top = 4.dp).height(3.dp),
