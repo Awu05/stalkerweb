@@ -1,5 +1,6 @@
 import { Loader2, Play, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { episodeRowLabel } from '@/lib/seriesProgress'
 
 // A show's episodes in the VOD player: pick a season, play any episode. The one
 // playing is highlighted. Used in the player's side panel, and in a pop-up on
@@ -53,7 +54,7 @@ export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, pl
                   )}
                 >
                   <Play size={11} className={cn('shrink-0', playing ? 'opacity-100' : 'opacity-40')} fill="currentColor" />
-                  <span className="truncate flex-1">{ep.name || `Episode ${ep.seriesNumber}`}</span>
+                  <span className="truncate flex-1">{episodeRowLabel(ep)}</span>
                   {seen && <Check size={12} className="shrink-0 text-[var(--color-success)]" aria-label="Watched" />}
                   {pct > 0 && <span className="shrink-0 w-8 h-1 rounded-full bg-[var(--color-surface-3)] overflow-hidden" aria-label={`${Math.round(pct * 100)}% watched`}><span className="block h-full bg-[var(--color-primary-light)]" style={{ width: `${pct * 100}%` }} /></span>}
                 </button>

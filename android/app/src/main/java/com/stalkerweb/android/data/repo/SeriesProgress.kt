@@ -91,6 +91,14 @@ fun episodeLabel(season: String, episode: String, name: String): String {
     return out.joinToString(" · ").ifEmpty { name.trim() }
 }
 
+/** An episode in a list: "E11 · Narrow-Minded" — its number too, so the right one is picked; "Episode 11" with no title of its own. */
+fun episodeRowLabel(ep: VodEpisode): String {
+    val n = ep.seriesNumber.trim()
+    val name = ep.name.trim()
+    if (isPlaceholder(name, n)) return if (n.isNotEmpty()) "Episode $n" else name
+    return if (n.isNotEmpty()) "E$n · $name" else name
+}
+
 /**
  * A Recently watched entry's episode, from its player link. Links saved before
  * the season was kept are looked up in [seasonNos] ("showId:seasonId" →

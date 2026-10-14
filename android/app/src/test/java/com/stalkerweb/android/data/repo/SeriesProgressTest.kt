@@ -80,4 +80,11 @@ class SeriesProgressTest {
         assertEquals("", seasonWatchedLabel(0, 3))
         assertEquals(1, watchedOfEpisodes(listOf("200:s1:e1", "200:s1:gone"), "200", "s1", listOf(e1, e2)))
     }
+
+    @Test fun episodeRowsCarryTheirNumber() {
+        assertEquals("E11 · Narrow-Minded", episodeRowLabel(VodEpisode("x", "11", "Narrow-Minded")))
+        assertEquals("Episode 11", episodeRowLabel(VodEpisode("x", "11", "Episode 11")))
+        assertEquals("Episode 11", episodeRowLabel(VodEpisode("x", "11", "")))
+        assertEquals("Pilot", episodeRowLabel(VodEpisode("x", "", "Pilot")))
+    }
 }

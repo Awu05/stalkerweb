@@ -12,7 +12,7 @@ import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import EpisodePanel from '@/components/EpisodePanel'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
-import { seasonNoOf } from '@/lib/seriesProgress'
+import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
 import { releaseMedia } from '@/lib/mediaRelease'
 import {
   makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
@@ -661,7 +661,7 @@ function UpNextCard({ next, onPlay, onCancel }) {
     const t = setTimeout(() => setLeft((n) => n - 1), 1000)
     return () => clearTimeout(t)
   }, [left])
-  const name = next.episode.name || `Episode ${next.episode.seriesNumber}`
+  const name = episodeRowLabel(next.episode)
   return (
     <div className="absolute right-4 bottom-24 z-30 w-72 rounded-[var(--radius-md)] bg-black/85 backdrop-blur p-3 text-white shadow-xl" onClick={(e) => e.stopPropagation()}>
       <p className="text-[10px] uppercase tracking-wide text-white/60">Up next · in {left}s</p>

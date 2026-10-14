@@ -202,7 +202,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 
         state.upNext?.let { next ->
             UpNextCard(
-                title = next.episode.name.ifBlank { "Episode ${next.episode.seriesNumber}" },
+                title = com.stalkerweb.android.data.repo.episodeRowLabel(next.episode),
                 onPlay = viewModel::playNext,
                 onCancel = viewModel::cancelUpNext,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
@@ -252,12 +252,11 @@ private fun EpisodesPanel(
                                 .padding(10.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text(ep.seriesNumber, color = SwColors.Muted, modifier = Modifier.width(28.dp))
                             val key = com.stalkerweb.android.data.repo.WatchRules.makeKey(current.videoId, seasonId, ep.episodeId)
                             val seen = key in watched
                             val frac = if (seen) null else progress[key]?.takeIf { it.duration > 0 }?.let { (it.position / it.duration).toFloat().coerceIn(0f, 1f) }
                             Column(Modifier.weight(1f)) {
-                                Text(ep.name.ifBlank { "Episode ${ep.seriesNumber}" }, color = if (playing) SwColors.PrimaryLight else SwColors.Text,
+                                Text(com.stalkerweb.android.data.repo.episodeRowLabel(ep), color = if (playing) SwColors.PrimaryLight else SwColors.Text,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (frac != null && frac > 0f) LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth(0.6f).padding(top = 3.dp).height(2.dp),
                                     color = SwColors.Primary, trackColor = SwColors.Surface3)

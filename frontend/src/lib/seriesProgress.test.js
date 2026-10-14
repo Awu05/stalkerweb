@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonLookupFor, seasonNoOf, watchedInSeason, seasonWatchedLabel, watchedOfEpisodes } from './seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, seasonWatchedLabel, watchedOfEpisodes } from './seriesProgress'
 
 const s1 = { id: 's1', name: 'Season 1', seasonNumber: '1' }
 const s2 = { id: 's2', name: 'Season 2', seasonNumber: '2' }
@@ -91,5 +91,14 @@ describe('labels', () => {
     expect(seasonWatchedLabel(0, 3)).toBe('')
     // Its episodes known: only theirs count (an episode the portal dropped doesn't make it Watched).
     expect(watchedOfEpisodes(['200:s1:e1', '200:s1:gone'], '200', 's1', [e1, e2])).toBe(1)
+  })
+})
+
+describe('episode rows', () => {
+  it('names an episode with its number, so the right one is picked', () => {
+    expect(episodeRowLabel({ seriesNumber: '11', name: 'Narrow-Minded' })).toBe('E11 · Narrow-Minded')
+    expect(episodeRowLabel({ seriesNumber: '11', name: 'Episode 11' })).toBe('Episode 11')
+    expect(episodeRowLabel({ seriesNumber: '11', name: '' })).toBe('Episode 11')
+    expect(episodeRowLabel({ seriesNumber: '', name: 'Pilot' })).toBe('Pilot')
   })
 })

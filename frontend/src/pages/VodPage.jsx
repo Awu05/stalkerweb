@@ -7,7 +7,7 @@ import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
-import { continueTarget, episodeLabel, historyEpisodeLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
+import { continueTarget, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -454,7 +454,7 @@ function EpisodeList({ showId, season, episodes, watch, highlightId, onPlay, onD
         const seen = watched.has(key)
         const point = seen ? null : watch.progress.find((e) => e.key === key)
         const pct = point && point.duration > 0 ? Math.min(100, (point.position / point.duration) * 100) : 0
-        const name = ep.name || `Episode ${ep.seriesNumber}`
+        const name = episodeRowLabel(ep)
         return (
           <li key={ep.episodeId} className={cn('flex items-center group', ep.episodeId === highlightId && 'bg-[var(--color-primary)]/10')}>
             <button
