@@ -377,6 +377,7 @@ class MainActivity : ComponentActivity() {
                             settings = {
                                 SettingsScreen(
                                     viewModel = viewModel(factory = settingsVmFactory),
+                                    updates = updateViewModel,
                                     serverUrl = container.server.getServerUrl(),
                                     onOpenServer = { navController.navigate(Screen.Setup.go()) },
                                     onOwnViewerDeleted = { toPicker(required = true) },

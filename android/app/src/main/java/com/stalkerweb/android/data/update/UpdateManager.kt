@@ -21,7 +21,8 @@ class UpdateManager(private val context: Context) {
     private val client = OkHttpClient()
     private val prefs  = context.getSharedPreferences("stalkerweb_update", Context.MODE_PRIVATE)
 
-    suspend fun checkForUpdate(): ReleaseInfo? = withContext(Dispatchers.IO) {
+    /** The latest GitHub release, and whether it has a newer APK for this build (mobile or TV). */
+    suspend fun latest(): UpdateCheck = withContext(Dispatchers.IO) {
         runCatching {
             val req  = Request.Builder()
                 .url("https://api.github.com/repos/${com.stalkerweb.android.BuildConfig.GITHUB_REPO}/releases/latest")
@@ -29,30 +30,32 @@ class UpdateManager(private val context: Context) {
                 .header("User-Agent", "StalkerWeb-Android/${com.stalkerweb.android.BuildConfig.VERSION_NAME}")
                 .build()
             val response = client.newCall(req).execute()
-            if (!response.isSuccessful) {
-                Log.w("UpdateManager", "Check failed: ${response.code} ${response.message}")
-                return@withContext null
-            }
-            val body = response.body?.string() ?: return@withContext null
+            val body = response.use { r ->
+                if (!r.isSuccessful) {
+                    Log.w("UpdateManager", "Check failed: ${r.code} ${r.message}")
+                    return@withContext UpdateCheck.Failed
+                }
+                r.body?.string()
+            } ?: return@withContext UpdateCheck.Failed
             val json    = JSONObject(body)
             val tagName = json.getString("tag_name")
             val version = tagName.trimStart('v')
-            if (!isNewer(version, com.stalkerweb.android.BuildConfig.VERSION_NAME)) {
+            if (!isNewerVersion(version, com.stalkerweb.android.BuildConfig.VERSION_NAME)) {
                 Log.d("UpdateManager", "Current version (${com.stalkerweb.android.BuildConfig.VERSION_NAME}) is up to date with $version")
-                return@withContext null
+                return@withContext UpdateCheck.UpToDate(version)
             }
-            val assets  = json.getJSONArray("assets")
-            for (i in 0 until assets.length()) {
+            val assets = json.getJSONArray("assets")
+            val named = (0 until assets.length()).map { i ->
                 val asset = assets.getJSONObject(i)
-                if (asset.getString("name").endsWith(".apk")) {
-                    Log.i("UpdateManager", "New version found: $version")
-                    return@withContext ReleaseInfo(tagName, version, asset.getString("browser_download_url"))
-                }
+                asset.getString("name") to asset.getString("browser_download_url")
             }
-            null
+            val url = apkFor(named, com.stalkerweb.android.BuildConfig.IS_TV)
+                ?: return@withContext UpdateCheck.NoApk(version)
+            Log.i("UpdateManager", "New version found: $version")
+            UpdateCheck.Found(ReleaseInfo(tagName, version, url))
         }.onFailure {
             Log.e("UpdateManager", "Update check error: ${it.message}", it)
-        }.getOrNull()
+        }.getOrDefault(UpdateCheck.Failed)
     }
 
     suspend fun downloadApk(release: ReleaseInfo, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
@@ -150,23 +153,13 @@ class UpdateManager(private val context: Context) {
         if (!file.exists() || file.length() <= 0) return null
 
         val pending = prefs.getString(KEY_PENDING_VERSION, null)
-        if (pending != null && isNewer(pending, com.stalkerweb.android.BuildConfig.VERSION_NAME)) {
+        if (pending != null && isNewerVersion(pending, com.stalkerweb.android.BuildConfig.VERSION_NAME)) {
             return file
         }
         // Already installed (or unknown version) → clean up the stale download.
         file.delete()
         prefs.edit().remove(KEY_PENDING_VERSION).apply()
         return null
-    }
-
-    private fun isNewer(remote: String, current: String): Boolean {
-        val r = remote.split(".").map { it.toIntOrNull() ?: 0 }
-        val c = current.split(".").map { it.toIntOrNull() ?: 0 }
-        for (i in 0 until maxOf(r.size, c.size)) {
-            val diff = r.getOrElse(i) { 0 } - c.getOrElse(i) { 0 }
-            if (diff != 0) return diff > 0
-        }
-        return false
     }
 
     companion object {
