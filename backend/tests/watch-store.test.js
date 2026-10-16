@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -74,6 +74,13 @@ describe('WatchStore', () => {
     expect(fresh.importLegacy('view_def')).toBe(false)
   })
 
+  it('keeps the ticked episodes of entries saved with no portal', () => {
+    fs.writeFileSync(path.join(dir, 'watch.json'), JSON.stringify({
+      view_def: { '': { watchedEpisodes: ['200:s1:e1'] }, [P]: { watchedEpisodes: ['200:s1:e2'] } },
+    }))
+    expect(new WatchStore(dir).get('view_def', P).watchedEpisodes).toEqual(['200:s1:e2', '200:s1:e1'])
+  })
+
   it('gives old entries saved with no portal to the first portal the viewer uses', () => {
     fs.writeFileSync(path.join(dir, 'vod-progress.json'), JSON.stringify([
       { key: '100', title: 'Heat', position: 600, duration: 6000, params: 'videoId=100', updatedAt: 5 },
@@ -87,9 +94,30 @@ describe('WatchStore', () => {
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'watch.json'), 'utf8')).view_def['']).toBeUndefined()
   })
 
-  it('survives a restart', () => {
+  it('survives a restart (shutdown writes the positions still waiting)', () => {
     play('100', 600)
+    store.flush()
     expect(new WatchStore(dir).get('view_a', P).history[0].id).toBe('100')
+  })
+
+  it('writes positions a few seconds later, together, and reads them meanwhile', () => {
+    vi.useFakeTimers()
+    try {
+      play('100', 600)
+      play('100', 610)
+      expect(store.get('view_a', P).progress[0].position).toBe(610)
+      expect(fs.existsSync(path.join(dir, 'watch.json'))).toBe(false)
+      vi.advanceTimersByTime(3000)
+      expect(new WatchStore(dir).get('view_a', P).progress[0].position).toBe(610)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('writes waiting positions along with any other change', () => {
+    play('100', 600)
+    store.addToList('view_a', P, { id: '300', name: 'Show' })
+    const fresh = new WatchStore(dir).get('view_a', P)
+    expect(fresh.progress[0].key).toBe('100')
+    expect(fresh.list[0].id).toBe('300')
   })
 })
 
@@ -150,6 +178,13 @@ describe('Watched episodes', () => {
     w = store.setEpisodeWatched('view_a', P, '200:s1:e3', false)
     expect(w.watchedEpisodes).toEqual([])
     expect(store.setEpisodeWatched('view_a', P, '100', true).watchedEpisodes).toEqual([])   // a movie isn't an episode
+  })
+
+  it('unticking the episode last played unfinishes it in Recently watched', () => {
+    play('200:s1:e5', 600, 6000, { title: 'Show' })
+    store.setEpisodeWatched('view_a', P, '200:s1:e5', true)
+    const w = store.setEpisodeWatched('view_a', P, '200:s1:e5', false)
+    expect(w.history[0]).toMatchObject({ key: '200:s1:e5', finished: false })
   })
 
   it('ticking the episode last played finishes it in Recently watched', () => {

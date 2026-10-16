@@ -26,6 +26,9 @@ const HISTORY_MAX  = 20;
 const WATCHED_MAX  = 2000;
 const WATCHED_EPISODES_MAX = 5000;
 const LIST_MAX     = 500;
+// Positions come every 10 s while something plays: they're written together,
+// a few seconds later (and on shutdown), not the whole file each time.
+const PROGRESS_SAVE_DELAY_MS = 3000;
 
 // What My List keeps of a title: enough to show its tile, filter it and play
 // it, without asking the portal again.
@@ -47,6 +50,7 @@ class WatchStore {
   // The file is read again only when it changed on disk (by mtime and size),
   // not on every request — progress saves come every few seconds.
   _load() {
+    if (this._pending) return this._pending;   // newer than the file, on its way there
     let st;
     try { st = fs.statSync(this._file); } catch { this._cache = null; return {}; }
     if (this._cache && this._cache.mtimeMs === st.mtimeMs && this._cache.size === st.size) return this._cache.data;
@@ -63,6 +67,9 @@ class WatchStore {
 
   _save(d) {
     delete d.__adopted;   // _bucket's note to get(), not data
+    // d is what _load() handed out, so it carries any positions still waiting.
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    this._pending = null;
     try {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(d), 'utf8');
@@ -74,6 +81,21 @@ class WatchStore {
       log.error(TAG, `save failed: ${e.message}`);
       throw e;
     }
+  }
+
+  /** Written within a few seconds; until then reads see it from memory. */
+  _saveSoon(d) {
+    this._pending = d;
+    if (this._timer) return;
+    this._timer = setTimeout(() => this.flush(), PROGRESS_SAVE_DELAY_MS);
+    this._timer.unref?.();
+  }
+
+  /** Positions still waiting, onto disk now (on shutdown). */
+  flush() {
+    if (!this._timer) return;
+    const d = this._pending;
+    try { this._save(d); } catch { /* logged; the next save tries again */ this._pending = d; }
   }
 
   // A viewer's lists on one portal, created when asked for with `create`.
@@ -91,6 +113,7 @@ class WatchStore {
     const ids = new Set(b.history.map((e) => e.id));
     b.history = [...b.history, ...list('history').filter((e) => !ids.has(e.id))].slice(0, HISTORY_MAX);
     b.watched = [...new Set([...b.watched, ...list('watched')])].slice(0, WATCHED_MAX);
+    b.watchedEpisodes = [...new Set([...b.watchedEpisodes, ...list('watchedEpisodes')])].slice(0, WATCHED_EPISODES_MAX);
     const saved = new Set(b.list.map((e) => e.id));
     b.list = [...b.list, ...list('list').filter((e) => !saved.has(e.id))].slice(0, LIST_MAX);
     log.info(TAG, `moved ${viewerId}'s entries with no portal to ${p}`);
@@ -192,7 +215,7 @@ class WatchStore {
     const d = this._load();
     const b = this._bucket(d, viewerId, portal, true);
     this._apply(b, entry, Date.now());
-    this._save(d);
+    this._saveSoon(d);
     return b;
   }
 
@@ -208,6 +231,9 @@ class WatchStore {
       b.progress = b.progress.filter((e) => e.key !== k);
       // The show's tile in Recently watched moves on from it too (not "Resume").
       for (const e of b.history) if (e.key === k) e.finished = true;
+    } else {
+      // Unticked: not finished any more either, so Continue comes back to it.
+      for (const e of b.history) if (e.key === k) e.finished = false;
     }
     this._save(d);
     return b;

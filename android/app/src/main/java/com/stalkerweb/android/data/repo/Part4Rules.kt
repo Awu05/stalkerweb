@@ -33,9 +33,12 @@ fun cleanEvents(events: List<EpgEvent>): List<EpgEvent> =
 fun eventAt(events: List<EpgEvent>, timeSecs: Long): EpgEvent? = events.firstOrNull { it.startTime <= timeSecs && it.endTime > timeSecs }
 
 /** How far through [event] [nowSecs] is, 0–1. */
-fun progressOf(event: EpgEvent, nowSecs: Long): Float {
-    val span = (event.endTime - event.startTime).coerceAtLeast(1)
-    return ((nowSecs - event.startTime).toFloat() / span).coerceIn(0f, 1f)
+fun progressOf(event: EpgEvent, nowSecs: Long): Float = progressAt(event.startTime, event.endTime, nowSecs)
+
+/** How far through a programme from [startSecs] to [endSecs] [nowSecs] is, 0–1. */
+fun progressAt(startSecs: Long, endSecs: Long, nowSecs: Long): Float {
+    val span = (endSecs - startSecs).coerceAtLeast(1)
+    return ((nowSecs - startSecs).toFloat() / span).coerceIn(0f, 1f)
 }
 
 // ── Downloads ─────────────────────────────────────────────────────────────────

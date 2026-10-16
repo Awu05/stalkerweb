@@ -22,6 +22,17 @@ class SeriesProgressTest {
     ) = continueTarget("200", listOf(s1, s2), episodes, history, progress, watched)
     private fun h(key: String, finished: Boolean) = HistoryEntry(id = "200", key = key, finished = finished)
 
+    @Test fun readsKeysWhoseSeasonAndEpisodeIdsHaveColonsOfTheirOwn() {
+        val c1 = VodSeason("200:1", "Season 1", "1"); val c2 = VodSeason("200:2", "Season 2", "2")
+        val g1 = ep("200:2:1", 1); val g2 = ep("200:2:2", 2); val g3 = ep("200:2:3", 3)
+        val eps = mapOf("200:1" to listOf(ep("200:1:1", 1)), "200:2" to listOf(g1, g2, g3))
+        val key = "200:200:2:200:2:2"
+        assertEquals(ContinueTarget.Play(true, c2, g2),
+            continueTarget("200", listOf(c1, c2), eps, listOf(h(key, false)), listOf(ProgressEntry(key)), emptyList()))
+        assertEquals(ContinueTarget.Play(false, c2, g3),
+            continueTarget("200", listOf(c1, c2), eps, listOf(h(key, true)), emptyList(), emptyList()))
+    }
+
     @Test fun startsAShowNotWatchedYetAtItsFirstEpisode() =
         assertEquals(ContinueTarget.Play(resume = false, season = s1, episode = e1), target())
 

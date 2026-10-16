@@ -41,6 +41,14 @@ describe('season and episode order', () => {
     expect(asked).toEqual(['1', '2'])
   })
 
+  it('stops when a page brings nothing new (a portal that ignores the page number)', async () => {
+    const asked = []
+    const same = [{ id: 'e2', series_number: 2 }, { id: 'e1', series_number: 1 }]
+    const vm = new VodManager({ _stalkerCall: async (q) => { asked.push(q.p); return { js: { total_items: 400, max_page_items: 2, data: same } } } })
+    expect((await vm.getEpisodes('show', 's1')).map((e) => e.episodeId)).toEqual(['e1', 'e2'])
+    expect(asked).toEqual(['1', '2'])
+  })
+
   it('lists an episode once when pages overlap, and stops at an empty page', async () => {
     const pages = { 1: [{ id: 'e3', series_number: 3 }, { id: 'e2', series_number: 2 }], 2: [{ id: 'e2', series_number: 2 }, { id: 'e1', series_number: 1 }], 3: [] }
     const vm = new VodManager({ _stalkerCall: async (q) => ({ js: { total_items: 99, max_page_items: 2, data: pages[q.p] ?? [] } }) })

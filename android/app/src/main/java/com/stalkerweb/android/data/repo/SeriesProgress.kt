@@ -17,7 +17,16 @@ sealed class ContinueTarget {
     data class Needs(val seasonId: String) : ContinueTarget()
 }
 
-private fun keyParts(key: String): Pair<String, String> {
+// A key's season and episode. Some portals' ids have colons of their own
+// ("123:2", "123:2:5"), so the key is matched against the show's seasons, not
+// just split; the plain split is the fallback.
+private fun keyParts(key: String, showId: String, seasons: List<VodSeason>): Pair<String, String> {
+    if (key.startsWith("$showId:")) {
+        val rest = key.substring(showId.length + 1)
+        seasons.filter { rest.startsWith("${it.id}:") }.maxByOrNull { it.id.length }?.let { s ->
+            return s.id to rest.substring(s.id.length + 1)
+        }
+    }
     val p = key.split(':')
     return p.getOrElse(1) { "" } to p.getOrElse(2) { "" }
 }
@@ -40,7 +49,7 @@ fun continueTarget(
     // "Resume" only where there's a point to resume from (it can drop off the list): else it plays from the start.
     val resumable = progress.map { it.key }.toSet()
     fun locate(key: String): ContinueTarget? {
-        val (seasonId, episodeId) = keyParts(key)
+        val (seasonId, episodeId) = keyParts(key, showId, seasons)
         val season = seasons.firstOrNull { it.id == seasonId } ?: return null
         val eps = episodesBySeason[season.id] ?: return ContinueTarget.Needs(season.id)
         val episode = eps.firstOrNull { it.episodeId == episodeId } ?: return null
@@ -51,7 +60,7 @@ fun continueTarget(
     val last = history.firstOrNull { it.id == showId && it.key.contains(':') }
     if (last != null) {
         if (!last.finished && last.key !in watched) locate(last.key)?.let { return it }
-        after = keyParts(last.key)
+        after = keyParts(last.key, showId, seasons)
     } else {
         progress.firstOrNull { it.key.startsWith("$showId:") && it.key !in watched }?.let { p -> locate(p.key)?.let { return it } }
     }
@@ -118,12 +127,12 @@ fun seasonLookupFor(entry: HistoryEntry): String? {
 }
 
 /** How many of a season's episodes are watched. */
-fun watchedInSeason(watchedEpisodes: List<String>, showId: String, seasonId: String): Int =
+fun watchedInSeason(watchedEpisodes: Collection<String>, showId: String, seasonId: String): Int =
     watchedEpisodes.count { it.startsWith("$showId:$seasonId:") }
 
 /** How many of these episodes (a season's, as listed now) are watched. */
-fun watchedOfEpisodes(watchedEpisodes: List<String>, showId: String, seasonId: String, episodes: List<VodEpisode>): Int {
-    val w = watchedEpisodes.toSet()
+fun watchedOfEpisodes(watchedEpisodes: Collection<String>, showId: String, seasonId: String, episodes: List<VodEpisode>): Int {
+    val w = watchedEpisodes as? Set<String> ?: watchedEpisodes.toSet()
     return episodes.count { WatchRules.makeKey(showId, seasonId, it.episodeId) in w }
 }
 

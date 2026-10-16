@@ -9,6 +9,16 @@ const all = { s1: [e1, e2, e3], s2: [f1, f2] }
 const base = { showId: '200', seasons: [s1, s2], episodesBySeason: all, history: [], progress: [], watchedEpisodes: [] }
 
 describe('continueTarget', () => {
+  it('reads keys whose season and episode ids have colons of their own', () => {
+    const c1 = { id: '200:1', name: 'Season 1', seasonNumber: '1' }
+    const c2 = { id: '200:2', name: 'Season 2', seasonNumber: '2' }
+    const g1 = ep('200:2:1', 1), g2 = ep('200:2:2', 2), g3 = ep('200:2:3', 3)
+    const show = { ...base, seasons: [c1, c2], episodesBySeason: { '200:1': [ep('200:1:1', 1)], '200:2': [g1, g2, g3] } }
+    const history = [{ id: '200', key: '200:200:2:200:2:2', finished: false }]
+    expect(continueTarget({ ...show, history, progress: [{ key: '200:200:2:200:2:2' }] })).toEqual({ action: 'resume', season: c2, episode: g2 })
+    expect(continueTarget({ ...show, history: [{ ...history[0], finished: true }] })).toEqual({ action: 'play', season: c2, episode: g3 })
+  })
+
   it('starts a show not watched yet at its first episode', () => {
     expect(continueTarget(base)).toEqual({ action: 'play', season: s1, episode: e1 })
   })

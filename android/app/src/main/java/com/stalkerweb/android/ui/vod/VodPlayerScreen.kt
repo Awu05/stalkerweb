@@ -102,6 +102,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     var panelOpen by remember { mutableStateOf(false) }
     val p = state.params ?: params
     val watchState by viewModel.watchState.collectAsStateWithLifecycle()
+    val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
+    val progressByKey = remember(watchState.progress) { watchState.progress.associateBy { it.key } }
     val inMyList = watchState.list.any { it.id == p.videoId }
 
     LaunchedEffect(Unit) { viewModel.init(params) }
@@ -191,7 +193,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         if (panelOpen && p.isEpisode) {
             EpisodesPanel(
                 state = state, current = p, wide = wide,
-                watched = watchState.watchedEpisodes.toSet(), progress = watchState.progress.associateBy { it.key },
+                watched = watchedKeys, progress = progressByKey,
                 onPick = { season, ep -> viewModel.playEpisode(season, ep) },
                 onSeason = viewModel::loadSeason,
                 onClose = { panelOpen = false },

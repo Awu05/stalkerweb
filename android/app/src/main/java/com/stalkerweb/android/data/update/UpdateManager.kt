@@ -77,6 +77,9 @@ class UpdateManager(private val context: Context) {
         val total    = body.contentLength()
         val dir      = File(context.externalCacheDir ?: context.cacheDir, "apk_downloads").also { it.mkdirs() }
         val file     = File(dir, "update.apk")
+        // Written beside it and moved in once whole: until then there is no
+        // update.apk for cachedApk() to offer (half-written) or tidy away.
+        val part     = File(dir, "update.apk.part")
         var received = 0L
 
         val nm = NotificationManagerCompat.from(context)
@@ -88,7 +91,7 @@ class UpdateManager(private val context: Context) {
             .setProgress(100, 0, total <= 0)
 
         body.byteStream().use { input ->
-            file.outputStream().use { output ->
+            part.outputStream().use { output ->
                 val buf = ByteArray(8 * 1024)
                 var n: Int
                 var lastNotifiedPct = -1
@@ -112,6 +115,9 @@ class UpdateManager(private val context: Context) {
                 }
             }
         }
+
+        file.delete()
+        if (!part.renameTo(file)) throw Exception("Couldn't save the update")
 
         // Remember which version this APK is for, so once it's installed we can
         // tell the cached file is stale and stop offering it as an update.

@@ -493,6 +493,7 @@ if (config.httpsPort) {
 function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
   xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
+  watchStore.flush();      // positions from the last few seconds
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();

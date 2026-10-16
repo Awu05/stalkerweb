@@ -330,17 +330,20 @@ class VodViewModel(
 
     fun toggleMyList(item: VodItem) = watch.toggleMyList(item)
 
-    // Each show's seasons asked once, for the tiles' "S2 · E3".
-    private val seasonsAsked = mutableSetOf<String>()
+    // Shows whose seasons are being asked for, for the tiles' "S2 · E3". Once
+    // known they live in seasonNos — which a viewer switch or a new type clears,
+    // so they're asked for again then.
+    private val seasonsAsking = mutableSetOf<String>()
 
     /** Looks up the seasons of shows in Recently watched saved without the season number. */
     fun lookUpSeasons(history: List<com.stalkerweb.android.data.api.HistoryEntry>) {
         for (e in history) {
             val show = com.stalkerweb.android.data.repo.seasonLookupFor(e) ?: continue
-            if (!seasonsAsked.add(show)) continue
+            if (_state.value.seasonNos.keys.any { it.startsWith("$show:") } || !seasonsAsking.add(show)) continue
             viewModelScope.launch {
                 val seasons = vod.getVodSeasons(show)
-                if (seasons.isEmpty()) { seasonsAsked.remove(show); return@launch }
+                seasonsAsking.remove(show)
+                if (seasons.isEmpty()) return@launch
                 _state.value = _state.value.copy(seasonNos = _state.value.seasonNos +
                     seasons.associate { "$show:${it.id}" to com.stalkerweb.android.data.repo.seasonNoOf(it) })
             }

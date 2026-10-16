@@ -10,7 +10,7 @@ data class NowPlaying(val now: EpgEvent?, val later: List<EpgEvent>)
 
 /** The programme on at [nowSecs] and the [count] after it (or the next [count] when nothing is on). */
 fun nowPlaying(events: List<EpgEvent>, nowSecs: Long, count: Int = 2): NowPlaying {
-    val idx = events.indexOfFirst { it.startTime <= nowSecs && nowSecs < it.endTime }
+    val idx = eventAt(events, nowSecs)?.let(events::indexOf) ?: -1
     val later = if (idx >= 0) events.drop(idx + 1) else events.filter { it.startTime > nowSecs }
     return NowPlaying(events.getOrNull(idx), later.take(count))
 }

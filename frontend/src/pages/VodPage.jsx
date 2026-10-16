@@ -259,7 +259,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
   const [seasons, setSeasons] = useState(null)
   const [selectedSeason, setSelectedSeason] = useState(null)
   const [episodesBySeason, setEpisodesBySeason] = useState({})   // seasonId → episodes, as loaded
-  const [epLoading, setEpLoading] = useState(false)
+  const [seasonErrors, setSeasonErrors] = useState({})          // seasonId → why its episodes didn't load
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [continueFailed, setContinueFailed] = useState(false)  // a season Continue needed didn't load: no Continue, the rest works
@@ -276,12 +276,19 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
       .catch(e => { setError(e.message); setLoading(false) })
   }, [item.id])
 
-  const loadSeason = useCallback((seasonId) => {
+  // One load per season, whoever asks first (Continue or a tap); a failure is
+  // that season's alone — the seasons list and the others still work.
+  const loadSeason = useCallback((seasonId, forContinue = false) => {
     if (!seasonId || loadingSeasons.current.has(seasonId)) return
     loadingSeasons.current.add(seasonId)
+    setSeasonErrors(m => { if (!(seasonId in m)) return m; const rest = { ...m }; delete rest[seasonId]; return rest })
     getVodEpisodes(item.id, seasonId)
       .then(r => setEpisodesBySeason(m => ({ ...m, [seasonId]: r.episodes || [] })))
-      .catch(() => { loadingSeasons.current.delete(seasonId); setContinueFailed(true) })
+      .catch(e => {
+        loadingSeasons.current.delete(seasonId)
+        setSeasonErrors(m => ({ ...m, [seasonId]: e.message || 'Could not load the episodes' }))
+        if (forContinue) setContinueFailed(true)
+      })
   }, [item.id])
 
   // What Continue plays — loading the seasons it has to look into.
@@ -290,7 +297,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
     history: watch.history, progress: watch.progress, watchedEpisodes: watch.watchedEpisodes,
   }) : null
   const needs = target?.needs
-  useEffect(() => { if (needs) loadSeason(needs) }, [needs, loadSeason])
+  useEffect(() => { if (needs) loadSeason(needs, true) }, [needs, loadSeason])
   const next = target && !target.needs && !continueFailed ? target : null
 
   // Open straight at Continue's season, its episode highlighted. (At the
@@ -303,17 +310,12 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
   function openSeason(season) {
     picked.current = true
     setSelectedSeason(season)
-    if (!episodesBySeason[season.id] && !loadingSeasons.current.has(season.id)) {
-      loadingSeasons.current.add(season.id)
-      setEpLoading(true)
-      getVodEpisodes(item.id, season.id)
-        .then(r => { setEpisodesBySeason(m => ({ ...m, [season.id]: r.episodes || [] })); setEpLoading(false) })
-        .catch(e => { loadingSeasons.current.delete(season.id); setError(e.message); setEpLoading(false) })
-    }
+    if (!episodesBySeason[season.id]) loadSeason(season.id)
   }
 
   const episodes = selectedSeason ? episodesBySeason[selectedSeason.id] : null
-  const waiting = selectedSeason && (epLoading || !episodes)
+  const seasonError = selectedSeason ? seasonErrors[selectedSeason.id] : null
+  const waiting = selectedSeason && !episodes && !seasonError
   const continueLabel = next && episodeLabel({ season: seasonNoOf(next.season), episode: next.episode.seriesNumber, name: next.episode.name })
 
   // Portalled to <body> so no page ancestor (transforms, filters, overflow)
@@ -416,7 +418,12 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           )}
 
           {!loading && !error && selectedSeason && (
-            waiting ? (
+            seasonError ? (
+              <div className="px-4 py-6 text-center space-y-3">
+                <p className="text-sm text-[var(--color-live)]">{seasonError}</p>
+                <button onClick={() => loadSeason(selectedSeason.id)} className="text-sm text-[var(--color-primary-light)] hover:underline">Try again</button>
+              </div>
+            ) : waiting ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 size={24} className="animate-spin text-[var(--color-primary-light)]" />
               </div>

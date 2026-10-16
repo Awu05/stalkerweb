@@ -347,6 +347,9 @@ export default function VodPlayerPage() {
   const leftRef = useRef(false)
   useEffect(() => {
     const video = videoRef.current
+    // Mounted (again: StrictMode's dev mount → unmount → mount would otherwise
+    // leave it "left", and nothing would ever play).
+    leftRef.current = false
     return () => { leftRef.current = true; hlsRef.current?.destroy(); releaseMedia(video) }
   }, [])
 
