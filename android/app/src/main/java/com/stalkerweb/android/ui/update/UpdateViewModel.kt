@@ -55,6 +55,10 @@ class UpdateViewModel(private val manager: UpdateManager) : ViewModel() {
     /** A check by hand, from Settings: says what it found, and offers a newer APK. */
     fun checkNow() {
         if (_checking.value) return
+        if (_state.value is UpdateState.Downloading) {
+            _checkStatus.value = "An update is downloading."
+            return
+        }
         val cached = manager.cachedApk()
         if (cached != null) {
             _checkStatus.value = "An update is downloaded and ready to install."

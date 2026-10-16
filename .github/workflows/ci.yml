@@ -7,9 +7,9 @@ name: CI
 on:
   workflow_dispatch:
 
-# A new push to a PR cancels the run for its previous commit.
+# Running it again for a branch cancels the run still going for it.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

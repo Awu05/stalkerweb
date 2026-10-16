@@ -1,14 +1,47 @@
 package com.stalkerweb.android.data.update
 
-/** Whether [remote] ("0.4.36", a "v" in front is fine) is a later version than [current]. */
-fun isNewerVersion(remote: String, current: String): Boolean {
-    val r = remote.trim().trimStart('v').split(".").map { it.toIntOrNull() ?: 0 }
-    val c = current.trim().trimStart('v').split(".").map { it.toIntOrNull() ?: 0 }
-    for (i in 0 until maxOf(r.size, c.size)) {
-        val diff = r.getOrElse(i) { 0 } - c.getOrElse(i) { 0 }
-        if (diff != 0) return diff > 0
+/**
+ * Whether [remote] ("0.4.36", a "v" in front is fine) is a later version than
+ * [current]. A pre-release ("0.4.36-rc.1") comes before its release and after
+ * the one before it, as the release workflow tags them.
+ */
+fun isNewerVersion(remote: String, current: String): Boolean = compareVersions(remote, current) > 0
+
+private fun compareVersions(a: String, b: String): Int {
+    fun split(v: String): Pair<List<Int>, String?> {
+        val s = v.trim().trimStart('v')
+        val dash = s.indexOf('-')
+        val core = if (dash >= 0) s.substring(0, dash) else s
+        val pre = if (dash >= 0) s.substring(dash + 1) else null
+        return core.split(".").map { it.toIntOrNull() ?: 0 } to pre
     }
-    return false
+    val (ac, ap) = split(a)
+    val (bc, bp) = split(b)
+    for (i in 0 until maxOf(ac.size, bc.size)) {
+        val diff = ac.getOrElse(i) { 0 } - bc.getOrElse(i) { 0 }
+        if (diff != 0) return diff
+    }
+    return when {
+        ap == bp -> 0
+        ap == null -> 1    // the release beats its own pre-releases
+        bp == null -> -1
+        else -> comparePre(ap, bp)
+    }
+}
+
+/** "rc.2" after "rc.1", "rc.10" after "rc.9", "rc" after "beta". */
+private fun comparePre(a: String, b: String): Int {
+    val ap = a.split('.')
+    val bp = b.split('.')
+    for (i in 0 until maxOf(ap.size, bp.size)) {
+        val x = ap.getOrNull(i) ?: return -1
+        val y = bp.getOrNull(i) ?: return 1
+        val xn = x.toIntOrNull()
+        val yn = y.toIntOrNull()
+        val c = if (xn != null && yn != null) xn.compareTo(yn) else x.compareTo(y)
+        if (c != 0) return c
+    }
+    return 0
 }
 
 private val FORM = Regex("""-(tv|mobile)[-.]""", RegexOption.IGNORE_CASE)

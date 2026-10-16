@@ -92,6 +92,7 @@ class PlayerViewModel(
     private var reconnectJob: Job? = null
     private var watchdogJob: Job? = null
     private var guideJob: Job? = null
+    private var nowNextJob: Job? = null
     private var jumpJob: Job? = null
 
     private val playerListener = object : Player.Listener {
@@ -212,7 +213,11 @@ class PlayerViewModel(
     }
 
     fun loadStream(channelId: String) {
+        if (!onScreen) return
         val p = _player.value ?: return
+        // Only the newest load plays, and only while the screen is open: a slow
+        // resolve finishing after Back (or after another zap) mustn't start it.
+        val load = ++loadNo
         val channel = _state.value.channels.find { it.uniqueId == channelId }
         // Resolve via the backend so we know the engine type (hls/mpegts/native)
         // and feed ExoPlayer the correct MIME — assuming HLS for everything breaks
@@ -220,6 +225,7 @@ class PlayerViewModel(
         viewModelScope.launch {
             runCatching {
                 val info = live.resolveStream(channelId)
+                if (load != loadNo || !onScreen) return@launch
                 val mime = when (info.type) {
                     "hls"    -> MimeTypes.APPLICATION_M3U8
                     "mpegts" -> MimeTypes.VIDEO_MP2T
@@ -269,9 +275,12 @@ class PlayerViewModel(
     // reminder starts the new screen before the old one is gone, and the old
     // one's leave() mustn't stop the new one.
     private var visit = 0
+    // Whether a player screen is open, and the number of the latest loadStream().
+    private var onScreen = false
+    private var loadNo = 0
 
     /** The player screen opened: its number, for [leave]. */
-    fun enter(): Int = ++visit
+    fun enter(): Int { onScreen = true; return ++visit }
 
     /**
      * The player screen [closed] went away. Unless another opened since: stop
@@ -282,8 +291,11 @@ class PlayerViewModel(
      */
     fun leave(closed: Int) {
         if (closed != visit) return
+        onScreen = false
+        loadNo++   // a load still resolving finds it was dropped
         watchdogJob?.cancel()
         guideJob?.cancel()
+        nowNextJob?.cancel()
         cancelDigits()
         resetReconnect()
         _player.value?.takeIf { playingLive() }?.let { p ->
@@ -311,16 +323,19 @@ class PlayerViewModel(
             while (isActive) {
                 val events = runCatching { live.channelGuide(channelId) }.getOrDefault(emptyList())
                 if (_state.value.activeChannelId == channelId) _state.value = _state.value.copy(guide = events)
-                refreshNowNext()   // the list rows' "now" too
                 delay(10 * 60_000L)
             }
         }
-    }
-
-    private fun refreshNowNext() {
-        viewModelScope.launch {
-            val nowNext = live.getNowNext()
-            if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
+        // The list rows' "now" for every channel: on its own clock, not on each
+        // zap (holding Down through 30 channels fetched the whole map 30 times).
+        if (nowNextJob?.isActive != true) {
+            nowNextJob = viewModelScope.launch {
+                while (isActive) {
+                    val nowNext = runCatching { live.getNowNext() }.getOrDefault(emptyMap())
+                    if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
+                    delay(10 * 60_000L)
+                }
+            }
         }
     }
 

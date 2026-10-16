@@ -36,6 +36,17 @@ class UpdateRulesTest {
         assertFalse(isNewerVersion("0.3.97", "0.4.35"))
     }
 
+    @Test fun `a pre-release sits between its release and the one before`() {
+        assertFalse(isNewerVersion("0.4.35", "0.4.36-rc.1"))   // no downgrade offered
+        assertTrue(isNewerVersion("0.4.36", "0.4.36-rc.1"))
+        assertTrue(isNewerVersion("0.4.36-rc.1", "0.4.35"))
+        assertTrue(isNewerVersion("0.4.36-rc.2", "0.4.36-rc.1"))
+        assertTrue(isNewerVersion("0.4.36-rc.10", "0.4.36-rc.9"))
+        assertTrue(isNewerVersion("0.4.36-rc.1", "0.4.36-beta.3"))
+        assertFalse(isNewerVersion("0.4.36-rc.1", "0.4.36"))
+        assertFalse(isNewerVersion("v0.4.36-rc.1", "0.4.36-rc.1"))
+    }
+
     @Test fun `each check result reads as a line`() {
         assertEquals("Up to date (version 0.4.35).", checkMessage(UpdateCheck.UpToDate("0.4.35"), "0.4.35"))
         assertEquals("Version 0.4.36 is available.", checkMessage(UpdateCheck.Found(ReleaseInfo("v0.4.36", "0.4.36", "u")), "0.4.35"))

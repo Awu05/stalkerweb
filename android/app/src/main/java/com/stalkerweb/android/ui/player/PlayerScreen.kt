@@ -67,6 +67,8 @@ import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
 import com.stalkerweb.android.data.repo.nowPlaying
+import com.stalkerweb.android.data.repo.progressAt
+import com.stalkerweb.android.data.repo.progressOf
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -149,7 +151,8 @@ fun PlayerScreen(
     val isLandscape   = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTV          = rememberIsTV()
     // TV and tablets: the list sits beside the picture and stays open while you choose.
-    val wide          = isTV || configuration.screenWidthDp >= 840
+    // (The narrow side, so a phone turned sideways — often 900dp wide — isn't one.)
+    val wide          = isTV || configuration.smallestScreenWidthDp >= 600
     val state         by viewModel.state.collectAsStateWithLifecycle()
     val player        by viewModel.player.collectAsStateWithLifecycle()
 
@@ -361,8 +364,9 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     Key.MediaPlayPause             -> { a.onTogglePlayPause(); true }
                     Key.MediaPlay                  -> { c.player?.play(); true }
                     Key.MediaPause                 -> { c.player?.pause(); true }
-                    Key.DirectionUp, Key.ChannelUp       -> { if (!s.showChannelList) { a.onPreviousChannel(); true } else false }
-                    Key.DirectionDown, Key.ChannelDown   -> { if (!s.showChannelList) { a.onNextChannel(); true } else false }
+                    // D-pad Up/Down walk the list as it reads; CH+ is the next channel, as on any remote.
+                    Key.DirectionUp, Key.ChannelDown     -> { if (!s.showChannelList) { a.onPreviousChannel(); true } else false }
+                    Key.DirectionDown, Key.ChannelUp     -> { if (!s.showChannelList) { a.onNextChannel(); true } else false }
                     Key.DirectionRight             -> { if (!s.showChannelList) { a.onToggleChannelList(); true } else false }
                     Key.DirectionLeft              -> { if (s.showChannelList) { a.onCloseChannelList(); true } else false }
                     Key.Info, Key.Guide, Key.G     -> { a.onToggleGuide(); true }
@@ -652,9 +656,8 @@ private fun NowPlayingGuide(events: List<EpgEvent>?, nowSecs: Long, dark: Boolea
                     if (cur.description.isNotBlank()) {
                         Text(cur.description, color = muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    val span = (cur.endTime - cur.startTime).coerceAtLeast(1)
                     LinearProgressIndicator(
-                        progress = { ((nowSecs - cur.startTime).toFloat() / span).coerceIn(0f, 1f) },
+                        progress = { progressOf(cur, nowSecs) },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp),
                     )
                 }
@@ -1000,7 +1003,7 @@ private fun NowLine(entry: NowNextEntry?, nowSecs: Long, muted: Color) {
     if (now.title.isBlank()) return
     Text(now.title, color = muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     if (now.endTime > now.startTime) {
-        val p = ((nowSecs - now.startTime).toFloat() / (now.endTime - now.startTime)).coerceIn(0f, 1f)
+        val p = progressAt(now.startTime, now.endTime, nowSecs)
         LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(2.dp))
     }
 }

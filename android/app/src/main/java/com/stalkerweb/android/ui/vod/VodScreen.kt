@@ -540,8 +540,8 @@ private fun SeriesDialog(
                         if (list.isEmpty()) item { Text("No seasons found.", color = SwColors.Muted) }
                         items(list, key = { it.id }) { s ->
                             val listed = episodesOf(s.id)
-                            val done = if (listed != null) seasonWatchedLabel(watchedOfEpisodes(watched.toList(), show.id, s.id, listed), listed.size)
-                                       else seasonWatchedLabel(watchedInSeason(watched.toList(), show.id, s.id), null)
+                            val done = if (listed != null) seasonWatchedLabel(watchedOfEpisodes(watched, show.id, s.id, listed), listed.size)
+                                       else seasonWatchedLabel(watchedInSeason(watched, show.id, s.id), null)
                             Column(
                                 Modifier.fillMaxWidth()
                                     .then(if (s.id == list.first().id) Modifier.focusRequester(firstFocus) else Modifier)

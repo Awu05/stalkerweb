@@ -283,7 +283,8 @@ class VodManager {
   // a page, newest first, so reading only the first left a long season without
   // its early episodes (11–24 of 24), and a long-running show without its first
   // seasons. Read until the portal's total is reached or a page comes back
-  // empty; an entry on two pages is listed once.
+  // empty or with nothing new (a portal that ignores `p` sends page 1 again);
+  // an entry on two pages is listed once.
   async _allPages(showId, seasonId) {
     const MAX_PAGES = 30;   // 420 entries at 14 a page — far past any show
     const data = [];
@@ -300,10 +301,12 @@ class VodManager {
       });
       const js = r?.js || {};
       const page = Array.isArray(js.data) ? js.data : [];
+      const before = data.length;
       for (const e of page) {
         const id = String(e.id);
         if (!seen.has(id)) { seen.add(id); data.push(e); }
       }
+      if (data.length === before) break;
       const total   = parseInt(js.total_items || '0', 10) || data.length;
       const perPage = parseInt(js.max_page_items || '0', 10) || page.length || 14;
       if (!page.length || data.length >= total || p >= Math.ceil(total / perPage)) break;

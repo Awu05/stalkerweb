@@ -5,7 +5,21 @@
 // Keys are the watch keys "showId:seasonId:episodeId" (vodProgress makeVodKey).
 
 const keyOf = (showId, season, episode) => `${showId}:${season.id}:${episode.episodeId}`
-const parts = (key) => { const [, seasonId = '', episodeId = ''] = String(key).split(':'); return { seasonId, episodeId } }
+// A key's season and episode. Some portals' ids have colons of their own
+// ("123:2", "123:2:5"), so the key is matched against the show's seasons, not
+// just split; the plain split is the fallback.
+const parts = (key, showId, seasons) => {
+  const k = String(key)
+  const rest = k.startsWith(`${showId}:`) ? k.slice(String(showId).length + 1) : null
+  if (rest != null) {
+    const season = seasons
+      .filter((s) => rest.startsWith(`${s.id}:`))
+      .sort((a, b) => String(b.id).length - String(a.id).length)[0]
+    if (season) return { seasonId: String(season.id), episodeId: rest.slice(String(season.id).length + 1) }
+  }
+  const [, seasonId = '', episodeId = ''] = k.split(':')
+  return { seasonId, episodeId }
+}
 
 /**
  * What Continue does for a show:
@@ -22,7 +36,7 @@ export function continueTarget({ showId, seasons, episodesBySeason, history = []
   // "Resume" only where there's a point to resume from (it can drop off the list): else it plays from the start.
   const resumable = new Set(progress.map((e) => String(e.key)))
   const locate = (key) => {
-    const { seasonId, episodeId } = parts(key)
+    const { seasonId, episodeId } = parts(key, id, seasons)
     const season = seasons.find((s) => String(s.id) === seasonId)
     if (!season) return null
     const eps = episodesBySeason[season.id]
@@ -38,7 +52,7 @@ export function continueTarget({ showId, seasons, episodesBySeason, history = []
       const found = locate(last.key)
       if (found) return found
     }
-    after = parts(last.key)
+    after = parts(last.key, id, seasons)
   } else {
     const point = progress.find((e) => String(e.key).startsWith(`${id}:`) && !watched.has(String(e.key)))
     if (point) {
