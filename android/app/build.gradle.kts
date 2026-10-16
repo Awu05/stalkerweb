@@ -21,7 +21,7 @@ android {
         versionCode = appVersionCode.coerceAtLeast(1)
         versionName = appVersionName
 
-        buildConfigField("String", "GITHUB_REPO", "\"rangoDJ/stalkerweb\"")
+        buildConfigField("String", "GITHUB_REPO", "\"Awu05/stalkerweb\"")
     }
 
     flavorDimensions += "form"

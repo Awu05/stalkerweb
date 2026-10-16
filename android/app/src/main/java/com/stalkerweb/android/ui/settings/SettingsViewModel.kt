@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-val SETTINGS_TABS = listOf("viewers" to "Viewers", "connection" to "Connection", "links" to "Links", "playback" to "Playback", "logos" to "Logos")
+val SETTINGS_TABS = listOf("viewers" to "Viewers", "connection" to "Connection", "links" to "Links", "playback" to "Playback", "logos" to "Logos", "app" to "App")
 
 data class SettingsState(
     val tab: String = "viewers",

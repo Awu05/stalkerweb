@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -61,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.SettingsUpdate
 import com.stalkerweb.android.data.api.ViewerSummary
@@ -75,13 +77,14 @@ import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.components.parseHexColor
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
+import com.stalkerweb.android.ui.update.UpdateViewModel
 import com.stalkerweb.android.ui.utils.rememberIsTV
 
 private val VIEWER_COLORS = listOf("#5b8def", "#e5484d", "#30a46c", "#f5a524", "#8e4ec6", "#12a594", "#e93d82", "#978365")
 
-/** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos. */
+/** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos — and App (version, updates). */
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, serverUrl: String?, onOpenServer: () -> Unit, onOwnViewerDeleted: () -> Unit) {
+fun SettingsScreen(viewModel: SettingsViewModel, updates: UpdateViewModel, serverUrl: String?, onOpenServer: () -> Unit, onOwnViewerDeleted: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val viewer by viewModel.viewers.current.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -100,6 +103,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, serverUrl: String?, onOpenServe
                 "links" -> LinksTab(state, serverUrl, viewModel.viewers.savedViewerId(), viewer?.name)
                 "playback" -> PlaybackTab(viewModel, state)
                 "logos" -> LogosTab(viewModel, state)
+                "app" -> AppTab(updates)
             }
         }
     }
@@ -228,6 +232,23 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
+
+// ── App ───────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun AppTab(updates: UpdateViewModel) {
+    val status by updates.checkStatus.collectAsStateWithLifecycle()
+    val checking by updates.checking.collectAsStateWithLifecycle()
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(
+            "App updates",
+            "StalkerWeb ${if (BuildConfig.IS_TV) "TV" else "mobile"} · version ${BuildConfig.VERSION_NAME}. New releases come from github.com/${BuildConfig.GITHUB_REPO}; the app also checks each time it starts.",
+        ) {
+            OutlinedButton(onClick = updates::checkNow, enabled = !checking) { Icon(Icons.Default.SystemUpdate, null); Text(" Check for updates") }
+            status?.let { Text(it, color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
 
 @Composable
 private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, serverUrl: String?, onOpenServer: () -> Unit) {
