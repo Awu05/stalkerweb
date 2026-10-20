@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { KeyRound, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { accessLogin } from '../stalkerApi'
 import { setViewerId } from '@/lib/viewer'
 
@@ -37,8 +37,7 @@ export default function LoginPage() {
           <h1 className="text-lg font-semibold text-[var(--color-text)]">StalkerWeb</h1>
           <p className="text-sm text-[var(--color-muted)]">Enter the access key to continue.</p>
         </div>
-        <Input
-          type="password"
+        <PasswordInput
           autoFocus
           autoComplete="current-password"
           placeholder="Access key"

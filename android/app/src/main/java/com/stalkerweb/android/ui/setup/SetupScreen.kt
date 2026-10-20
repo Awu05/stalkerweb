@@ -16,7 +16,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.stalkerweb.android.ui.components.PasswordEye
+import com.stalkerweb.android.ui.components.passwordTransformation
 import androidx.compose.ui.unit.dp
 import com.stalkerweb.android.data.api.ApiError
 import com.stalkerweb.android.data.api.toApiError
@@ -61,6 +62,7 @@ fun SetupScreen(
     var port    by remember { mutableStateOf(initial.port) }
     // Only needed when the server sets ACCESS_KEY; sent as a header, never in links.
     var accessKey by remember { mutableStateOf(server.getAccessKey() ?: "") }
+    var keyShown by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(startMessage?.takeIf { it.isNotBlank() }) }
     val scope   = rememberCoroutineScope()
@@ -189,7 +191,8 @@ fun SetupScreen(
                 label = { Text("Access key (if set)") },
                 singleLine = true,
                 isError = error != null,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = passwordTransformation(keyShown),
+                trailingIcon = { PasswordEye(keyShown) { keyShown = !keyShown } },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Go,
