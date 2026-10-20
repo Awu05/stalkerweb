@@ -59,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,7 +74,9 @@ import com.stalkerweb.android.data.repo.filtersToSave
 import com.stalkerweb.android.data.repo.shownWith
 import com.stalkerweb.android.data.repo.titleKey
 import com.stalkerweb.android.ui.channels.NameDialog
+import com.stalkerweb.android.ui.components.PasswordEye
 import com.stalkerweb.android.ui.components.Pill
+import com.stalkerweb.android.ui.components.passwordTransformation
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.components.parseHexColor
 import com.stalkerweb.android.ui.components.tvFocus
@@ -309,7 +313,14 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 field("Timezone", p.timezone) { p = p.copy(timezone = it) }
                 field("Language", p.lang) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
-                field("Password", p.password) { p = p.copy(password = it) }
+                var passwordShown by remember { mutableStateOf(false) }
+                OutlinedTextField(
+                    p.password, { p = p.copy(password = it) }, singleLine = true, label = { Text("Password") },
+                    visualTransformation = passwordTransformation(passwordShown),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = { PasswordEye(passwordShown) { passwordShown = !passwordShown } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 field("Token", p.token) { p = p.copy(token = it) }
                 field("Serial number", p.serialNumber) { p = p.copy(serialNumber = it) }
                 field("Device ID", p.deviceId) { p = p.copy(deviceId = it) }

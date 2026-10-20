@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -276,7 +277,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
                   <Input id="prof-login" value={form.login} onChange={set('login')} />
                 </Field>
                 <Field label="Password" id="prof-pw">
-                  <Input id="prof-pw" type="password" value={form.password} onChange={set('password')} />
+                  <PasswordInput id="prof-pw" value={form.password} onChange={set('password')} />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
