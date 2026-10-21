@@ -965,7 +965,7 @@ export default function VodPage() {
 
   return (
     // dvh: the height left with a phone browser's bars showing (100vh ran under Safari's toolbar).
-    <div className="fade-in flex h-[calc(100dvh-3.5rem)]">
+    <div className="fade-in flex h-[calc(100dvh-3.5rem)] lg:h-dvh">
 
       {/* ── Left sidebar: categories (tablets and up; phones get the bar below) ── */}
       <aside className="hidden md:flex w-56 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">

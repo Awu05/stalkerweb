@@ -379,7 +379,7 @@ export default function ChannelsPage() {
   useEffect(() => { rowVirtualizer.measure() }, [columns, rowVirtualizer])
 
   return (
-    <div className="fade-in flex flex-col h-[calc(100dvh-3.5rem)]">
+    <div className="fade-in flex flex-col h-[calc(100dvh-3.5rem)] lg:h-dvh">
       {/* Number jump overlay */}
       {jumpDigits && <NumberJumpOverlay digits={jumpDigits} />}
 
