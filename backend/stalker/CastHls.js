@@ -15,7 +15,8 @@ const childProcess = require('child_process');
 const log = require('../logger');
 const TAG = 'cast';
 
-const SEGMENT = /^seg\d{1,6}\.ts$/;
+// seg + its number — the clock's (YYYYMMDDhhmmss…), see -hls_start_number_source.
+const SEGMENT = /^seg\d{1,20}\.ts$/;
 
 /** FFmpeg's arguments: copy the streams, 4 s segments, the last 10 listed, old ones deleted. */
 function hlsArgs(inputUrl, dir) {
