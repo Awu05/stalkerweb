@@ -964,7 +964,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
   router.get('/cast/live/:channelId/index.m3u8', async (req, res) => {
     const id = String(req.params.channelId);
     if (!/^\d+$/.test(id)) return res.status(400).send('Invalid channel ID');
-    if (!appState.castHls) return res.status(415).send('Casting live TV needs FFmpeg, which this server does not have');
+    if (!appState.castHls?.available()) return res.status(415).send('Casting live TV needs FFmpeg, which this server does not have');
     try {
       const file = await appState.castHls.playlist(id);
       appState.touchActivity?.();

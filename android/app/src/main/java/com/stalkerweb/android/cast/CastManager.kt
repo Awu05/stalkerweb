@@ -12,7 +12,10 @@ import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
+import com.google.android.gms.cast.CastStatusCodes
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.images.WebImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,12 +97,22 @@ class CastManager private constructor(private val context: Context) {
         val provider = source ?: return
         val session = currentSession() ?: return
         loadJob?.cancel()
+        val no = ++loadNo
         loadJob = scope.launch {
-            runCatching { provider() }
-                .onSuccess { load(session, it); _error.value = null }
-                .onFailure { _error.value = it.message ?: "Couldn't cast this"; Log.w(TAG, "cast source failed", it) }
+            try {
+                val media = provider()
+                if (no != loadNo) return@launch    // a newer one was asked for meanwhile
+                load(session, media)
+                _error.value = null
+            } catch (e: CancellationException) {
+                throw e                              // superseded or ended: not an error
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Couldn't cast this"
+                Log.w(TAG, "cast source failed", e)
+            }
         }
     }
+    private var loadNo = 0
 
     private fun load(session: CastSession, m: CastMedia) {
         val meta = MediaMetadata(if (m.live) MediaMetadata.MEDIA_TYPE_GENERIC else MediaMetadata.MEDIA_TYPE_MOVIE).apply {
@@ -116,7 +129,10 @@ class CastManager private constructor(private val context: Context) {
             MediaLoadRequestData.Builder().setMediaInfo(info).setAutoplay(true)
                 .setCurrentTime(if (m.live) 0 else m.startMs).build(),
         )?.setResultCallback { r ->
-            if (!r.status.isSuccess) _error.value = "The TV couldn't play this (${r.status.statusCode})"
+            val code = r.status.statusCode
+            // Replaced by the next load (a quick zap), or the session going: not the TV failing.
+            val superseded = code == CastStatusCodes.REPLACED || code == CastStatusCodes.CANCELED || code == CommonStatusCodes.INTERRUPTED
+            if (!r.status.isSuccess && !superseded) _error.value = "The TV couldn't play this ($code)"
         }
     }
 
@@ -140,13 +156,19 @@ class CastManager private constructor(private val context: Context) {
         override fun onStatusUpdated() { client()?.let { publish(it.approximateStreamPosition, it.streamDuration) } }
     }
 
+    // The TV's last real position: once a session ends, later updates read 0,
+    // and the phone picks up from this.
+    private var lastGood = RemoteState()
+
     private fun publish(pos: Long, dur: Long) {
         val c = client()
-        _remote.value = RemoteState(
+        val s = RemoteState(
             playing = c?.isPlaying == true || c?.isBuffering == true,
             positionMs = pos, durationMs = dur.coerceAtLeast(0),
             idle = c == null || c.isIdle(),
         )
+        if (s.positionMs > 0) lastGood = s
+        _remote.value = s
     }
 
     private fun RemoteMediaClient.isIdle() = playerState == com.google.android.gms.cast.MediaStatus.PLAYER_STATE_IDLE ||
@@ -185,9 +207,10 @@ class CastManager private constructor(private val context: Context) {
 
     private fun ended() {
         loadJob?.cancel()
+        _remote.value = lastGood.copy(playing = false, idle = true)   // before isCasting: its watchers read it
+        lastGood = RemoteState()
         _isCasting.value = false
         _deviceName.value = null
-        _remote.value = _remote.value.copy(playing = false, idle = true)
     }
 
     // ── The device picker ────────────────────────────────────────────────────

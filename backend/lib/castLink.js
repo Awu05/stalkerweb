@@ -5,9 +5,11 @@
 // share token (/k/<token>, lib/access.js) — never the access key — and the
 // address the app was opened on, which the device must be able to reach too.
 
+const { origin } = require('./publicUrl');
+
 /** Scheme, host and (with an access key) the share-token prefix. */
 function castBase(req, shareToken) {
-  return `${req.protocol}://${req.get('host')}${shareToken ? `/k/${shareToken}` : ''}`;
+  return `${origin(req)}${shareToken ? `/k/${shareToken}` : ''}`;
 }
 
 /** Whether a host is only this machine — a cast device can't reach that. */

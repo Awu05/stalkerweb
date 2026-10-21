@@ -8,7 +8,12 @@
 // /k/<token> link gets links under the same prefix (lib/access.js), so the
 // streams in a playlist open from wherever the playlist did.
 function baseUrl(req) {
-  return `${req.protocol}://${req.get('host')}${req.accessPrefix || ''}`;
+  return `${origin(req)}${req.accessPrefix || ''}`;
 }
 
-module.exports = { baseUrl };
+/** Scheme and host only. */
+function origin(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+module.exports = { baseUrl, origin };

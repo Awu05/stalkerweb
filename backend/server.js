@@ -321,10 +321,13 @@ const epgRoutes = require('./routes/epg')(appState);
 // re-wrapped as HLS while they're cast (FFmpeg reading this server's own
 // /proxy/stream, under the same token).
 appState.shareToken = access.shareToken;
-if (require('./stalker/FfmpegService').isAvailable()) {
+{
   const { CastHls } = require('./stalker/CastHls');
   const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
-  appState.castHls = new CastHls({ inputUrlFor: (id) => `http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}` });
+  appState.castHls = new CastHls({
+    inputUrlFor: (id) => `http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}`,
+    available: () => require('./stalker/FfmpegService').isAvailable(),   // checked when first needed
+  });
 }
 const streamRoutes = require('./routes/stream')(appState, config);
 const settingsRoutes = require('./routes/settings')(config, appState, access);

@@ -33,11 +33,13 @@ describe('cast links', () => {
 })
 
 describe('/api/stream/:id/cast and /api/vod/cast', () => {
-  let server, base
+  let server, base, stopped, ffmpeg
   beforeAll(async () => {
+    stopped = []
+    ffmpeg = true
     const appState = {
       shareToken: 'tok',
-      castHls: {},
+      castHls: { available: () => ffmpeg, stop: (id) => stopped.push(id) },
       sessionManager: { isAuthenticated: () => true },
       vodManager: { getStreamUrl: async (id) => (id === 'hls' ? 'http://cdn/x/index.m3u8?t=1' : 'http://cdn/x/movie.mkv') },
     }
@@ -64,6 +66,19 @@ describe('/api/stream/:id/cast and /api/vod/cast', () => {
 
   it('says when the address is only this machine', async () => {
     expect((await get('/api/stream/42/cast')).body.reachable).toBe(false)
+  })
+
+  it('says when the server has no FFmpeg to cast live TV with', async () => {
+    ffmpeg = false
+    try { expect((await get('/api/stream/42/cast')).status).toBe(415) } finally { ffmpeg = true }
+  })
+
+  it("stops a channel's cast stream when the sender says so", async () => {
+    const r = await new Promise((resolve, reject) => {
+      http.request(base + '/api/stream/42/cast', { method: 'DELETE' }, resolve).on('error', reject).end()
+    })
+    expect(r.statusCode).toBe(204)
+    expect(stopped).toEqual(['42'])
   })
 
   it('refuses a channel id that is not a number', async () => {
@@ -106,6 +121,9 @@ describe('CastHls', () => {
   it('re-wraps the channel from this server, copying its streams into HLS', () => {
     const a = hlsArgs('http://127.0.0.1:1/proxy/stream/5', '/tmp/x')
     expect(a).toContain('copy')
+    // A source that restarts is reopened; a restarted session numbers on from the clock.
+    expect(a[a.indexOf('-reconnect_at_eof') + 1]).toBe('1')
+    expect(a[a.indexOf('-hls_start_number_source') + 1]).toBe('datetime')
     expect(a[a.indexOf('-i') + 1]).toBe('http://127.0.0.1:1/proxy/stream/5')
     expect(a.at(-1)).toBe(path.join('/tmp/x', 'index.m3u8'))
   })
@@ -128,6 +146,16 @@ describe('CastHls', () => {
     expect(hls.segment('6', '../../etc/passwd')).toBeNull()
     expect(hls.segment('6', 'index.m3u8')).toBeNull()
     expect(hls.segment('9', 'seg00001.ts')).toBeNull()
+  })
+
+  it('stops a channel when asked, and only that one', async () => {
+    hls = make()
+    hls.playlist('11').catch(() => {})
+    hls.playlist('12').catch(() => {})
+    hls.stop('11')
+    expect(procs[0].killed).toBe(true)
+    expect(procs[1].killed).toBe(false)
+    expect(hls.size).toBe(1)
   })
 
   it('stops a channel no one asks for, and tidies its folder', async () => {
