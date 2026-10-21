@@ -5,6 +5,7 @@ import path from 'path'
 import { EventEmitter } from 'events'
 import http from 'http'
 import { spawnSync } from 'child_process'
+import { setInterval, clearInterval } from 'timers'
 import express from 'express'
 import { castBase, isLocalHost, vodContentType } from '../lib/castLink.js'
 import { CastHls, hlsArgs } from '../stalker/CastHls.js'
@@ -178,8 +179,18 @@ describe.skipIf(!hasFfmpeg)('CastHls with FFmpeg', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-real-'))
     const src = path.join(root, 'src.ts')
     spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine',
-      '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-c:a', 'aac', '-f', 'mpegts', src])
-    const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'video/mp2t'); fs.createReadStream(src).pipe(res) })
+      '-t', '120', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-c:a', 'aac', '-f', 'mpegts', src])
+    // Sent a little at a time, as a live channel comes (all at once, FFmpeg would finish and tidy up).
+    const data = fs.readFileSync(src)
+    const server = http.createServer((req, res) => {
+      res.setHeader('Content-Type', 'video/mp2t')
+      let at = 0
+      const tick = setInterval(() => {
+        if (at >= data.length || res.destroyed) { clearInterval(tick); return res.end() }
+        res.write(data.subarray(at, at += 32 * 1024))
+      }, 100)
+      req.on('close', () => clearInterval(tick))
+    })
     await new Promise((r) => server.listen(0, r))
     const hls = new CastHls({ root: path.join(root, 'cast'), inputUrlFor: () => `http://127.0.0.1:${server.address().port}/stream` })
     try {

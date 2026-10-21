@@ -67,7 +67,7 @@ class CastHls {
     const file = path.join(s.dir, 'index.m3u8');
     const deadline = this._now() + this._startTimeoutMs;
     while (!fs.existsSync(file)) {
-      if (s.exited) throw new Error('The channel stopped before it could be cast');
+      if (s.exited) throw new Error(`The channel stopped before it could be cast${s.lastError ? ` (${s.lastError})` : ''}`);
       if (this._now() > deadline) { this._stop(id, 'no playlist in time'); throw new Error('The channel took too long to start'); }
       await new Promise((r) => setTimeout(r, this._pollMs));
     }
@@ -102,8 +102,13 @@ class CastHls {
     const input = this._inputUrlFor(id);
     log.info(TAG, `ch ${id}: casting as HLS`);
     const proc = this._spawn('ffmpeg', hlsArgs(input, dir), { stdio: ['ignore', 'ignore', 'pipe'] });
-    const s = { proc, dir, lastUsed: this._now(), exited: false };
-    proc.stderr?.on('data', (d) => { const t = String(d).trim(); if (t) log.debug(TAG, t); });
+    const s = { proc, dir, lastUsed: this._now(), exited: false, lastError: '' };
+    proc.stderr?.on('data', (d) => {
+      const t = String(d).trim();
+      if (!t) return;
+      s.lastError = t.split(/\r?\n/).pop();
+      log.debug(TAG, t);
+    });
     const ended = (why) => {
       s.exited = true;
       if (this._sessions.get(id) === s) this._stop(id, why);
