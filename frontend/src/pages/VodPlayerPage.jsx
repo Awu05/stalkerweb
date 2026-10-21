@@ -414,7 +414,7 @@ export default function VodPlayerPage() {
   useEffect(() => { if (!duration) setScrubPct(null) }, [duration])
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem)] bg-black">
+    <div className="flex flex-col lg:flex-row h-[calc(100dvh-3.5rem)] lg:h-dvh bg-black">
 
       {/* ── Video panel ── */}
       <div
