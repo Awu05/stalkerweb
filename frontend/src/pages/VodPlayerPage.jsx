@@ -18,6 +18,7 @@ import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
 import { releaseMedia } from '@/lib/mediaRelease'
+import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import {
   makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
@@ -41,6 +42,8 @@ export default function VodPlayerPage() {
   const episodeTitle = searchParams.get('episodeTitle') || ''
 
   const displayTitle = episodeTitle ? `${title} · ${episodeTitle}` : title
+  const displayTitleRef = useRef(displayTitle)
+  displayTitleRef.current = displayTitle
 
   // This movie or show as a My List title, from the player link.
   const decoded = (k) => { const v = searchParams.get(k); try { return v ? decodeURIComponent(v) : '' } catch { return v || '' } }
@@ -318,6 +321,8 @@ export default function VodPlayerPage() {
       })
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {
+          const t = hlsErrorText(data)
+          reportPlayerError({ title: displayTitleRef.current, engine: 'hls.js', kind: t.kind, detail: t.detail })
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError()
           } else {
@@ -350,6 +355,12 @@ export default function VodPlayerPage() {
     const onPlay   = () => { setPlaying(true); setStatus('playing') }
     const onPause  = () => { setPlaying(false); setStatus('paused') }
     const onEnded  = () => { setPlaying(false); setStatus('paused'); if (nextRef.current) setUpNext(nextRef.current) }
+    // The <video>'s own error — to the server log (lib/playerReport.js).
+    const onError  = () => {
+      const text = mediaErrorText(v)
+      if (text) reportPlayerError({ title: displayTitleRef.current, engine: v.src.startsWith('blob:') ? 'hls.js' : 'native', kind: 'video error', detail: text })
+    }
+    v.addEventListener('error',            onError)
     v.addEventListener('timeupdate',       onTime)
     v.addEventListener('durationchange',   onDur)
     v.addEventListener('play',             onPlay)
@@ -361,6 +372,7 @@ export default function VodPlayerPage() {
       v.removeEventListener('play',           onPlay)
       v.removeEventListener('pause',          onPause)
       v.removeEventListener('ended',          onEnded)
+      v.removeEventListener('error',          onError)
     }
   }, [])
 
