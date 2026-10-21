@@ -15,6 +15,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.stalkerweb.android.cast.CastManager
+import com.stalkerweb.android.cast.castMediaOf
+import com.stalkerweb.android.cast.resumeAfterCast
 import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.SaveWatchRequest
 import com.stalkerweb.android.data.api.VodEpisode
@@ -78,6 +81,14 @@ class VodPlayerViewModel(
 
     private val _player = MutableStateFlow<Player?>(null)
     val player: StateFlow<Player?> = _player.asStateFlow()
+
+    /** Chromecast (null without Google Play services' Cast). While casting the TV plays and the phone waits. */
+    val cast: CastManager? = runCatching { CastManager.get(application) }.getOrNull()?.takeIf { it.available }
+    private var castSourceNo = 0
+    private val casting get() = cast?.isCasting?.value == true
+    // Where the TV got to when casting ended: the phone resumes there (the save
+    // of it may not be back from the server yet).
+    private var afterCastMs: Long? = null
 
     private val _state = MutableStateFlow(VodPlayerState())
 
@@ -158,12 +169,40 @@ class VodPlayerViewModel(
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
         watch.load()
         load(params)
-        // Every 10 s while playing (as the web does).
+        // Every 10 s while playing (as the web does) — on the TV, from its position.
         saver = viewModelScope.launch {
             while (isActive) {
                 delay(10_000)
-                if (_player.value?.isPlaying == true) persist()
+                if (casting) { if (cast?.remote?.value?.playing == true) persistFromTv() }
+                else if (_player.value?.isPlaying == true) persist()
             }
+        }
+        cast?.let { cm ->
+            viewModelScope.launch {
+                var was = cm.isCasting.value
+                cm.isCasting.collect { now ->
+                    if (now && !was) { persist(); _player.value?.pause() }
+                    if (!now && was) {
+                        // Back on the phone, from where the TV got to (saved, so the resume finds it).
+                        persistFromTv()
+                        cm.remote.value.let { afterCastMs = resumeAfterCast(it.positionMs, it.durationMs) }
+                        _state.value.params?.let { mediaKey = null; resumedKey = null; load(it) }
+                    }
+                    was = now
+                }
+            }
+        }
+    }
+
+    // What the Cast button sends: this title, from where the phone is (or where it was left off).
+    private fun castSource(params: PlayerParams) {
+        val cm = cast ?: return
+        castSourceNo = cm.setSource {
+            val p = _player.value
+            val here = if (p != null && p.currentMediaItem?.mediaId == params.key) p.currentPosition
+                       else ((watch.progressFor(params.key)?.position ?: 0.0) * 1000).toLong()
+            val link = vod.castLink(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId)
+            castMediaOf(link, params.title, params.episodeTitle.ifBlank { null }, links.absoluteImage(params.screenshotUrl), here)
         }
     }
 
@@ -174,6 +213,8 @@ class VodPlayerViewModel(
         // Next pressed twice: only the last title's stream may start.
         loadJob?.cancel()
         pendingPlay = null
+        castSource(params)
+        if (casting) { _player.value?.pause(); _state.value = _state.value.copy(loading = false); return }   // it's on the TV
         loadJob = viewModelScope.launch {
             runCatching { vod.resolveVodStreamUrl(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId) }
                 .onSuccess { url ->
@@ -204,6 +245,12 @@ class VodPlayerViewModel(
         val key = mediaKey ?: return
         if (resumedKey == key) return
         resumedKey = key
+        afterCastMs?.let { ms ->
+            afterCastMs = null
+            p.seekTo(ms)
+            _state.value = _state.value.copy(resumedFrom = ms / 1000.0)
+            return
+        }
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
         val saved = watch.progressFor(key) ?: return
         val at = WatchRules.resumeAt(saved.position, duration) ?: return
@@ -224,6 +271,18 @@ class VodPlayerViewModel(
         val params = _state.value.params ?: return
         if (mediaKey == null || mediaKey != params.key || p.currentMediaItem?.mediaId != params.key) return
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
+        save(params, p.currentPosition / 1000.0, duration)
+    }
+
+    /** Saves where the TV is in this title (it plays the one on screen). */
+    private fun persistFromTv() {
+        val params = _state.value.params ?: return
+        val r = cast?.remote?.value ?: return
+        if (r.durationMs <= 0 || r.positionMs <= 0) return
+        save(params, r.positionMs / 1000.0, r.durationMs / 1000.0)
+    }
+
+    private fun save(params: PlayerParams, position: Double, duration: Double) {
         val s = _state.value
         val last = params.isEpisode && s.seasons != null && isLastEpisode(s.seasons, s.episodes, params.seasonId, params.episodeId)
         val stored = params.copy(screenshotUrl = links.relativeImage(params.screenshotUrl))
@@ -233,7 +292,7 @@ class VodPlayerViewModel(
             episodeTitle = params.episodeTitle,
             screenshotUrl = stored.screenshotUrl,
             params = stored.toQuery(),
-            position = p.currentPosition / 1000.0,
+            position = position,
             duration = duration,
             lastEpisode = last,
         ))
@@ -263,7 +322,7 @@ class VodPlayerViewModel(
     /** Another episode of the same show, in place. */
     fun playEpisode(season: VodSeason, episode: VodEpisode) {
         val params = _state.value.params ?: return
-        persist()
+        if (casting) persistFromTv() else persist()
         mediaKey = null
         load(params.copy(
             series = episode.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = episode.episodeId,
@@ -294,7 +353,8 @@ class VodPlayerViewModel(
     fun toggleMyList() { myListItem()?.let(watch::toggleMyList) }
 
     override fun onCleared() {
-        persist()
+        if (casting) persistFromTv() else persist()
+        cast?.clearSource(castSourceNo)
         saver?.cancel()
         _player.value?.removeListener(listener)
         _player.value?.pause()

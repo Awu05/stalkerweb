@@ -52,8 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.mediarouter.app.MediaRouteButton
-import com.google.android.gms.cast.framework.CastButtonFactory
+import com.stalkerweb.android.ui.components.CastButton
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -100,6 +100,7 @@ private class LiveControls(
     val activeId: String,
     val isPlaying: Boolean,
     val isBuffering: Boolean,
+    val castingTo: String? = null,   // the TV it plays on, while casting
     val playerError: String?,
     val showControls: Boolean,
     val nowSecs: Long,
@@ -155,6 +156,11 @@ fun PlayerScreen(
     val wide          = isTV || configuration.smallestScreenWidthDp >= 600
     val state         by viewModel.state.collectAsStateWithLifecycle()
     val player        by viewModel.player.collectAsStateWithLifecycle()
+    val castDevice    = viewModel.castManager?.deviceName?.collectAsStateWithLifecycle()?.value
+    LaunchedEffect(viewModel.castManager) {
+        val cm = viewModel.castManager ?: return@LaunchedEffect
+        cm.error.collect { msg -> if (msg != null) { android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show(); cm.clearError() } }
+    }
 
     var showControls by remember { mutableStateOf(true) }
     var isPlaying    by remember { mutableStateOf(false) }
@@ -281,6 +287,7 @@ fun PlayerScreen(
 
     val controls = LiveControls(
         state = state, player = player, displayName = displayName, activeId = activeId,
+        castingTo = if (state.isCasting) castDevice ?: "TV" else null,
         isPlaying = isPlaying, isBuffering = isBuffering, playerError = playerError, showControls = showControls,
         nowSecs = nowSecs, audio = trackOptions(tracks, C.TRACK_TYPE_AUDIO), subtitles = trackOptions(tracks, C.TRACK_TYPE_TEXT),
         isTV = isTV,
@@ -380,7 +387,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
     ) {
         ExoPlayerSurface(player = c.player, modifier = Modifier.fillMaxSize())
 
-        PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry)
+        PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry, castingTo = c.castingTo)
 
         JumpBubble(s.jumpDigits, Modifier.align(Alignment.TopCenter).padding(top = 72.dp))
 
@@ -518,7 +525,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
         ) {
             ExoPlayerSurface(player = c.player, modifier = Modifier.fillMaxSize())
 
-            PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry)
+            PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry, castingTo = c.castingTo)
 
             if (c.showControls) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
@@ -754,27 +761,6 @@ private fun ExoPlayerSurface(player: Player?, modifier: Modifier) {
 }
 
 @Composable
-private fun CastButton(castManager: com.stalkerweb.android.cast.CastManager) {
-    AndroidView(
-        factory = { ctx ->
-            // MediaRouteButton's constructor requires a Theme.AppCompat-descendant
-            // context; the app's host theme is a framework Material theme, so it
-            // throws and would crash the player on open. Guard the whole creation
-            // so any Cast/theme failure falls back to an empty view instead of
-            // crashing (the cast button simply won't render in that case).
-            runCatching {
-                MediaRouteButton(ctx).also { btn ->
-                    CastButtonFactory.setUpMediaRouteButton(ctx, btn)
-                }
-            }.getOrElse { android.view.View(ctx) }
-        },
-        modifier = Modifier
-            .size(44.dp)
-            .padding(10.dp),
-    )
-}
-
-@Composable
 private fun SleepTimerChip(endsAt: Long?) {
     if (endsAt == null) return
     var remaining by remember { mutableLongStateOf(0L) }
@@ -801,7 +787,16 @@ private fun SleepTimerChip(endsAt: Long?) {
 }
 
 @Composable
-private fun PlaybackOverlay(isBuffering: Boolean, playerError: String?, onRetry: () -> Unit) {
+private fun PlaybackOverlay(isBuffering: Boolean, playerError: String?, onRetry: () -> Unit, castingTo: String? = null) {
+    if (castingTo != null) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.CastConnected, null, tint = Color.White, modifier = Modifier.size(40.dp))
+                Text("Playing on $castingTo", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        return
+    }
     if (isBuffering && playerError == null) {
         Box(Modifier.fillMaxSize()) {
             CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)

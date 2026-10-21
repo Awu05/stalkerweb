@@ -317,6 +317,15 @@ const downloadsRoutes = require('./routes/downloads')(downloadManager, appState)
 
 const channelRoutes = require('./routes/channels')(appState);
 const epgRoutes = require('./routes/epg')(appState);
+// Cast devices: links under the playback-only share token, and live channels
+// re-wrapped as HLS while they're cast (FFmpeg reading this server's own
+// /proxy/stream, under the same token).
+appState.shareToken = access.shareToken;
+if (require('./stalker/FfmpegService').isAvailable()) {
+  const { CastHls } = require('./stalker/CastHls');
+  const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
+  appState.castHls = new CastHls({ inputUrlFor: (id) => `http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}` });
+}
 const streamRoutes = require('./routes/stream')(appState, config);
 const settingsRoutes = require('./routes/settings')(config, appState, access);
 const proxyRoutes = require('./routes/proxy')(appState);
@@ -494,6 +503,7 @@ function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
   xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   watchStore.flush();      // positions from the last few seconds
+  appState.castHls?.stopAll();   // FFmpeg for channels being cast
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();

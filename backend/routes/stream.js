@@ -9,6 +9,7 @@
 const express = require('express');
 const router = express.Router();
 const log = require('../logger');
+const { castLink } = require('../lib/castLink');
 const TAG = 'stream';
 
 module.exports = function streamRoutes(appState) {
@@ -32,6 +33,16 @@ module.exports = function streamRoutes(appState) {
   // the authenticated proxy URL.  All stream resolution — create_link,
   // matrix, localhost rewriting, HLS playlist rewriting — is handled by
   // /proxy/stream/:channelId which runs server-side with the portal session.
+  // A cast device's link for a live channel: the channel as HLS (CastHls),
+  // under the playback-only share token. Nothing is resolved here — the
+  // device's first request starts it.
+  router.get('/:channelId/cast', (req, res) => {
+    const rawId = req.params.channelId;
+    if (!/^\d+$/.test(rawId)) return res.status(400).json({ error: 'Invalid channel ID' });
+    if (!appState.castHls) return res.status(415).json({ error: 'Casting live TV needs FFmpeg, which this server does not have' });
+    res.json(castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
+  });
+
   router.get('/:channelId', async (req, res) => {
     try {
       await ensureSession();

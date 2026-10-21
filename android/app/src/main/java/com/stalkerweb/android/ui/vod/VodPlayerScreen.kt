@@ -35,6 +35,14 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.Forward30
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material3.Slider
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -73,11 +81,43 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.stalkerweb.android.data.repo.PlayerParams
+import com.stalkerweb.android.cast.CastManager
+import com.stalkerweb.android.cast.RemoteState
+import com.stalkerweb.android.ui.components.CastButton
 import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.delay
+
+/** While casting: the TV's name, where it is in the title, and its controls. */
+@Composable
+private fun CastingControls(cast: CastManager, modifier: Modifier) {
+    val device by cast.deviceName.collectAsStateWithLifecycle()
+    val r: RemoteState by cast.remote.collectAsStateWithLifecycle()
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    Column(modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(Icons.Default.CastConnected, null, tint = Color.White, modifier = Modifier.size(40.dp))
+        Text("Playing on ${device ?: "TV"}", color = Color.White, style = MaterialTheme.typography.titleSmall)
+        if (r.durationMs > 0) {
+            Slider(
+                value = dragging ?: (r.positionMs.toFloat() / r.durationMs).coerceIn(0f, 1f),
+                onValueChange = { dragging = it },
+                onValueChangeFinished = { dragging?.let { cast.seekTo((it * r.durationMs).toLong()) }; dragging = null },
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White),
+                modifier = Modifier.widthIn(max = 520.dp),
+            )
+            Text("${clock(r.positionMs / 1000.0)} / ${clock(r.durationMs / 1000.0)}", color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            IconButton(onClick = { cast.seekBy(-10_000) }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = Color.White) }
+            IconButton(onClick = cast::togglePlay, modifier = Modifier.size(56.dp)) {
+                Icon(if (r.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (r.playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(40.dp))
+            }
+            IconButton(onClick = { cast.seekBy(30_000) }) { Icon(Icons.Default.Forward30, "Forward 30 seconds", tint = Color.White) }
+        }
+    }
+}
 
 private fun clock(secs: Double): String {
     val s = secs.toLong()
@@ -105,6 +145,12 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
     val progressByKey = remember(watchState.progress) { watchState.progress.associateBy { it.key } }
     val inMyList = watchState.list.any { it.id == p.videoId }
+    val cast = viewModel.cast
+    val casting = cast?.isCasting?.collectAsStateWithLifecycle()?.value == true
+    val castContext = LocalContext.current
+    LaunchedEffect(cast) {
+        cast?.error?.collect { msg -> if (msg != null) { android.widget.Toast.makeText(castContext, msg, android.widget.Toast.LENGTH_LONG).show(); cast.clearError() } }
+    }
 
     LaunchedEffect(Unit) { viewModel.init(params) }
     val toastContext = LocalContext.current
@@ -141,7 +187,10 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
             )
         }
 
-        if (state.loading && state.error == null) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        // On the TV: what's playing there, and its controls.
+        if (casting && cast != null) CastingControls(cast, Modifier.align(Alignment.Center))
+
+        if (state.loading && state.error == null && !casting) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
 
         state.error?.let { msg ->
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -153,7 +202,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         }
 
         // Top bar, shown with the player's controls.
-        if (controlsVisible || state.error != null) {
+        if (controlsVisible || state.error != null || casting) {
             Row(
                 Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).statusBarsPadding().padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -169,6 +218,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     IconButton(onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
                     IconButton(onClick = { panelOpen = !panelOpen }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
                 }
+                if (!isTV && cast != null) CastButton(cast)
                 IconButton(onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
                 IconButton(onClick = viewModel::toggleMyList) {
                     Icon(if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,

@@ -123,6 +123,9 @@ class LiveRepository(
      * by its extension. On any failure we fall back to the direct proxy URL
      * assuming HLS, so playback still attempts rather than dead-ending.
      */
+    /** The link a cast device opens for this channel (as HLS). */
+    suspend fun castLink(channelId: String) = apis.get().getChannelCastLink(channelId)
+
     suspend fun resolveStream(channelId: String): StreamInfo {
         links.ensureShareToken()
         val base = links.base()

@@ -62,6 +62,10 @@ interface StalkerApi {
     @GET("api/stream/{channelId}")
     suspend fun getStream(@Path("channelId") channelId: String): StreamResponse
 
+    // A cast device's link for a channel: HLS, under the playback-only token.
+    @GET("api/stream/{channelId}/cast")
+    suspend fun getChannelCastLink(@Path("channelId") channelId: String): CastLink
+
     @GET("api/settings")
     suspend fun getSettings(): SettingsResponse
 
@@ -132,6 +136,16 @@ interface StalkerApi {
         @Query("seasonId") seasonId: String = "",
         @Query("episodeId") episodeId: String = "",
     ): VodStreamResponse
+
+    // A cast device's link for a movie or episode (as api/vod/stream).
+    @GET("api/vod/cast")
+    suspend fun getVodCastLink(
+        @Query("videoId") videoId: String,
+        @Query("cmd") cmd: String = "",
+        @Query("series") series: String = "",
+        @Query("seasonId") seasonId: String = "",
+        @Query("episodeId") episodeId: String = "",
+    ): CastLink
 
     // ── What the viewer watched (per viewer and portal) ────────────────────────
     @GET("api/vod/watch")
