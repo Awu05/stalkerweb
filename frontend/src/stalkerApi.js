@@ -174,6 +174,18 @@ export const reorderFavoriteGroups   = (order) => _put('/favorites/groups/order'
 
 // ── Stream ────────────────────────────────────────────────────────────────
 export const getStreamUrl = (channelId) => _get(`/stream/${channelId}`)
+// The links a cast device (Chromecast, Apple TV) opens itself: { url, contentType, live, reachable }.
+export const getChannelCastLink = (channelId) => _get(`/stream/${encodeURIComponent(channelId)}/cast`)
+// The TV left the channel: the server stops repackaging it (and lets go of its portal connection).
+export const stopChannelCast = (channelId) => _delete(`/stream/${encodeURIComponent(channelId)}/cast`).catch(() => {})
+export const getVodCastLink = ({ videoId, cmd = '', series = 0, seasonId = '', episodeId = '' }) => {
+  const p = new URLSearchParams({ videoId: String(videoId) })
+  if (cmd)       p.set('cmd', cmd)
+  if (series)    p.set('series', String(series))
+  if (seasonId)  p.set('seasonId', String(seasonId))
+  if (episodeId) p.set('episodeId', String(episodeId))
+  return _get(`/vod/cast?${p}`)
+}
 export const streamKeepalive = () => _get('/stream/keepalive')
 
 // ── VOD progress (Continue Watching) ─────────────────────────────────────

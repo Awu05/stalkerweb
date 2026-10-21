@@ -8,7 +8,11 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { useCasting } from '@/lib/useCasting'
+import { resumeAfterCast } from '@/lib/cast'
+import { CastButtons, CastingOverlay } from '@/components/CastControls'
+import { formatTime } from '@/lib/formatTime'
 import EpisodePanel from '@/components/EpisodePanel'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
@@ -19,15 +23,6 @@ import {
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
-function formatTime(secs) {
-  if (!isFinite(secs) || secs < 0) return '0:00'
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = Math.floor(secs % 60)
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`
-}
 
 export default function VodPlayerPage() {
   const [searchParams] = useSearchParams()
@@ -58,6 +53,14 @@ export default function VodPlayerPage() {
 
   const videoRef     = useRef(null)
   const hlsRef       = useRef(null)
+  // Casting (lib/useCasting.js): on a Chromecast the TV plays and this page
+  // waits, paused; AirPlay plays the <video>'s own source on the Apple TV.
+  const onTvRef      = useRef(false)
+  const [onTv, setOnTv] = useState(false)
+  const castRemoteRef = useRef({ playing: false, time: 0, duration: 0 })
+  const afterCastRef  = useRef(null)    // where the TV got to: the stream reloaded here resumes there
+  const releasedAtRef = useRef(null)    // { key, at } — where this page was when it let go for the TV
+  const onAirplayRef  = useRef(false)
   const containerRef = useRef(null)
   const hideTimer    = useRef(null)
   const volumeRef    = useRef(80)
@@ -196,8 +199,19 @@ export default function VodPlayerPage() {
 
   // Save every 10s while playing, and once more on unmount / title change.
   useEffect(() => {
-    const id = setInterval(() => { if (!videoRef.current?.paused) persist() }, 10_000)
-    return () => { clearInterval(id); persist() }
+    const id = setInterval(() => {
+      if (onTvRef.current) {
+        const r = castRemoteRef.current
+        if (r.playing && r.duration > 0 && r.time > 0) saveVodProgress({ ...metaRef.current, position: r.time, duration: r.duration })
+      } else if (!videoRef.current?.paused) persist()
+    }, 10_000)
+    return () => {
+      clearInterval(id)
+      if (onTvRef.current) {
+        const r = castRemoteRef.current
+        if (r.duration > 0 && r.time > 0) saveVodProgress({ ...metaRef.current, position: r.time, duration: r.duration })
+      } else persist()
+    }
   }, [persist, progressKey])
 
   // Resume once per title, after the duration is known. Re-runs if the user
@@ -205,6 +219,14 @@ export default function VodPlayerPage() {
   const resumedKeyRef = useRef(null)
   useEffect(() => {
     const v = videoRef.current
+    if (v && duration && mediaKey === progressKey && afterCastRef.current?.key === progressKey) {
+      const at = afterCastRef.current.at
+      afterCastRef.current = null
+      resumedKeyRef.current = progressKey
+      try { v.currentTime = at } catch { /* seek rejected */ }
+      setResumedFrom(at)
+      return
+    }
     if (!v || !duration || mediaKey !== progressKey || resumedKeyRef.current === progressKey) return
     resumedKeyRef.current = progressKey
     const saved = getVodProgress(progressKey)
@@ -235,6 +257,7 @@ export default function VodPlayerPage() {
   // Fetch + load stream
   useEffect(() => {
     if (!videoId) { setStatus('error'); setErrorMsg('No video ID provided.'); return }
+    if (onTv) return
 
     let cancelled = false
     setStatus('loading')
@@ -254,15 +277,15 @@ export default function VodPlayerPage() {
       })
 
     return () => { cancelled = true }
-  }, [videoId, cmd, seriesNo, seasonId, episodeId])
+  }, [videoId, cmd, seriesNo, seasonId, episodeId, onTv])
 
   function loadStreamUrl(url) {
     const video = videoRef.current
-    if (!video) return
+    if (!video || onAirplayRef.current) return
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
-    const tryPlay = () => leftRef.current ? Promise.resolve() :
+    const tryPlay = () => leftRef.current || onTvRef.current ? Promise.resolve() :
       video.play()
         .then(() => { setStatus('playing'); setPlaying(true) })
         .catch(() => {
@@ -382,7 +405,57 @@ export default function VodPlayerPage() {
     return () => { v.removeEventListener('enterpictureinpicture', enter); v.removeEventListener('leavepictureinpicture', leave) }
   }, [])
 
+  const cast = useCasting({
+    videoRef,
+    mediaKey: progressKey,
+    ready: mediaKey === progressKey,   // AirPlay's link once this page's own stream has resolved (not both at once)
+    getLink: () => getVodCastLink({ videoId, cmd, series: seriesNo, seasonId, episodeId }),
+    getMeta: () => {
+      const v = videoRef.current
+      // Where this title is: the page's position if it's the one loaded, else where it was left off.
+      const here = v && mediaKeyRef.current === progressKey ? v.currentTime
+        : releasedAtRef.current?.key === progressKey ? releasedAtRef.current.at
+        : (getVodProgress(progressKey)?.position || 0)
+      return { title, subtitle: episodeTitle, image: myListItem.screenshotUrl, startSecs: here }
+    },
+    // The TV plays it: this page lets go of the stream (some allow one
+    // connection per link), remembering where it was.
+    onTvStart: () => {
+      persist()
+      const v = videoRef.current
+      if (v && mediaKeyRef.current === progressKey) releasedAtRef.current = { key: progressKey, at: v.currentTime }
+      onTvRef.current = true
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      releaseMedia(v)
+      mediaKeyRef.current = null
+      setMediaKey(null)
+      setOnTv(true)
+    },
+    onTvEnd: (time, dur) => {
+      onTvRef.current = false
+      releasedAtRef.current = null
+      const at = resumeAfterCast(time, dur)
+      afterCastRef.current = at != null ? { key: progressKey, at } : null
+      resumedKeyRef.current = null
+      setOnTv(false)   // the stream loads again, and resumes there
+    },
+    toNative: (url) => {
+      const v = videoRef.current
+      if (!v) return
+      // This title's position, or — a new episode — where it was left off.
+      const saved = getVodProgress(progressKey)?.position || 0
+      const at = mediaKeyRef.current === progressKey ? v.currentTime : saved >= VOD_RESUME_MIN_SECS ? saved : 0
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      v.src = url
+      if (at > 0) v.addEventListener('loadedmetadata', () => { try { v.currentTime = at } catch { /* seek rejected */ } }, { once: true })
+      v.play().catch(() => {})
+    },
+  })
+  castRemoteRef.current = cast.remote
+  onAirplayRef.current = cast.mode === 'airplay'
+
   function togglePlayPause() {
+    if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return
     if (v.paused) v.play().catch(() => {})
     else v.pause()
@@ -465,6 +538,7 @@ export default function VodPlayerPage() {
           onClick={togglePlayPause}
         >
           <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
+          <CastingOverlay cast={cast} />
         </div>
 
         {/* Loading overlay */}
@@ -516,10 +590,10 @@ export default function VodPlayerPage() {
           </div>
         )}
 
-        {/* Controls bar */}
+        {/* Controls bar (the local video's — hidden while a Chromecast plays it: the overlay has the TV's) */}
         <div className={cn(
           'absolute bottom-0 inset-x-0 z-20 transition-opacity duration-300',
-          showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
+          onTv ? 'hidden' : showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
           {/* Seek bar */}
           {duration > 0 && (
@@ -578,6 +652,7 @@ export default function VodPlayerPage() {
                 <ListVideo size={18} />
               </button>
             )}
+            <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (
               <button
                 onClick={togglePiP}
