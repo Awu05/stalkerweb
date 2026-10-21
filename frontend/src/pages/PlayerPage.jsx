@@ -21,6 +21,7 @@ import { showToast } from '@/lib/toast'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
 import { releaseMedia } from '@/lib/mediaRelease'
+import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import { useCasting } from '@/lib/useCasting'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
 
@@ -720,10 +721,25 @@ export default function PlayerPage() {
   // the attach effect re-runs and hits /proxy/stream again — the server then
   // resolves a fresh create_link (new token / CDN host), exactly like a manual
   // page refresh, but transparently and with exponential backoff.
+  //
+  // What made it reconnect goes to the server log (lib/playerReport.js): on a
+  // phone it's otherwise out of sight. The last few warnings ride along with
+  // the final "gave up", for a stream that stalls without a fatal error.
+  const engineRef = useRef('hls.js')
+  const recentIssuesRef = useRef([])
+  const reportIssue = useCallback((engine, kind, detail, extra = {}) => {
+    const ch = activeChannelRef.current
+    reportPlayerError({ channelId: ch?.uniqueId, title: ch?.name, engine, kind, detail, attempt: reconnectAttempts.current, ...extra })
+  }, [])
+  const noteIssue = useCallback((text) => {
+    recentIssuesRef.current = [...recentIssuesRef.current.slice(-4), text]
+  }, [])
+
   const recoverStream = useCallback(() => {
     if (recoveringRef.current) return
     if (typeof document !== 'undefined' && document.hidden) return // don't fight background-pause
     if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+      reportIssue(engineRef.current, 'gave up', `after ${MAX_RECONNECT_ATTEMPTS} reconnects; last: ${recentIssuesRef.current.join(' | ') || 'nothing reported'}`, { gaveUp: true })
       // A permanently dead link (portal removed it, account expired) would
       // otherwise retry every ~15s forever with no way for the user to tell
       // the difference from a normal transient drop. Give up and surface an
@@ -748,7 +764,7 @@ export default function PlayerPage() {
       recoveringRef.current = false
       setReloadKey(k => k + 1)
     }, delay)
-  }, [])
+  }, [reportIssue])
 
   // Attach HLS when streamUrl changes
   useEffect(() => {
@@ -782,7 +798,22 @@ export default function PlayerPage() {
     // For the live engines, the upstream pipe closing surfaces as 'ended' — treat
     // it as a drop and reconnect rather than stopping. ('native' is progressive,
     // where 'ended' is a real end-of-file, so it's excluded.)
-    const onEnded = () => { if (streamType === 'mpegts' || streamType === 'hls') recoverStream() }
+    const onEnded = () => {
+      if (streamType !== 'mpegts' && streamType !== 'hls') return
+      noteIssue('ended')
+      reportIssue(engineRef.current, 'ended', 'the stream ended — reconnecting')
+      recoverStream()
+    }
+    // The <video>'s own error (a format the browser can't decode shows here).
+    const onVideoError = () => {
+      const text = mediaErrorText(video)
+      if (!text) return
+      noteIssue(text)
+      reportIssue(engineRef.current, 'video error', text)
+    }
+    video.addEventListener('error', onVideoError)
+    engineRef.current = airplayUrl ? 'native (AirPlay)' : streamType === 'native' ? 'native' : streamType === 'mpegts' ? 'mpegts.js' : 'hls.js'
+    recentIssuesRef.current = []
     video.addEventListener('playing', onPlaying)
     video.addEventListener('ended', onEnded)
 
@@ -842,6 +873,8 @@ export default function PlayerPage() {
       player.attachMediaElement(video)
       player.on(mpegts.Events.ERROR, (type, detail, info) => {
         console.error('[mpegts] playback error', type, detail, info)
+        noteIssue(`mpegts.js ${type}: ${detail}`)
+        reportIssue('mpegts.js', String(type), [detail, info?.msg].filter(Boolean).join(': '))
         // A live MPEG-TS pipe dropped (token/CDN/ffmpeg) — reconnect with a fresh
         // link instead of dead-ending until a manual refresh.
         recoverStream()
@@ -889,7 +922,12 @@ export default function PlayerPage() {
           tryPlay()
         })
         hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (!data.fatal) return
+          if (!data.fatal) { noteIssue(`hls.js ${data.details}`); return }
+          {
+            const t = hlsErrorText(data)
+            noteIssue(`hls.js ${t.kind}: ${t.detail}`)
+            reportIssue('hls.js', t.kind, t.detail)
+          }
 
           // The server answered with an HTTP error — almost always the CDN
           // rejecting an expired stream token (proxied back as 502). Retrying
@@ -958,13 +996,14 @@ export default function PlayerPage() {
       active = false
       video.removeEventListener('playing', onPlaying)
       video.removeEventListener('ended', onEnded)
+      video.removeEventListener('error', onVideoError)
       teardown()
       // Paused, its source and connection let go — or a direct stream plays on
       // with nothing on screen (lib/mediaRelease.js). Not when AirPlay has just
       // put its own link in (the next run plays that).
       if (!keepSrcRef.current && !onAirplayRef.current) releaseMedia(video)
     }
-  }, [streamUrl, streamType, reloadKey, recoverStream, onTv, airplayUrl])
+  }, [streamUrl, streamType, reloadKey, recoverStream, onTv, airplayUrl, noteIssue, reportIssue])
 
   // Stall watchdog: a frozen live stream frequently emits no error at all (the
   // MSE buffer just stops, or the upstream silently closes). If the playback
@@ -985,14 +1024,20 @@ export default function PlayerPage() {
         buffered: rangesOf(video.buffered),
       })
       state = next
-      if (action === 'reconnect') recoverStream()
+      if (action === 'reconnect') {
+        const b = rangesOf(video.buffered).map(([s, e]) => `${s.toFixed(1)}–${e.toFixed(1)}`).join(' ') || 'nothing'
+        const why = `frozen at ${video.currentTime.toFixed(1)}s, readyState ${video.readyState}, buffered ${b}`
+        noteIssue(why)
+        reportIssue(engineRef.current, 'stalled', why)
+        recoverStream()
+      }
       else if (action?.jumpTo !== undefined) {
         console.info(`[player] frozen at ${video.currentTime.toFixed(2)}s — jumping to ${action.jumpTo.toFixed(2)}s`)
         video.currentTime = action.jumpTo
       }
     }, 2000)
     return () => clearInterval(id)
-  }, [status, recoverStream])
+  }, [status, recoverStream, noteIssue, reportIssue])
 
   useEffect(() => {
     if (!videoRef.current) return

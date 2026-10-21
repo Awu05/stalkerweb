@@ -10,6 +10,7 @@ const express = require('express');
 const router = express.Router();
 const log = require('../logger');
 const { castLink } = require('../lib/castLink');
+const { reportLine, rateLimiter } = require('../lib/playerReport');
 const TAG = 'stream';
 
 module.exports = function streamRoutes(appState) {
@@ -26,6 +27,15 @@ module.exports = function streamRoutes(appState) {
   router.get('/keepalive', (req, res) => {
     appState.touchActivity?.();
     res.json({ ok: true });
+  });
+
+  // A web player's playback error, for the log (lib/playerReport.js).
+  const allowReport = rateLimiter();
+  router.post('/report', (req, res) => {
+    if (!allowReport(req.ip)) return res.status(429).end();
+    const line = reportLine(req.body, req.get('user-agent'));
+    if (line) log.warn('player', line);
+    res.status(204).end();
   });
 
   // A cast device's link for a live channel: the channel as HLS (CastHls),
