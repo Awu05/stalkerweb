@@ -21,7 +21,9 @@ const SEGMENT = /^seg\d{1,6}\.ts$/;
 function hlsArgs(inputUrl, dir) {
   return [
     '-hide_banner', '-loglevel', 'warning',
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+    // -reconnect_at_eof: a source that ends its response (they restart) is
+    // reopened, not the end of the cast.
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_at_eof', '1', '-reconnect_delay_max', '5',
     '-fflags', '+genpts',
     '-i', inputUrl,
     '-map', '0:v:0?', '-map', '0:a:0?',
@@ -30,6 +32,9 @@ function hlsArgs(inputUrl, dir) {
     '-hls_time', '4',
     '-hls_list_size', '10',
     '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
+    // Numbered by the clock: a session started again carries on from the
+    // TV's last segment number instead of going back to 0.
+    '-hls_start_number_source', 'datetime',
     '-hls_segment_filename', path.join(dir, 'seg%05d.ts'),
     path.join(dir, 'index.m3u8'),
   ];
@@ -45,8 +50,9 @@ class CastHls {
    * @param {number} [o.maxSessions]     channels cast at once; the least recently used gives way
    */
   constructor({ inputUrlFor, root = path.join(os.tmpdir(), 'stalkerweb-cast'), idleMs = 30_000, startTimeoutMs = 20_000,
-    maxSessions = 3, spawn = childProcess.spawn, now = Date.now, pollMs = 250 } = {}) {
+    maxSessions = 3, spawn = childProcess.spawn, now = Date.now, pollMs = 250, available = () => true } = {}) {
     this._inputUrlFor = inputUrlFor;
+    this.available = available;
     this._root = root;
     this._idleMs = idleMs;
     this._startTimeoutMs = startTimeoutMs;
@@ -82,6 +88,9 @@ class CastHls {
     const file = path.join(s.dir, name);
     return fs.existsSync(file) ? file : null;
   }
+
+  /** The channel's session ended now (the sender stopped casting it, or moved on). */
+  stop(channelId, why = 'stopped') { this._stop(String(channelId), why); }
 
   /** Every session ended (on shutdown). */
   stopAll() {

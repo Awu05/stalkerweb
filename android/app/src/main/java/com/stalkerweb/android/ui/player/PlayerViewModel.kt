@@ -148,7 +148,11 @@ class PlayerViewModel(
                 cm.isCasting.collect { casting ->
                     _state.value = _state.value.copy(isCasting = casting)
                     if (casting && !was) _player.value?.takeIf { playingLive() }?.let { it.stop(); it.clearMediaItems() }
-                    if (!casting && was && onScreen) _state.value.activeChannelId.takeIf { it.isNotEmpty() }?.let(::loadStream)
+                    if (!casting && was) {
+                        castOnTv?.let { id -> viewModelScope.launch { live.stopCast(id) } }
+                        castOnTv = null
+                        if (onScreen) _state.value.activeChannelId.takeIf { it.isNotEmpty() }?.let(::loadStream)
+                    }
                     was = casting
                 }
             }
@@ -156,12 +160,20 @@ class PlayerViewModel(
     }
 
     private var castSourceNo = 0
+    // The channel the TV plays, so the server can let go of it when the TV
+    // moves on: its FFmpeg holds the channel's one portal connection.
+    private var castOnTv: String? = null
 
     /** What the Cast button sends for [channelId]: the channel as HLS, from the server. */
     private fun castChannel(channelId: String) {
         val cm = castManager ?: return
         val name = _state.value.channels.find { it.uniqueId == channelId }?.name
-        castSourceNo = cm.setSource { castMediaOf(live.castLink(channelId), name) }
+        castSourceNo = cm.setSource {
+            val media = castMediaOf(live.castLink(channelId), name)
+            castOnTv?.takeIf { it != channelId }?.let { old -> viewModelScope.launch { live.stopCast(old) } }
+            castOnTv = channelId
+            media
+        }
     }
 
     fun init(channelId: String) {

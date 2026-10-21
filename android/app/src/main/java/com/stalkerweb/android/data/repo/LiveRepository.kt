@@ -116,6 +116,12 @@ class LiveRepository(
 
     fun defaultStreamUrl(channelId: String): String = "${links.base()}/proxy/stream/$channelId"
 
+    /** The link a cast device opens for this channel (as HLS). */
+    suspend fun castLink(channelId: String) = apis.get().getChannelCastLink(channelId)
+
+    /** The channel's cast stream stopped on the server now — not 30 s after the TV last asked. */
+    suspend fun stopCast(channelId: String) { runCatching { apis.get().stopChannelCast(channelId) } }
+
     /**
      * Resolves a channel to a playable URL + engine type by asking the backend
      * (`/api/stream/:id`), which runs create_link and classifies the stream
@@ -123,8 +129,6 @@ class LiveRepository(
      * by its extension. On any failure we fall back to the direct proxy URL
      * assuming HLS, so playback still attempts rather than dead-ending.
      */
-    /** The link a cast device opens for this channel (as HLS). */
-    suspend fun castLink(channelId: String) = apis.get().getChannelCastLink(channelId)
 
     suspend fun resolveStream(channelId: String): StreamInfo {
         links.ensureShareToken()

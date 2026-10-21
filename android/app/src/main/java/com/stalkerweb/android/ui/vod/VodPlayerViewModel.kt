@@ -89,6 +89,8 @@ class VodPlayerViewModel(
     // Where the TV got to when casting ended: the phone resumes there (the save
     // of it may not be back from the server yet).
     private var afterCastMs: Long? = null
+    // Where the phone was when it let go for the TV (the TV may ask after it has).
+    private var releasedAt: Pair<String, Long>? = null
 
     private val _state = MutableStateFlow(VodPlayerState())
 
@@ -181,7 +183,15 @@ class VodPlayerViewModel(
             viewModelScope.launch {
                 var was = cm.isCasting.value
                 cm.isCasting.collect { now ->
-                    if (now && !was) { persist(); _player.value?.pause() }
+                    if (now && !was) {
+                        persist()
+                        // Let go of the stream, not just pause: some allow one connection per link.
+                        _player.value?.takeIf { it.currentMediaItem?.mediaId == mediaKey }?.let {
+                            releasedAt = mediaKey!! to it.currentPosition
+                            it.stop(); it.clearMediaItems()
+                        }
+                        mediaKey = null
+                    }
                     if (!now && was) {
                         // Back on the phone, from where the TV got to (saved, so the resume finds it).
                         persistFromTv()
@@ -199,8 +209,11 @@ class VodPlayerViewModel(
         val cm = cast ?: return
         castSourceNo = cm.setSource {
             val p = _player.value
-            val here = if (p != null && p.currentMediaItem?.mediaId == params.key) p.currentPosition
-                       else ((watch.progressFor(params.key)?.position ?: 0.0) * 1000).toLong()
+            val here = when {
+                p != null && p.currentMediaItem?.mediaId == params.key -> p.currentPosition
+                releasedAt?.first == params.key -> releasedAt!!.second
+                else -> ((watch.progressFor(params.key)?.position ?: 0.0) * 1000).toLong()
+            }
             val link = vod.castLink(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId)
             castMediaOf(link, params.title, params.episodeTitle.ifBlank { null }, links.absoluteImage(params.screenshotUrl), here)
         }
@@ -214,7 +227,7 @@ class VodPlayerViewModel(
         loadJob?.cancel()
         pendingPlay = null
         castSource(params)
-        if (casting) { _player.value?.pause(); _state.value = _state.value.copy(loading = false); return }   // it's on the TV
+        if (casting) { _state.value = _state.value.copy(loading = false); return }   // it's on the TV
         loadJob = viewModelScope.launch {
             runCatching { vod.resolveVodStreamUrl(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId) }
                 .onSuccess { url ->

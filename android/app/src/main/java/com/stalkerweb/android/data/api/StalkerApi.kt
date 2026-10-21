@@ -66,6 +66,9 @@ interface StalkerApi {
     @GET("api/stream/{channelId}/cast")
     suspend fun getChannelCastLink(@Path("channelId") channelId: String): CastLink
 
+    @DELETE("api/stream/{channelId}/cast")
+    suspend fun stopChannelCast(@Path("channelId") channelId: String): retrofit2.Response<Unit>
+
     @GET("api/settings")
     suspend fun getSettings(): SettingsResponse
 
