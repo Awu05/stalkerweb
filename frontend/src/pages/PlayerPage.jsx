@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
-import { getStreamUrl, getChannelCastLink, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
+import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
 import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
@@ -587,22 +587,31 @@ export default function PlayerPage() {
   const cast = useCasting({
     videoRef,
     mediaKey: activeChannel?.uniqueId ? String(activeChannel.uniqueId) : null,
-    getLink: () => getChannelCastLink(activeChannelRef.current?.uniqueId),
-    getMeta: () => ({ title: activeChannelRef.current?.name || '' }),
+    // This render's channel (the hook calls these from its effects, which run
+    // before activeChannelRef's own effect catches up).
+    getLink: () => getChannelCastLink(activeChannel?.uniqueId),
+    getMeta: () => ({ title: activeChannel?.name || '' }),
     onTvStart: () => setOnTv(true),
     onTvEnd: () => setOnTv(false),
+    release: (id) => stopChannelCast(id),
     toNative: (url) => {
       const v = videoRef.current
       if (!v) return
-      keepSrcRef.current = true
+      // Only when the attach effect will run again to see it (else the flag would outlive this hand-over).
+      keepSrcRef.current = url !== airplayUrlRef.current
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
       if (mpegtsRef.current) { try { mpegtsRef.current.destroy() } catch { /* already gone */ } mpegtsRef.current = null }
       v.src = url
       v.play().catch(() => {})
-      setAirplaySrc({ key: String(activeChannelRef.current?.uniqueId), url })
+      setAirplaySrc({ key: String(activeChannel?.uniqueId), url })
     },
   })
   const airplayUrl = airplaySrc && airplaySrc.key === String(activeChannel?.uniqueId) ? airplaySrc.url : null
+  const airplayUrlRef = useRef(airplayUrl)
+  airplayUrlRef.current = airplayUrl
+  const onAirplay = cast.mode === 'airplay'
+  const onAirplayRef = useRef(onAirplay)
+  onAirplayRef.current = onAirplay
 
   // Channel number jump
   const [jumpDigits, setJumpDigits] = useState('')
@@ -744,6 +753,9 @@ export default function PlayerPage() {
   // Attach HLS when streamUrl changes
   useEffect(() => {
     if (!streamUrl || !videoRef.current || onTv) return
+    // On the Apple TV, waiting for this channel's link: the last one plays on
+    // there until it comes (an hls.js source would end the AirPlay).
+    if (onAirplayRef.current && !airplayUrl) return
     const video = videoRef.current
     const handedOver = keepSrcRef.current   // AirPlay put its link in just now
     keepSrcRef.current = false
@@ -950,7 +962,7 @@ export default function PlayerPage() {
       // Paused, its source and connection let go — or a direct stream plays on
       // with nothing on screen (lib/mediaRelease.js). Not when AirPlay has just
       // put its own link in (the next run plays that).
-      if (!keepSrcRef.current) releaseMedia(video)
+      if (!keepSrcRef.current && !onAirplayRef.current) releaseMedia(video)
     }
   }, [streamUrl, streamType, reloadKey, recoverStream, onTv, airplayUrl])
 
@@ -1193,7 +1205,7 @@ export default function PlayerPage() {
       >
         {/* Pinned to the edges, so the whole picture fits any screen shape. */}
         <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
-        <CastingOverlay cast={cast} live />
+        <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div

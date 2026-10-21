@@ -1,13 +1,8 @@
 import { useState } from 'react'
+import { formatTime } from '@/lib/formatTime'
 import { Airplay, Cast, Pause, Play, RotateCcw, RotateCw } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-
-const fmt = (s) => {
-  if (!isFinite(s) || s < 0) return '0:00'
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`
-}
 
 /** The player's Cast (Chromecast) and AirPlay buttons — each only where the browser can, and a TV is around. */
 export function CastButtons({ cast, className }) {
@@ -44,9 +39,10 @@ export function CastButtons({ cast, className }) {
 
 /**
  * Over the video while it plays on a TV: where, and — for a movie on a
- * Chromecast — its controls (AirPlay is driven by the page's own).
+ * Chromecast — its controls (AirPlay is driven by the page's own). A tap on it
+ * is onActivity (the page shows its controls), not the page's play/pause.
  */
-export function CastingOverlay({ cast, live }) {
+export function CastingOverlay({ cast, live, onActivity }) {
   const [drag, setDrag] = useState(null)
   if (!cast.mode) return null
   const { playing, time, duration } = cast.remote
@@ -54,7 +50,7 @@ export function CastingOverlay({ cast, live }) {
   return (
     // Its clicks are its own: under it, a click would play/pause the page's video.
     <div
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onActivity?.() }}
       className={cn('absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 px-6 text-white', cast.mode === 'chromecast' ? 'bg-black' : 'bg-black/60 pointer-events-none')}
     >
       {cast.mode === 'airplay' ? <Airplay size={40} /> : <Cast size={40} />}
@@ -70,7 +66,7 @@ export function CastingOverlay({ cast, live }) {
                 onValueCommit={([v]) => { cast.seekTo(v); setDrag(null) }}
                 aria-label="Seek on the TV"
               />
-              <span className="text-xs text-white/60 text-center tabular-nums">{fmt(drag ?? time)} / {fmt(duration)}</span>
+              <span className="text-xs text-white/60 text-center tabular-nums">{formatTime(drag ?? time)} / {formatTime(duration)}</span>
             </div>
           )}
           <div className="flex items-center gap-6">

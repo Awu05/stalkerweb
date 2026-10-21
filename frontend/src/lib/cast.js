@@ -3,6 +3,8 @@
 // the stream itself, so it gets a cast link from the server (api/stream/:id/cast,
 // api/vod/cast): under the playback-only share token, live channels as HLS.
 
+import { VOD_DONE_FRACTION } from './vodProgress'
+
 const CAST_SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1'
 
 /** Chrome or Edge (not on iOS), on https or localhost: the Cast SDK only works there. */
@@ -58,10 +60,10 @@ export function castRequestOf(link, { title = '', subtitle = '', image = '', sta
 
 /**
  * Where the page picks a movie up once casting ends: where the TV got to — or
- * null (stay put) when it hadn't started, or was in its last 5%.
+ * null (stay put) when it hadn't started, or was in its last 5% (finished, as vodProgress counts it).
  */
 export function resumeAfterCast(timeSecs, durationSecs) {
   if (!(timeSecs > 0)) return null
-  if (durationSecs > 0 && timeSecs >= durationSecs * 0.95) return null
+  if (durationSecs > 0 && timeSecs >= durationSecs * VOD_DONE_FRACTION) return null
   return timeSecs
 }
