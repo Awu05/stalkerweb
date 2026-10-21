@@ -143,6 +143,9 @@ describe('CastHls', () => {
     const p = hls.playlist('6'); writePlaylist('6'); await p
     fs.writeFileSync(path.join(dirOf('6'), 'seg00001.ts'), 'x')
     expect(hls.segment('6', 'seg00001.ts')).toBe(path.join(dirOf('6'), 'seg00001.ts'))
+    // Numbered by the clock, as FFmpeg does here.
+    fs.writeFileSync(path.join(dirOf('6'), 'seg20261021031523.ts'), 'x')
+    expect(hls.segment('6', 'seg20261021031523.ts')).toBe(path.join(dirOf('6'), 'seg20261021031523.ts'))
     expect(hls.segment('6', '../../etc/passwd')).toBeNull()
     expect(hls.segment('6', 'index.m3u8')).toBeNull()
     expect(hls.segment('9', 'seg00001.ts')).toBeNull()
