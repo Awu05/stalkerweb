@@ -171,6 +171,15 @@ data class VodStreamResponse(
     val isHls: Boolean = true,
 )
 
+/** A link a cast device opens itself (backend lib/castLink.js). reachable: false when the server was reached as localhost. */
+@JsonClass(generateAdapter = false)
+data class CastLink(
+    val url: String,
+    val contentType: String,
+    val live: Boolean = false,
+    val reachable: Boolean = true,
+)
+
 // Live-channel stream resolution. `streamType` is the backend's engine hint
 // (hls | mpegts | native | unsupported) so the player can pick the right
 // container/MIME instead of assuming HLS for everything.

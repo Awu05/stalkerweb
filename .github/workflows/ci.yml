@@ -27,6 +27,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
+      # FFmpeg for the tests that run it (casting live TV as HLS), as in the image.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: npm ci
       - run: npm run lint
       - run: npm test

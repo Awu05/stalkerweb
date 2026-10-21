@@ -22,6 +22,7 @@ const COMBINED_ALL = { vod: 'movies:all', series: 'series:all' };
 const tabOfCombined = (id) => Object.keys(COMBINED_ALL).find((tab) => COMBINED_ALL[tab] === id) ?? null;
 
 const log = require('../logger');
+const { castLink, vodContentType } = require('../lib/castLink');
 const TAG = 'vod';
 
 module.exports = function vodRoutes(appState, config, { watchStore = null } = {}) {
@@ -247,10 +248,12 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   // GET /api/vod/stream?videoId=X&cmd=<encoded>&series=0&seasonId=&episodeId=
   // Returns a /proxy/vod/stream URL so the browser never talks to the portal
   // directly — the proxy carries the session cookies and handles auth.
-  router.get('/stream', guard, async (req, res) => {
+  // The /proxy/vod/stream link for a movie or episode (and whether it's HLS),
+  // resolved now — see /stream below. Throws { status, message } on failure.
+  async function vodStreamLink(query) {
     const { vodManager } = appState;
-    const { videoId, cmd = '', series = '0', seasonId = '', episodeId = '' } = req.query;
-    if (!videoId) return res.status(400).json({ error: 'videoId is required' });
+    const { videoId, cmd = '', series = '0', seasonId = '', episodeId = '' } = query;
+    if (!videoId) throw Object.assign(new Error('videoId is required'), { status: 400 });
 
     // Resolve up front. The result is cached in VodManager, so the subsequent
     // /proxy/vod/stream fetch reuses it (no extra portal round-trip). Resolving
@@ -264,7 +267,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       resolved = await vodManager.getStreamUrl(videoId, cmd || null, parseInt(series, 10) || 0, { seasonId, episodeId });
     } catch (e) {
       log.warn(TAG, `stream resolve failed for videoId=${videoId}: ${e.message}`);
-      return res.status(502).json({ error: e.message });
+      throw Object.assign(new Error(e.message), { status: 502 });
     }
 
     const resolvedPath = resolved.split('?')[0].split('#')[0];
@@ -288,7 +291,27 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     }
 
     appState.touchActivity?.();
-    res.json({ streamUrl: `/proxy/vod/stream${ext}?${p}`, videoId, isHls });
+    return { path: `/proxy/vod/stream${ext}?${p}`, videoId: String(videoId), isHls, ext };
+  }
+
+  router.get('/stream', guard, async (req, res) => {
+    try {
+      const link = await vodStreamLink(req.query);
+      res.json({ streamUrl: link.path, videoId: link.videoId, isHls: link.isHls });
+    } catch (e) {
+      res.status(e.status || 502).json({ error: e.message });
+    }
+  });
+
+  // GET /api/vod/cast?videoId=… (as /stream): the link a cast device opens —
+  // the same stream, under the playback-only share token (lib/castLink.js).
+  router.get('/cast', guard, async (req, res) => {
+    try {
+      const link = await vodStreamLink(req.query);
+      res.json(castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
+    } catch (e) {
+      res.status(e.status || 502).json({ error: e.message });
+    }
   });
 
   // ── What the viewer watched (viewers/WatchStore.js) ──────────────────────────

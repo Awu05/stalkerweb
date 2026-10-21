@@ -17,6 +17,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.stalkerweb.android.cast.CastManager
+import com.stalkerweb.android.cast.castMediaOf
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
@@ -135,16 +136,43 @@ class PlayerViewModel(
         reconnectAttempts = 0
     }
 
-    val castManager: CastManager? = runCatching { CastManager(application) }.getOrNull()
+    val castManager: CastManager? = runCatching { CastManager.get(application) }.getOrNull()?.takeIf { it.available }
 
     init {
-        // Mirror cast session state into UI state
+        // While casting, the TV plays the channel and the phone doesn't (two
+        // pulls of one channel can end each other's portal link); once it
+        // ends, the phone plays it again.
         castManager?.let { cm ->
             viewModelScope.launch {
+                var was = cm.isCasting.value
                 cm.isCasting.collect { casting ->
                     _state.value = _state.value.copy(isCasting = casting)
+                    if (casting && !was) _player.value?.takeIf { playingLive() }?.let { it.stop(); it.clearMediaItems() }
+                    if (!casting && was) {
+                        castOnTv?.let { id -> viewModelScope.launch { live.stopCast(id) } }
+                        castOnTv = null
+                        if (onScreen) _state.value.activeChannelId.takeIf { it.isNotEmpty() }?.let(::loadStream)
+                    }
+                    was = casting
                 }
             }
+        }
+    }
+
+    private var castSourceNo = 0
+    // The channel the TV plays, so the server can let go of it when the TV
+    // moves on: its FFmpeg holds the channel's one portal connection.
+    private var castOnTv: String? = null
+
+    /** What the Cast button sends for [channelId]: the channel as HLS, from the server. */
+    private fun castChannel(channelId: String) {
+        val cm = castManager ?: return
+        val name = _state.value.channels.find { it.uniqueId == channelId }?.name
+        castSourceNo = cm.setSource {
+            val media = castMediaOf(live.castLink(channelId), name)
+            castOnTv?.takeIf { it != channelId }?.let { old -> viewModelScope.launch { live.stopCast(old) } }
+            castOnTv = channelId
+            media
         }
     }
 
@@ -214,6 +242,8 @@ class PlayerViewModel(
 
     fun loadStream(channelId: String) {
         if (!onScreen) return
+        castChannel(channelId)
+        if (castManager?.isCasting?.value == true) return   // on the TV, not here
         val p = _player.value ?: return
         // Only the newest load plays, and only while the screen is open: a slow
         // resolve finishing after Back (or after another zap) mustn't start it.
@@ -242,8 +272,6 @@ class PlayerViewModel(
                 if (channel != null) {
                     live.pushWatched(channel, _state.value.logoMap[channelId])
                 }
-                // Keep Cast session in sync with channel changes
-                castManager?.setStream(info.url, channel?.name)
             }.onFailure { e ->
                 android.util.Log.e("PlayerViewModel", "loadStream failed: ${e.message}")
                 // If the controller we used became disconnected, clear it so the next
@@ -298,6 +326,7 @@ class PlayerViewModel(
         nowNextJob?.cancel()
         cancelDigits()
         resetReconnect()
+        castManager?.clearSource(castSourceNo)   // what's on the TV carries on
         _player.value?.takeIf { playingLive() }?.let { p ->
             p.stop()
             p.clearMediaItems()
@@ -487,7 +516,7 @@ class PlayerViewModel(
         guideJob?.cancel()
         jumpJob?.cancel()
         (_player.value as? MediaController)?.removeListener(playerListener)
-        castManager?.release()
+        castManager?.clearSource(castSourceNo)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()
     }

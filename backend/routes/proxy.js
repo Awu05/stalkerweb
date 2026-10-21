@@ -958,6 +958,32 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     return serveStream(req, res, streamUrl, true, uniqueId, fallbackUrl); // trusted — URL from portal create_link
   });
 
+  // ── GET /proxy/cast/live/:channelId/index.m3u8 (+ its segments) ───────────
+  // A live channel as HLS for a cast device (stalker/CastHls.js). Its links
+  // come from /api/stream/:id/cast.
+  router.get('/cast/live/:channelId/index.m3u8', async (req, res) => {
+    const id = String(req.params.channelId);
+    if (!/^\d+$/.test(id)) return res.status(400).send('Invalid channel ID');
+    if (!appState.castHls?.available()) return res.status(415).send('Casting live TV needs FFmpeg, which this server does not have');
+    try {
+      const file = await appState.castHls.playlist(id);
+      appState.touchActivity?.();
+      res.set('Cache-Control', 'no-cache, no-store');
+      res.type('application/vnd.apple.mpegurl').sendFile(file);
+    } catch (e) {
+      log.warn(TAG, `cast ch ${id}: ${e.message}`);
+      res.status(502).send(e.message);
+    }
+  });
+
+  router.get('/cast/live/:channelId/:segment', (req, res) => {
+    const file = appState.castHls?.segment(req.params.channelId, req.params.segment);
+    if (!file) return res.status(404).send('Not found');
+    appState.touchActivity?.();
+    res.set('Cache-Control', 'no-cache');
+    res.type('video/mp2t').sendFile(file);
+  });
+
   // ── GET /proxy/hls?url=<encoded> — sub-playlist proxy ────────────────────
   router.get('/hls', hlsUrlRules, async (req, res) => {
     if (!requireSession(res)) return;
