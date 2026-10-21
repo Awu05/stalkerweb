@@ -8,7 +8,10 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { getVodStreamUrl, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { useCasting } from '@/lib/useCasting'
+import { resumeAfterCast } from '@/lib/cast'
+import { CastButtons, CastingOverlay } from '@/components/CastControls'
 import EpisodePanel from '@/components/EpisodePanel'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
@@ -58,6 +61,10 @@ export default function VodPlayerPage() {
 
   const videoRef     = useRef(null)
   const hlsRef       = useRef(null)
+  // Casting (lib/useCasting.js): on a Chromecast the TV plays and this page
+  // waits, paused; AirPlay plays the <video>'s own source on the Apple TV.
+  const onTvRef      = useRef(false)
+  const castRemoteRef = useRef({ playing: false, time: 0, duration: 0 })
   const containerRef = useRef(null)
   const hideTimer    = useRef(null)
   const volumeRef    = useRef(80)
@@ -196,7 +203,12 @@ export default function VodPlayerPage() {
 
   // Save every 10s while playing, and once more on unmount / title change.
   useEffect(() => {
-    const id = setInterval(() => { if (!videoRef.current?.paused) persist() }, 10_000)
+    const id = setInterval(() => {
+      if (onTvRef.current) {
+        const r = castRemoteRef.current
+        if (r.playing && r.duration > 0 && r.time > 0) saveVodProgress({ ...metaRef.current, position: r.time, duration: r.duration })
+      } else if (!videoRef.current?.paused) persist()
+    }, 10_000)
     return () => { clearInterval(id); persist() }
   }, [persist, progressKey])
 
@@ -262,7 +274,7 @@ export default function VodPlayerPage() {
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
-    const tryPlay = () => leftRef.current ? Promise.resolve() :
+    const tryPlay = () => leftRef.current || onTvRef.current ? Promise.resolve() :
       video.play()
         .then(() => { setStatus('playing'); setPlaying(true) })
         .catch(() => {
@@ -382,7 +394,41 @@ export default function VodPlayerPage() {
     return () => { v.removeEventListener('enterpictureinpicture', enter); v.removeEventListener('leavepictureinpicture', leave) }
   }, [])
 
+  const [onTv, setOnTv] = useState(false)
+  const cast = useCasting({
+    videoRef,
+    mediaKey: progressKey,
+    getLink: () => getVodCastLink({ videoId, cmd, series: seriesNo, seasonId, episodeId }),
+    getMeta: () => {
+      const v = videoRef.current
+      // Where this title is: the page's position if it's the one loaded, else where it was left off.
+      const here = v && mediaKeyRef.current === progressKey ? v.currentTime : (getVodProgress(progressKey)?.position || 0)
+      return { title, subtitle: episodeTitle, image: myListItem.screenshotUrl, startSecs: here }
+    },
+    onTvStart: () => { persist(); videoRef.current?.pause(); onTvRef.current = true; setOnTv(true) },
+    onTvEnd: (time, dur) => {
+      onTvRef.current = false
+      setOnTv(false)
+      const v = videoRef.current
+      if (!v) return
+      const at = resumeAfterCast(time, dur)
+      if (at != null) { try { v.currentTime = at } catch { /* seek rejected */ } }
+      v.play().catch(() => {})
+    },
+    toNative: (url) => {
+      const v = videoRef.current
+      if (!v) return
+      const at = v.currentTime
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      v.src = url
+      if (at > 0) v.addEventListener('loadedmetadata', () => { try { v.currentTime = at } catch { /* seek rejected */ } }, { once: true })
+      v.play().catch(() => {})
+    },
+  })
+  castRemoteRef.current = cast.remote
+
   function togglePlayPause() {
+    if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return
     if (v.paused) v.play().catch(() => {})
     else v.pause()
@@ -465,6 +511,7 @@ export default function VodPlayerPage() {
           onClick={togglePlayPause}
         >
           <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
+          <CastingOverlay cast={cast} />
         </div>
 
         {/* Loading overlay */}
@@ -578,6 +625,7 @@ export default function VodPlayerPage() {
                 <ListVideo size={18} />
               </button>
             )}
+            <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (
               <button
                 onClick={togglePiP}

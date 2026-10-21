@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
-import { getStreamUrl, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
+import { getStreamUrl, getChannelCastLink, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
 import { useApp } from '@/lib/appContext'
 import { ChannelLogo } from '@/components/ChannelLogo'
 import { useFavorites } from '@/lib/useFavorites'
@@ -21,6 +21,8 @@ import { showToast } from '@/lib/toast'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
 import { releaseMedia } from '@/lib/mediaRelease'
+import { useCasting } from '@/lib/useCasting'
+import { CastButtons, CastingOverlay } from '@/components/CastControls'
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -28,7 +30,7 @@ function Controls({
   audioTracks, activeAudio, subtitleTracks, activeSub,
   showGuide, onToggleGuide, isFavorite, onToggleFavorite,
   onPlayPause, onMute, onVolume, onFullscreen, onToggleList, onTogglePiP,
-  onAudioTrack, onSubtitleTrack,
+  onAudioTrack, onSubtitleTrack, cast,
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
@@ -86,6 +88,7 @@ function Controls({
             ))}
           </select>
         )}
+        {cast && <CastButtons cast={cast} />}
         {/* PiP button — only shown when browser supports it */}
         {document.pictureInPictureEnabled && (
           <button
@@ -573,6 +576,34 @@ export default function PlayerPage() {
   const [subtitleTracks, setSubtitleTracks] = useState([])
   const [activeSub, setActiveSub]         = useState(-1)
 
+  // Casting (lib/useCasting.js). On a Chromecast the TV plays the channel and
+  // this page lets go of it (two pulls of a channel can end each other's portal
+  // link); for AirPlay the <video> plays the channel's plain HLS cast link,
+  // which Safari hands to the Apple TV.
+  const [onTv, setOnTv]             = useState(false)
+  const [airplaySrc, setAirplaySrc] = useState(null)   // { key: channel, url }
+  const keepSrcRef                  = useRef(false)    // AirPlay's source is already in the <video>: leave it there
+  const togglePlayPauseRef          = useRef(() => {})
+  const cast = useCasting({
+    videoRef,
+    mediaKey: activeChannel?.uniqueId ? String(activeChannel.uniqueId) : null,
+    getLink: () => getChannelCastLink(activeChannelRef.current?.uniqueId),
+    getMeta: () => ({ title: activeChannelRef.current?.name || '' }),
+    onTvStart: () => setOnTv(true),
+    onTvEnd: () => setOnTv(false),
+    toNative: (url) => {
+      const v = videoRef.current
+      if (!v) return
+      keepSrcRef.current = true
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      if (mpegtsRef.current) { try { mpegtsRef.current.destroy() } catch { /* already gone */ } mpegtsRef.current = null }
+      v.src = url
+      v.play().catch(() => {})
+      setAirplaySrc({ key: String(activeChannelRef.current?.uniqueId), url })
+    },
+  })
+  const airplayUrl = airplaySrc && airplaySrc.key === String(activeChannel?.uniqueId) ? airplaySrc.url : null
+
   // Channel number jump
   const [jumpDigits, setJumpDigits] = useState('')
   const jumpTimer                   = useRef(null)
@@ -712,8 +743,10 @@ export default function PlayerPage() {
 
   // Attach HLS when streamUrl changes
   useEffect(() => {
-    if (!streamUrl || !videoRef.current) return
+    if (!streamUrl || !videoRef.current || onTv) return
     const video = videoRef.current
+    const handedOver = keepSrcRef.current   // AirPlay put its link in just now
+    keepSrcRef.current = false
     // False once this stream is left (another channel, or the page): a play()
     // still on its way mustn't start it again.
     let active = true
@@ -895,7 +928,10 @@ export default function PlayerPage() {
     }
 
     // Pick the engine from the server's stream-type hint (resolved via create_link).
-    if (streamType === 'unsupported') {
+    if (airplayUrl) {
+      if (handedOver && video.src === airplayUrl) tryPlay()
+      else playNative(airplayUrl)
+    } else if (streamType === 'unsupported') {
       setStatus('error')
       setErrorMsg('This channel uses a protocol (UDP/RTP/RTSP) that browsers can’t play directly.')
     } else if (streamType === 'native') {
@@ -912,10 +948,11 @@ export default function PlayerPage() {
       video.removeEventListener('ended', onEnded)
       teardown()
       // Paused, its source and connection let go — or a direct stream plays on
-      // with nothing on screen (lib/mediaRelease.js).
-      releaseMedia(video)
+      // with nothing on screen (lib/mediaRelease.js). Not when AirPlay has just
+      // put its own link in (the next run plays that).
+      if (!keepSrcRef.current) releaseMedia(video)
     }
-  }, [streamUrl, streamType, reloadKey, recoverStream])
+  }, [streamUrl, streamType, reloadKey, recoverStream, onTv, airplayUrl])
 
   // Stall watchdog: a frozen live stream frequently emits no error at all (the
   // MSE buffer just stops, or the upstream silently closes). If the playback
@@ -1002,7 +1039,7 @@ export default function PlayerPage() {
       if (e.key === 'Enter') {
         if (e.target.closest?.('button, a, [role="button"]')) return
         e.preventDefault()
-        togglePlayPause()
+        togglePlayPauseRef.current()
         return
       }
       if (e.code === 'ArrowRight') {
@@ -1043,7 +1080,7 @@ export default function PlayerPage() {
       switch (e.code) {
         case 'Space':
           e.preventDefault()
-          togglePlayPause()
+          togglePlayPauseRef.current()
           break
         case 'KeyF':
           e.preventDefault()
@@ -1085,7 +1122,10 @@ export default function PlayerPage() {
     return () => { window.removeEventListener('keydown', onKey); clearTimeout(jumpTimer.current) }
   }, [resetHideTimer])
 
+  // The key handler is bound once: through a ref, it sees casting start and stop.
+  togglePlayPauseRef.current = togglePlayPause
   function togglePlayPause() {
+    if (cast.mode === 'chromecast') { cast.togglePlay(); return }
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
@@ -1153,6 +1193,7 @@ export default function PlayerPage() {
       >
         {/* Pinned to the edges, so the whole picture fits any screen shape. */}
         <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
+        <CastingOverlay cast={cast} live />
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
@@ -1236,6 +1277,7 @@ export default function PlayerPage() {
             onFullscreen={toggleFullscreen}
             onToggleList={() => setShowList(v => !v)}
             onTogglePiP={togglePiP}
+            cast={cast}
             onAudioTrack={setAudioTrack}
             onSubtitleTrack={setSubtitleTrack}
           />
