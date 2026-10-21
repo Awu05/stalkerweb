@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, Film, Tv2, ChevronLeft, ChevronRight, Clock, X, Loader2, Play, Download, Check, CheckCircle2, Circle, Bookmark, RotateCcw } from 'lucide-react'
+import { Search, Film, Tv2, ChevronLeft, ChevronRight, ChevronDown, Clock, X, Loader2, Play, Download, Check, CheckCircle2, Circle, Bookmark, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
@@ -248,6 +248,105 @@ function VodCard({ item, onClick, onDownload }) {
         </div>
       </div>
     </button>
+  )
+}
+
+// ── Categories ────────────────────────────────────────────────────────────
+// In the sidebar on tablets and up; on phones in a sheet from the bottom.
+
+function TypeToggle({ vodType, onChange, className }) {
+  return (
+    <div className={cn('flex gap-1', className)}>
+      {[['vod', 'Movies'], ['series', 'Series']].map(([t, label]) => (
+        <button
+          key={t}
+          type="button"
+          aria-pressed={vodType === t}
+          onClick={() => onChange(t)}
+          className={cn(
+            'flex-1 text-xs font-medium py-1.5 rounded-[var(--radius-sm)] transition-all',
+            vodType === t
+              ? 'btn-gradient text-white'
+              : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** My List, then the categories. onPick gets 'mylist' or a category. */
+function CategoryList({ categories, loading, error, selectedId, myListCount, onPick }) {
+  return (
+    <>
+      {loading && (
+        <div className="flex justify-center py-8">
+          <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />
+        </div>
+      )}
+      {error && <p className="px-3 py-4 text-xs text-[var(--color-live)] text-center">{error}</p>}
+      {!loading && categories.length === 0 && !error && (
+        <p className="px-3 py-4 text-xs text-[var(--color-muted)] text-center">No categories found.</p>
+      )}
+      <button
+        type="button"
+        onClick={() => onPick('mylist')}
+        aria-current={selectedId === MY_LIST.id ? 'true' : undefined}
+        className={cn(
+          'w-full flex items-center gap-2 text-left px-3 py-2 text-xs transition-colors border-b border-[var(--color-border)]',
+          selectedId === MY_LIST.id
+            ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
+            : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
+        )}
+      >
+        <Bookmark size={12} /> My List
+        <span className="ml-auto text-[10px] text-[var(--color-muted)]">{myListCount || ''}</span>
+      </button>
+      {categories.map(cat => (
+        <button
+          key={cat.id}
+          type="button"
+          onClick={() => onPick(cat)}
+          aria-current={selectedId === cat.id ? 'true' : undefined}
+          className={cn(
+            'w-full text-left px-3 py-2 text-xs transition-colors',
+            selectedId === cat.id
+              ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
+              : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
+          )}
+        >
+          {cat.title}
+        </button>
+      ))}
+    </>
+  )
+}
+
+/** Phones: the category list from the bottom of the screen, the one chosen in view. */
+function CategorySheet({ title, onClose, children }) {
+  const listRef = useRef(null)
+  useEffect(() => {
+    listRef.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'center' })
+  }, [])
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end md:hidden" role="dialog" aria-modal="true" aria-label={title + ' categories'}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-h-[75dvh] flex flex-col rounded-t-2xl overflow-hidden modal-panel pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
+          <p className="text-sm font-semibold text-[var(--color-text)]">{title}</p>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={18} /></button>
+        </div>
+        <div ref={listRef} className="flex-1 overflow-y-auto py-1 [&>button]:py-3 [&>button]:text-sm">{children}</div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -558,6 +657,8 @@ export default function VodPage() {
   const [hasMore, setHasMore]         = useState(false)
 
   const [search, setSearch]           = useState('')
+  const [catsOpen, setCatsOpen]       = useState(false)   // phones: the category sheet
+  const closeCats = useCallback(() => setCatsOpen(false), [])
   const [seriesSheet, setSeriesSheet] = useState(null) // item to show seasons for
   const [history, setHistory] = useState(() => getVodHistory()) // Recently watched
   const [myList, setMyList]   = useState(() => getMyList())     // My List
@@ -851,73 +952,48 @@ export default function VodPage() {
     }
   }
 
+  const categoryList = (
+    <CategoryList
+      categories={categories}
+      loading={catsLoading}
+      error={catsError}
+      selectedId={selectedCategory?.id}
+      myListCount={tabList.filter((e) => !e.completedAt).length}
+      onPick={(cat) => { setCatsOpen(false); selectCategory(cat === 'mylist' ? MY_LIST : cat) }}
+    />
+  )
+
   return (
-    <div className="fade-in flex h-[calc(100vh-3.5rem)]">
+    // dvh: the height left with a phone browser's bars showing (100vh ran under Safari's toolbar).
+    <div className="fade-in flex h-[calc(100dvh-3.5rem)]">
 
-      {/* ── Left sidebar: categories ── */}
-      <aside className="w-56 shrink-0 flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
-        {/* Type toggle */}
-        <div className="flex p-2 gap-1 border-b border-[var(--color-border)]">
-          {[['vod', 'Movies'], ['series', 'Series']].map(([t, label]) => (
-            <button
-              key={t}
-              onClick={() => setVodType(t)}
-              className={cn(
-                'flex-1 text-xs font-medium py-1.5 rounded-[var(--radius-sm)] transition-all',
-                vodType === t
-                  ? 'btn-gradient text-white'
-                  : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Category list */}
-        <div className="flex-1 overflow-y-auto py-1">
-          {catsLoading && (
-            <div className="flex justify-center py-8">
-              <Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" />
-            </div>
-          )}
-          {catsError && (
-            <p className="px-3 py-4 text-xs text-[var(--color-live)] text-center">{catsError}</p>
-          )}
-          {!catsLoading && categories.length === 0 && !catsError && (
-            <p className="px-3 py-4 text-xs text-[var(--color-muted)] text-center">No categories found.</p>
-          )}
-          <button
-            onClick={() => selectCategory(MY_LIST)}
-            className={cn(
-              'w-full flex items-center gap-2 text-left px-3 py-2 text-xs transition-colors border-b border-[var(--color-border)]',
-              isMyList
-                ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
-                : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
-            )}
-          >
-            <Bookmark size={12} /> My List
-            <span className="ml-auto text-[10px] text-[var(--color-muted)]">{tabList.filter((e) => !e.completedAt).length || ''}</span>
-          </button>
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => selectCategory(cat)}
-              className={cn(
-                'w-full text-left px-3 py-2 text-xs transition-colors',
-                selectedCategory?.id === cat.id
-                  ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
-                  : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-              )}
-            >
-              {cat.title}
-            </button>
-          ))}
-        </div>
+      {/* ── Left sidebar: categories (tablets and up; phones get the bar below) ── */}
+      <aside className="hidden md:flex w-56 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+        <TypeToggle vodType={vodType} onChange={setVodType} className="p-2 border-b border-[var(--color-border)]" />
+        <div className="flex-1 overflow-y-auto py-1">{categoryList}</div>
       </aside>
 
       {/* ── Main area ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+
+        {/* Phones: Movies/Series and the category on one line; the list opens as a sheet */}
+        <div className="md:hidden flex items-center gap-2 px-4 pt-3">
+          <TypeToggle vodType={vodType} onChange={setVodType} className="w-40 shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-surface)] p-0.5" />
+          <button
+            type="button"
+            onClick={() => setCatsOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={catsOpen}
+            className="flex-1 min-w-0 flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text)]"
+          >
+            {isMyList && <Bookmark size={12} className="shrink-0" />}
+            <span className="truncate flex-1 text-left">{selectedCategory?.title || 'Choose a category'}</span>
+            <ChevronDown size={14} className="shrink-0 text-[var(--color-muted)]" />
+          </button>
+        </div>
+        {catsOpen && (
+          <CategorySheet title={vodType === 'series' ? 'Series' : 'Movies'} onClose={closeCats}>{categoryList}</CategorySheet>
+        )}
 
         {/* Search bar */}
         <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center gap-3">
@@ -932,7 +1008,7 @@ export default function VodPage() {
             />
           </div>
           {selectedCategory && (
-            <span className="text-xs text-[var(--color-muted)]">
+            <span className="hidden sm:inline text-xs text-[var(--color-muted)]">
               {isMyList
                 ? `${tabList.length.toLocaleString()} titles`
                 : filtering
