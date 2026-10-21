@@ -31,7 +31,7 @@ function reportLine(body, ua) {
   const engine = clip(b.engine, 20) || 'player';
   const detail = clip(b.detail, 300);
   const attempt = Number.isInteger(b.attempt) && b.attempt > 0 ? ` (reconnect ${b.attempt})` : '';
-  const gaveUp = b.gaveUp === true ? ' — gave up, showed "Lost connection"' : '';
+  const gaveUp = b.gaveUp === true ? ' — the player gave up' : '';
   return `${what} on ${browserOf(ua)}: ${engine} ${kind}${detail ? ` — ${detail}` : ''}${attempt}${gaveUp}`;
 }
 
@@ -50,4 +50,10 @@ function rateLimiter(limit = 30, now = Date.now) {
   };
 }
 
-module.exports = { browserOf, reportLine, rateLimiter };
+/** A report of a device unable to decode what it got (not a dropped connection). */
+function isDecodeFailure(body) {
+  const text = `${body?.kind ?? ''} ${body?.detail ?? ''}`;
+  return /MediaError [34]\b|decode|bufferAppendError|not supported/i.test(text);
+}
+
+module.exports = { browserOf, reportLine, rateLimiter, isDecodeFailure };

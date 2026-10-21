@@ -10,7 +10,7 @@ const express = require('express');
 const router = express.Router();
 const log = require('../logger');
 const { castLink } = require('../lib/castLink');
-const { reportLine, rateLimiter } = require('../lib/playerReport');
+const { reportLine, rateLimiter, isDecodeFailure } = require('../lib/playerReport');
 const TAG = 'stream';
 
 module.exports = function streamRoutes(appState) {
@@ -35,8 +35,24 @@ module.exports = function streamRoutes(appState) {
     if (!allowReport(req.ip)) return res.status(429).end();
     const line = reportLine(req.body, req.get('user-agent'));
     if (line) log.warn('player', line);
+    // The device couldn't decode it: what is the channel's video, exactly?
+    const id = String(req.body?.channelId ?? '');
+    if (line && /^\d+$/.test(id) && isDecodeFailure(req.body) && appState.describeChannel && allowDescribe(id)) {
+      appState.describeChannel(id)
+        .then((d) => { if (d) log.warn('player', `ch ${id}: ${d}`); })
+        .catch(() => {});
+    }
     res.status(204).end();
   });
+  // Once per channel per 10 minutes (each probe pulls the channel briefly).
+  const described = new Map();
+  const allowDescribe = (id) => {
+    const t = Date.now();
+    if (t - (described.get(id) ?? 0) < 10 * 60_000) return false;
+    described.set(id, t);
+    if (described.size > 500) described.delete(described.keys().next().value);
+    return true;
+  };
 
   // A cast device's link for a live channel: the channel as HLS (CastHls),
   // under the playback-only share token. Nothing is resolved here — the
