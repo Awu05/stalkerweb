@@ -38,7 +38,9 @@ function isAvailable() {
 // MP2 — those play in STBemu/VLC because they feed native ffmpeg, not a browser.)
 // A stream whose codecs are all in these sets can be copied straight into the
 // output TS (cheap remux); anything else must be transcoded by ffmpeg.
-const COPY_VIDEO = new Set(['h264']);
+// H.265 too: mpegts.js 1.8 plays HEVC over MPEG-TS, and browsers that decode
+// it (Chrome with hardware, Safari) shouldn't have a 4K channel re-encoded.
+const COPY_VIDEO = new Set(['h264', 'hevc']);
 const COPY_AUDIO = new Set(['aac', 'mp3']);
 
 // True when mpegts.js can play the raw stream as-is (no server-side ffmpeg).
@@ -86,8 +88,9 @@ async function probeCodecs(streamUrl, headers = null) {
       '-v', 'error',                  // errors on stderr: said when nothing could be read
       '-print_format', 'json',
       '-show_format',                 // format_name → container (hls/mpegts/mp4…)
-      '-show_streams',
-      '-select_streams', 'a:0,v:0',   // first audio + first video only
+      '-show_streams',                // all of them: the first video and audio are picked below
+      // (No -select_streams: "a:0,v:0" isn't a stream specifier ffprobe takes —
+      // it refused every probe this way, so nothing was ever read.)
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let out = '';
