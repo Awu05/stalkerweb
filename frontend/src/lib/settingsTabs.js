@@ -5,6 +5,7 @@ export const SETTINGS_TABS = [
   { id: 'links',      label: 'Links' },
   { id: 'playback',   label: 'Playback' },
   { id: 'logos',      label: 'Logos' },
+  { id: 'activity',   label: 'Activity' },
 ]
 
 const KEY = 'sw:settingsTab'

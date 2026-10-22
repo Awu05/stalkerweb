@@ -294,9 +294,17 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
     return { path: `/proxy/vod/stream${ext}?${p}`, videoId: String(videoId), isHls, ext };
   }
 
+  // Settings → Activity: a movie or episode keyed as Continue Watching keys it.
+  const claimVod = (req, { cast = false, title = '', subtitle = '' } = {}) => {
+    const q = req.query;
+    const id = q.seasonId && q.episodeId ? `${q.videoId}:${q.seasonId}:${q.episodeId}` : String(q.videoId ?? '');
+    appState.activity?.claim({ ip: req.ip, kind: 'vod', id, viewerId: req.viewer?.id, cast, title, subtitle });
+  };
+
   router.get('/stream', guard, async (req, res) => {
     try {
       const link = await vodStreamLink(req.query);
+      claimVod(req);
       res.json({ streamUrl: link.path, videoId: link.videoId, isHls: link.isHls });
     } catch (e) {
       res.status(e.status || 502).json({ error: e.message });
@@ -308,6 +316,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   router.get('/cast', guard, async (req, res) => {
     try {
       const link = await vodStreamLink(req.query);
+      claimVod(req, { cast: true });
       res.json(castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
     } catch (e) {
       res.status(e.status || 502).json({ error: e.message });
@@ -337,7 +346,12 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   };
   router.use('/watch', refuseIfGone);
   router.get('/watch', watchAnswer((req) => watchStore.get(req.viewer.id, portalOf())));
-  router.put('/watch', watchAnswer((req) => watchStore.record(req.viewer.id, portalOf(), req.body ?? {})));
+  router.put('/watch', watchAnswer((req) => {
+    // Every 10 s while it plays: the title and whose it is, for Settings → Activity.
+    const b = req.body ?? {};
+    if (b.key) appState.activity?.claim({ ip: req.ip, kind: 'vod', id: String(b.key), viewerId: req.viewer.id, title: b.title, subtitle: b.episodeTitle });
+    return watchStore.record(req.viewer.id, portalOf(), b);
+  }));
   router.delete('/watch/history/:id', watchAnswer((req) => watchStore.removeTitle(req.viewer.id, portalOf(), req.params.id)));
   router.delete('/watch/history', watchAnswer((req) => watchStore.clearHistory(req.viewer.id, portalOf())));
   router.put('/watch/list', watchAnswer((req) => watchStore.addToList(req.viewer.id, portalOf(), req.body ?? {})));

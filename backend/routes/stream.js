@@ -61,6 +61,9 @@ module.exports = function streamRoutes(appState) {
     const rawId = req.params.channelId;
     if (!/^\d+$/.test(rawId)) return res.status(400).json({ error: 'Invalid channel ID' });
     if (!appState.castHls?.available()) return res.status(415).json({ error: 'Casting live TV needs FFmpeg, which this server does not have' });
+    // The TV plays it from its own address: claimed for any.
+    appState.activity?.claim({ kind: 'live', id: rawId, viewerId: req.viewer?.id, cast: true,
+      title: appState.channelManager?.getChannel?.(rawId)?.name });
     res.json(castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
   });
 
@@ -101,6 +104,8 @@ module.exports = function streamRoutes(appState) {
     }
 
     appState.touchActivity?.();
+    // Settings → Activity: this address plays the channel for this viewer.
+    appState.activity?.claim({ ip: req.ip, kind: 'live', id: String(channel.uniqueId ?? uniqueId), viewerId: req.viewer?.id, title: channel.name });
 
     // Resolve once up-front to tell the player which engine to use (hls.js vs
     // mpegts.js vs native). The result is cached by ChannelManager so the

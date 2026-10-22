@@ -174,6 +174,8 @@ export const reorderFavoriteGroups   = (order) => _put('/favorites/groups/order'
 
 // ── Stream ────────────────────────────────────────────────────────────────
 export const getStreamUrl = (channelId) => _get(`/stream/${channelId}`)
+// What's playing through this server now, whose, and on what (Settings → Activity).
+export const getActivity = () => _get('/activity')
 // The links a cast device (Chromecast, Apple TV) opens itself: { url, contentType, live, reachable }.
 export const getChannelCastLink = (channelId) => _get(`/stream/${encodeURIComponent(channelId)}/cast`)
 // The TV left the channel: the server stops repackaging it (and lets go of its portal connection).

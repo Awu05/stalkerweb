@@ -20,7 +20,7 @@ describe('chooseTab', () => {
     expect(chooseTab('nope', 'gone', true)).toBe('viewers')
   })
 
-  it('has the five tabs in order', () => {
-    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(['viewers', 'connection', 'links', 'playback', 'logos'])
+  it('has the six tabs in order', () => {
+    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(['viewers', 'connection', 'links', 'playback', 'logos', 'activity'])
   })
 })

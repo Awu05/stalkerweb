@@ -101,6 +101,10 @@ const viewersManager = new ViewersManager(config.dataDir);
   });
 }
 const viewerContext = require('./lib/viewerContext').createViewerContext(viewersManager);
+
+// Settings → Activity: who's watching what (lib/activity.js, routes/activity.js).
+appState.viewers  = viewersManager;
+appState.activity = new (require('./lib/activity').ActivityTracker)();
 // What each viewer watched on the VOD page (viewers/WatchStore.js). On first
 // start the old shared Continue Watching list goes to the default viewer.
 const watchStore = new (require('./viewers/WatchStore'))(config.dataDir);
@@ -355,6 +359,7 @@ const xtreamIdStore   = new XtreamIdStore(path.join(config.dataDir, 'xtream-epis
 // One catalog for the Xtream API and the Stremio addon, so they share filters
 // and caches (lib/catalog.js).
 const catalog         = require('./lib/catalog').createCatalog(appState, { logoManager, idStore: xtreamIdStore });
+appState.catalog = catalog;   // titles for Settings → Activity
 const xtreamRoutes    = require('./routes/xtream')(appState, {
   proxyRouter: proxyRoutes,
   m3uRouter:   m3uRoutes,
@@ -382,6 +387,7 @@ app.use('/api/m3u', m3uRoutes);
 app.use('/api/xspf', xspfRoutes);
 app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
