@@ -32,6 +32,16 @@ private fun keyParts(key: String, showId: String, seasons: List<VodSeason>): Pai
 }
 
 /**
+ * Whether the viewer has watched any of a show: a Recently watched entry, a
+ * resume point, or an episode ticked. Only then does its dialog open at
+ * Continue's season — a show not started opens at its seasons.
+ */
+fun hasWatchedShow(showId: String, history: List<HistoryEntry>, progress: List<ProgressEntry>, watchedEpisodes: Collection<String>): Boolean {
+    val prefix = "$showId:"
+    return history.any { it.id == showId } || progress.any { it.key.startsWith(prefix) } || watchedEpisodes.any { it.startsWith(prefix) }
+}
+
+/**
  * What Continue does for a show: the episode last played, unfinished → resume
  * it; finished → the next episode not yet watched, into the next seasons;
  * never played → the first episode not yet watched. Null once everything after

@@ -86,6 +86,7 @@ import com.stalkerweb.android.data.repo.WatchRules
 import com.stalkerweb.android.data.repo.continueTarget
 import com.stalkerweb.android.data.repo.episodeLabel
 import com.stalkerweb.android.data.repo.episodeRowLabel
+import com.stalkerweb.android.data.repo.hasWatchedShow
 import com.stalkerweb.android.data.repo.historyEpisodeLabel
 import com.stalkerweb.android.data.repo.seasonNoOf
 import com.stalkerweb.android.data.repo.seasonWatchedLabel
@@ -228,8 +229,10 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         }
         LaunchedEffect(target) { (target as? ContinueTarget.Needs)?.let { viewModel.loadSeasonEpisodes(it.seasonId) } }
         val next = target as? ContinueTarget.Play
-        // Open at Continue's season, its episode highlighted (at the show's end, the seasons list).
-        LaunchedEffect(next?.season?.id, next?.episode?.episodeId) { next?.let { viewModel.showContinueSeason(it.season) } }
+        // Open at Continue's season, its episode highlighted — for a show the viewer
+        // has started (one not started opens at its seasons; at the show's end, the seasons list).
+        val started = hasWatchedShow(show.id, watchState.history, watchState.progress, watchState.watchedEpisodes)
+        LaunchedEffect(next?.season?.id, next?.episode?.episodeId, started) { if (started) next?.let { viewModel.showContinueSeason(it.season) } }
         val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
         SeriesDialog(
             next = next,
