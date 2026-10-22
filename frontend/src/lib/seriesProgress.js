@@ -22,6 +22,19 @@ const parts = (key, showId, seasons) => {
 }
 
 /**
+ * Whether the viewer has watched any of a show: a Recently watched entry, a
+ * resume point, or an episode ticked. Only then does its sheet open at
+ * Continue's season — a show not started opens at its seasons.
+ */
+export function hasWatchedShow({ showId, history = [], progress = [], watchedEpisodes = [] }) {
+  const id = String(showId)
+  const prefix = `${id}:`
+  return history.some((e) => String(e.id) === id) ||
+    progress.some((e) => String(e.key).startsWith(prefix)) ||
+    watchedEpisodes.some((k) => String(k).startsWith(prefix))
+}
+
+/**
  * What Continue does for a show:
  * - the episode last played, unfinished → resume it;
  * - finished → the next episode not yet watched, into the next seasons;

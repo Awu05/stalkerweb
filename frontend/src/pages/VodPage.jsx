@@ -7,7 +7,7 @@ import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
 import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '../stalkerApi'
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
-import { continueTarget, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
+import { continueTarget, hasWatchedShow, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -399,12 +399,14 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
   useEffect(() => { if (needs) loadSeason(needs, true) }, [needs, loadSeason])
   const next = target && !target.needs && !continueFailed ? target : null
 
-  // Open straight at Continue's season, its episode highlighted. (At the
+  // Open straight at Continue's season, its episode highlighted — for a show
+  // the viewer has started. (One not started opens at its seasons; at the
   // show's end there's nothing to continue: the seasons list shows.)
+  const started = hasWatchedShow({ showId: item.id, history: watch.history, progress: watch.progress, watchedEpisodes: watch.watchedEpisodes })
   useEffect(() => {
-    if (!next || picked.current) return
+    if (!next || !started || picked.current) return
     setSelectedSeason(next.season)
-  }, [next?.season?.id, next?.episode?.episodeId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [next?.season?.id, next?.episode?.episodeId, started]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function openSeason(season) {
     picked.current = true

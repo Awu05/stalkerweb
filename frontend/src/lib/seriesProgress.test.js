@@ -112,3 +112,14 @@ describe('episode rows', () => {
     expect(episodeRowLabel({ seriesNumber: '', name: 'Pilot' })).toBe('Pilot')
   })
 })
+
+describe('hasWatchedShow', () => {
+  it('is a show with a Recently watched entry, a resume point or a ticked episode — not one never started', async () => {
+    const { hasWatchedShow } = await import('./seriesProgress')
+    expect(hasWatchedShow({ showId: '200' })).toBe(false)
+    expect(hasWatchedShow({ showId: '200', history: [{ id: '300', key: '300:s1:e1' }], watchedEpisodes: ['2000:s1:e1'] })).toBe(false)
+    expect(hasWatchedShow({ showId: '200', history: [{ id: '200', key: '200:s1:e1' }] })).toBe(true)
+    expect(hasWatchedShow({ showId: '200', progress: [{ key: '200:s2:e4' }] })).toBe(true)
+    expect(hasWatchedShow({ showId: 200, watchedEpisodes: ['200:s1:e3'] })).toBe(true)
+  })
+})
