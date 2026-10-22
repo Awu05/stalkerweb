@@ -36,4 +36,12 @@ function deviceOf(ua) {
   return browserOf(s);
 }
 
-module.exports = { deviceOf };
+/** A web browser (the web player) — not an IPTV app, the StalkerWeb apps, a TV, or Apple's own player. */
+function isWebBrowser(ua) {
+  const s = String(ua || '');
+  if (!/^Mozilla\//.test(s)) return false;
+  if (/AppleCoreMedia/i.test(s)) return false;
+  return !APPS.some(([re]) => re.test(s));
+}
+
+module.exports = { deviceOf, isWebBrowser };

@@ -58,10 +58,16 @@ jobs:
           cache-dependency-path: ${{ matrix.project }}/package-lock.json
       # FFmpeg for the backend tests that run it (casting live TV as HLS), as in the image.
       - if: matrix.project == 'backend'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-        # A hung package mirror mustn't hold up a release: without FFmpeg its tests skip.
-        timeout-minutes: 5
-        continue-on-error: true
+        timeout-minutes: 12
+        # Retried: a package mirror that hangs is given up on and tried again.
+        run: |
+          for i in 1 2 3; do
+            timeout 120 sudo apt-get update -qq && timeout 180 sudo apt-get install -y -qq ffmpeg && break
+            echo "FFmpeg install attempt $i failed — retrying"; sleep 5
+          done
+      # A release needs its FFmpeg tests run, not skipped: no FFmpeg, no release.
+      - if: matrix.project == 'backend'
+        run: command -v ffmpeg && command -v ffprobe
       - run: npm ci
       - run: npm run lint
       - run: npm test

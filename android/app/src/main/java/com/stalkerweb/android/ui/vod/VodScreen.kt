@@ -231,7 +231,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         val next = target as? ContinueTarget.Play
         // Open at Continue's season, its episode highlighted — for a show the viewer
         // has started (one not started opens at its seasons; at the show's end, the seasons list).
-        val started = hasWatchedShow(show.id, watchState.history, watchState.progress, watchState.watchedEpisodes)
+        val started = remember(show.id, watchState) { hasWatchedShow(show.id, watchState.watched, watchState.history, watchState.progress, watchState.watchedEpisodes) }
         LaunchedEffect(next?.season?.id, next?.episode?.episodeId, started) { if (started) next?.let { viewModel.showContinueSeason(it.season) } }
         val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
         SeriesDialog(

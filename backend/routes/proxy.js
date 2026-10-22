@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const log = require('../logger');
 const { baseUrl } = require('../lib/publicUrl');
 const { streamOf, vodKey } = require('../lib/activity');
+const { isWebBrowser } = require('../lib/device');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
 const { StreamDiagnostics, firstTimestamps } = require('../lib/streamDiagnostics');
@@ -957,13 +958,14 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     // playing. ChannelManager reuses the link for a short window and evicts
     // it as soon as the stream server rejects it (403 → recordStreamError).
 
-    // Codec-aware fallback for raw HTTP MPEG-TS. Our browser players use
-    // mpegts.js, which only decodes H.264 + AAC/MP3 — so a channel encoded in
-    // MPEG-2, HEVC or AC-3 resolves fine but won't play, even though it plays in
-    // STBemu/VLC (native ffmpeg). Probe the codecs; if the browser can't decode
-    // them directly, route through FFmpeg (copy what's playable, transcode the
-    // rest) exactly like the UDP/RTP/RTSP path. HLS is left to hls.js as before.
-    if (resolved.type === 'mpegts' && /^https?:\/\//i.test(streamUrl)) {
+    // Codec-aware fallback for raw HTTP MPEG-TS, for the web player only: it
+    // plays through mpegts.js (H.264/H.265 + AAC/MP3), so a channel with MPEG-2
+    // video or AC-3/MP2 audio resolves fine but won't play. Probe the codecs;
+    // if the browser can't decode them, route through FFmpeg (copy what's
+    // playable, transcode the rest) like the UDP/RTP/RTSP path. IPTV apps, the
+    // StalkerWeb apps and TVs decode those themselves: they get the stream as
+    // it is, not a lossy re-encode. HLS is left to hls.js as before.
+    if (resolved.type === 'mpegts' && /^https?:\/\//i.test(streamUrl) && isWebBrowser(req.get('user-agent'))) {
       const ffmpegSvc = require('../stalker/FfmpegService');
       if (ffmpegSvc.isAvailable()) {
         const headers = getHeadersForUrl(streamUrl);

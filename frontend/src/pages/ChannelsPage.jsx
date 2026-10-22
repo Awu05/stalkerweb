@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, Tv2, AlertCircle, AlertTriangle, RefreshCw, Heart, Clock, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { ClearSearch } from '@/components/ui/clear-search'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
@@ -392,7 +393,9 @@ export default function ChannelsPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none" />
-            <Input placeholder="Search channels…" value={query} onChange={e => setQuery(e.target.value)} className="pl-9 py-5" />
+            <Input placeholder="Search channels…" value={query} onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape' && query) setQuery('') }} className="pl-9 pr-9 py-5" />
+            <ClearSearch value={query} onClear={() => setQuery('')} className="right-2" />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {flakyCount > 0 && (

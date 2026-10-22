@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Heart, Layers, Pencil, Trash2, Plus, Check, X, Search, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ClearSearch } from '@/components/ui/clear-search'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import {
@@ -154,9 +155,11 @@ function GroupEditor({ group, logoMap, allChannels, onSave, onCancel }) {
           <Input
             value={query}
             onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape' && query) setQuery('') }}
             placeholder="Search channels to add…"
-            className="pl-8 text-xs"
+            className="pl-8 pr-8 text-xs"
           />
+          <ClearSearch value={query} onClear={() => setQuery('')} />
         </div>
         {suggestions.length > 0 && (
           <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]">

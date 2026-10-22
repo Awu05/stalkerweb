@@ -121,5 +121,11 @@ describe('hasWatchedShow', () => {
     expect(hasWatchedShow({ showId: '200', history: [{ id: '200', key: '200:s1:e1' }] })).toBe(true)
     expect(hasWatchedShow({ showId: '200', progress: [{ key: '200:s2:e4' }] })).toBe(true)
     expect(hasWatchedShow({ showId: 200, watchedEpisodes: ['200:s1:e3'] })).toBe(true)
+    expect(hasWatchedShow({ showId: '200', watched: ['200'] })).toBe(true)   // finished, its keys past the cap
+  })
+
+  it('is the rule the "Not watched" filter uses too', async () => {
+    const { startedTitleIds } = await import('./seriesProgress')
+    expect(startedTitleIds({ watched: ['1'], history: [{ id: '2' }], progress: [{ key: '3' }], watchedEpisodes: ['4:s1:e1'] })).toEqual(new Set(['1', '2', '3', '4']))
   })
 })

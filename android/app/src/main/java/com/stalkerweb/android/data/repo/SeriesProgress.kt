@@ -32,14 +32,19 @@ private fun keyParts(key: String, showId: String, seasons: List<VodSeason>): Pai
 }
 
 /**
- * Whether the viewer has watched any of a show: a Recently watched entry, a
- * resume point, or an episode ticked. Only then does its dialog open at
- * Continue's season — a show not started opens at its seasons.
+ * The titles the viewer has started: finished, in Recently watched, with a
+ * resume point, or with an episode ticked. One rule for the "Not watched"
+ * filter and for where a show's dialog opens (the web's seriesProgress.js too).
  */
-fun hasWatchedShow(showId: String, history: List<HistoryEntry>, progress: List<ProgressEntry>, watchedEpisodes: Collection<String>): Boolean {
-    val prefix = "$showId:"
-    return history.any { it.id == showId } || progress.any { it.key.startsWith(prefix) } || watchedEpisodes.any { it.startsWith(prefix) }
-}
+fun startedTitleIds(watched: Collection<String>, history: List<HistoryEntry>, progress: List<ProgressEntry>, watchedEpisodes: Collection<String>): Set<String> =
+    watched.toSet() + history.map { it.id } + progress.map { it.key.substringBefore(':') } + watchedEpisodes.map { it.substringBefore(':') }
+
+/**
+ * Whether the viewer has started a show (startedTitleIds). Only then does its
+ * dialog open at Continue's season — a show not started opens at its seasons.
+ */
+fun hasWatchedShow(showId: String, watched: Collection<String>, history: List<HistoryEntry>, progress: List<ProgressEntry>, watchedEpisodes: Collection<String>): Boolean =
+    showId in startedTitleIds(watched, history, progress, watchedEpisodes)
 
 /**
  * What Continue does for a show: the episode last played, unfinished → resume

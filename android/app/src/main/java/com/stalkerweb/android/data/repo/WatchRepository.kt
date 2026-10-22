@@ -90,9 +90,7 @@ class WatchRepository(private val apis: ApiProvider, private val links: MediaLin
     fun progressFor(key: String): ProgressEntry? = _state.value.progress.firstOrNull { it.key == key }
 
     /** Ids of titles started or finished — for the "Not watched" filter. */
-    fun watchedIds(): Set<String> = _state.value.let { s ->
-        s.watched.toSet() + s.history.map(HistoryEntry::id) + s.progress.map { it.key.substringBefore(':') }
-    }
+    fun watchedIds(): Set<String> = _state.value.let { s -> startedTitleIds(s.watched, s.history, s.progress, s.watchedEpisodes) }
 
     private fun set(next: WatchState) { _state.value = next }
 

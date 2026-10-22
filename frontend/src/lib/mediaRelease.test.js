@@ -28,3 +28,13 @@ describe('releaseMedia', () => {
     expect(() => releaseMedia({ pause: () => { throw new Error('gone') }, removeAttribute() {}, load() {} })).not.toThrow()
   })
 })
+
+describe('allowRemotePlayback', () => {
+  it('turns AirPlay back on for a plain link (hls.js/mpegts.js left it off)', async () => {
+    const { allowRemotePlayback } = await import('./mediaRelease')
+    const video = { disableRemotePlayback: true }
+    allowRemotePlayback(video)
+    expect(video.disableRemotePlayback).toBe(false)
+    expect(() => allowRemotePlayback(null)).not.toThrow()
+  })
+})
