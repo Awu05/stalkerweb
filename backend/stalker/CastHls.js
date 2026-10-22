@@ -22,9 +22,12 @@ const SEGMENT = /^seg\d{1,20}\.ts$/;
 function hlsArgs(inputUrl, dir) {
   return [
     '-hide_banner', '-loglevel', 'warning',
-    // -reconnect_at_eof: a source that ends its response (they restart) is
-    // reopened, not the end of the cast.
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_at_eof', '1', '-reconnect_delay_max', '5',
+    // No -reconnect_at_eof: for an HLS channel the input is a playlist, which
+    // ends after every download — FFmpeg then re-requested it ~10 times a
+    // second, burning portal tokens until the source answered 403. A source
+    // that really ends makes FFmpeg exit, and the TV's next request starts the
+    // session again (numbered on from the clock, so it carries on).
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
     '-fflags', '+genpts',
     '-i', inputUrl,
     '-map', '0:v:0?', '-map', '0:a:0?',

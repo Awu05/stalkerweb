@@ -121,8 +121,9 @@ describe('CastHls', () => {
   it('re-wraps the channel from this server, copying its streams into HLS', () => {
     const a = hlsArgs('http://127.0.0.1:1/proxy/stream/5', '/tmp/x')
     expect(a).toContain('copy')
-    // A source that restarts is reopened; a restarted session numbers on from the clock.
-    expect(a[a.indexOf('-reconnect_at_eof') + 1]).toBe('1')
+    // Never -reconnect_at_eof: an HLS playlist ends after every download (it looped on it).
+    expect(a).not.toContain('-reconnect_at_eof')
+    // A restarted session numbers on from the clock.
     expect(a[a.indexOf('-hls_start_number_source') + 1]).toBe('datetime')
     expect(a[a.indexOf('-i') + 1]).toBe('http://127.0.0.1:1/proxy/stream/5')
     expect(a.at(-1)).toBe(path.join('/tmp/x', 'index.m3u8'))
@@ -206,6 +207,46 @@ const hasFfmpeg = (() => {
 })()
 
 describe.skipIf(!hasFfmpeg)('CastHls with FFmpeg', () => {
+  it('reads an HLS channel at its own pace — not its playlist over and over', async () => {
+    // A live HLS source, as /proxy/stream serves an HLS channel: a playlist of
+    // 2 s segments that grows with the clock.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-hls-'))
+    spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine',
+      '-t', '60', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '50', '-c:a', 'aac', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0',
+      '-hls_segment_filename', path.join(root, 's%03d.ts'), path.join(root, 'all.m3u8')])
+    const segs = fs.readFileSync(path.join(root, 'all.m3u8'), 'utf8').split('\n').filter((l) => l.endsWith('.ts'))
+    const started = Date.now()
+    let playlistHits = 0
+    const server = http.createServer((req, res) => {
+      if (req.url.startsWith('/live.m3u8')) {
+        playlistHits++
+        const n = Math.min(segs.length, 3 + Math.floor((Date.now() - started) / 2000))
+        const from = Math.max(0, n - 5)
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl')
+        return res.end(['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:2', `#EXT-X-MEDIA-SEQUENCE:${from}`,
+          ...segs.slice(from, n).flatMap((s) => ['#EXTINF:2.0,', `/${s}`]), ''].join('\n'))
+      }
+      const file = path.join(root, path.basename(req.url))
+      if (!fs.existsSync(file)) { res.statusCode = 404; return res.end() }
+      res.setHeader('Content-Type', 'video/mp2t')
+      fs.createReadStream(file).pipe(res)
+    })
+    await new Promise((r) => server.listen(0, r))
+    const hls = new CastHls({ root: path.join(root, 'cast'), inputUrlFor: () => `http://127.0.0.1:${server.address().port}/live.m3u8` })
+    try {
+      const playlist = fs.readFileSync(await hls.playlist('2'), 'utf8')
+      expect(playlist).toContain('#EXTM3U')
+      await new Promise((r) => setTimeout(r, 6000))
+      const secs = (Date.now() - started) / 1000
+      // FFmpeg reloads a live playlist about once a segment (every ~2 s); the loop made it ~10 a second.
+      expect(playlistHits / secs).toBeLessThan(2)
+    } finally {
+      hls.stopAll()
+      server.closeAllConnections(); server.close()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  }, 40_000)
+
   it('turns a live MPEG-TS stream into HLS', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-real-'))
     const src = path.join(root, 'src.ts')

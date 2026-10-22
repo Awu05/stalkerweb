@@ -38,9 +38,10 @@ module.exports = function streamRoutes(appState) {
     // The device couldn't decode it: what is the channel's video, exactly?
     const id = String(req.body?.channelId ?? '');
     if (line && /^\d+$/.test(id) && isDecodeFailure(req.body) && appState.describeChannel && allowDescribe(id)) {
+      log.info('player', `ch ${id}: reading its format (the device couldn't decode it)…`);
       appState.describeChannel(id)
-        .then((d) => { if (d) log.warn('player', `ch ${id}: ${d}`); })
-        .catch(() => {});
+        .then((d) => log.warn('player', d ? `ch ${id}: ${d}` : `ch ${id}: couldn't read its format`))
+        .catch((e) => log.warn('player', `ch ${id}: couldn't read its format — ${e.message}`));
     }
     res.status(204).end();
   });
