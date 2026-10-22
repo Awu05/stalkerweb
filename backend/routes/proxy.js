@@ -19,6 +19,7 @@ const https = require('https');
 const crypto = require('crypto');
 const log = require('../logger');
 const { baseUrl } = require('../lib/publicUrl');
+const { streamOf } = require('../lib/activity');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
 const { StreamDiagnostics, firstTimestamps } = require('../lib/streamDiagnostics');
@@ -246,6 +247,22 @@ const SEGMENT_RETRY_MS = [500, 1000, 1500, 2000];
 
 module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY_MS } = {}) {
   const router = express.Router();
+
+  // Settings → Activity (lib/activity.js): each stream request, for as long as
+  // it's open. Not this server's own pulls (the cast packager, a probe — FFmpeg
+  // on this machine).
+  router.use((req, res, next) => {
+    const what = appState.activity ? streamOf(req.path, req.query) : null;
+    const ua = req.get('user-agent') || '';
+    if (what && !(/^(::1|127\.|::ffff:127\.)/.test(req.ip || '') && /^Lavf\//.test(ua))) {
+      const named = req.get('x-viewer') || (typeof req.query.viewer === 'string' ? req.query.viewer : null) || req.viewerFromPath || null;
+      const viewers = appState.viewers;
+      const viewerId = (named && viewers?.get(String(named))?.id) || (req.activityViewerName && viewers?.findByName(req.activityViewerName)?.id) || null;
+      const via = what.via === 'cast' ? 'cast' : req.activityViewerName ? 'xtream' : named ? 'link' : 'app';
+      res.once('close', appState.activity.touch({ ip: req.ip, ua, kind: what.kind, id: what.id, viewerId, via }));
+    }
+    next();
+  });
 
   // Per-process key for signing rewritten proxy URLs. Random so it never needs
   // configuring; URLs are short-lived (live HLS) so expiry-on-restart is fine.

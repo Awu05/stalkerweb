@@ -312,12 +312,14 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   router.get('/live/:user/:pass/:file', (req, res, next) => {
     const m = STREAM_FILE.exec(req.params.file);
     if (!m) return next();
+    req.activityViewerName = req.params.user;   // Settings → Activity
     forward(proxyRouter, cat.liveProxyPath(m[1]))(req, res, next);
   });
 
   router.get('/movie/:user/:pass/:file', (req, res, next) => {
     const m = STREAM_FILE.exec(req.params.file);
     if (!m) return next();
+    req.activityViewerName = req.params.user;
     req.url = cat.movieProxyPath(m[1]);
     proxyRouter(req, res, next);
   });
@@ -325,6 +327,7 @@ module.exports = function xtreamModule(appState, { proxyRouter, m3uRouter, xmltv
   router.get('/series/:user/:pass/:file', (req, res, next) => {
     const m = STREAM_FILE.exec(req.params.file);
     if (!m) return next();
+    req.activityViewerName = req.params.user;
     const ep = cat.episodeProxyPath(m[1]);
     if (ep.error) return res.status(404).send(ep.error);
     req.url = ep.path;

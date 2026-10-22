@@ -62,6 +62,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.focusable
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stalkerweb.android.BuildConfig
@@ -69,6 +73,10 @@ import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.SettingsUpdate
 import com.stalkerweb.android.data.api.ViewerSummary
 import com.stalkerweb.android.data.repo.linksFor
+import com.stalkerweb.android.data.repo.kindLabel
+import com.stalkerweb.android.data.repo.playingFor
+import com.stalkerweb.android.data.repo.portalSummary
+import com.stalkerweb.android.data.repo.viaLabel
 import com.stalkerweb.android.data.repo.FiltersToSave
 import com.stalkerweb.android.data.repo.filtersToSave
 import com.stalkerweb.android.data.repo.shownWith
@@ -107,6 +115,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, updates: UpdateViewModel, serve
                 "links" -> LinksTab(state, serverUrl, viewModel.viewers.savedViewerId(), viewer?.name)
                 "playback" -> PlaybackTab(viewModel, state)
                 "logos" -> LogosTab(viewModel, state)
+                "activity" -> ActivityTab(viewModel, state)
                 "app" -> AppTab(updates)
             }
         }
@@ -236,6 +245,60 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
+
+// ── Activity ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ActivityTab(viewModel: SettingsViewModel, state: SettingsState) {
+    DisposableEffect(viewModel) {
+        viewModel.watchActivity(true)
+        onDispose { viewModel.watchActivity(false) }
+    }
+    val a = state.activity
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card("Activity", "Everything playing through this server right now — who's watching, what, and on which device: the website and the apps, TVs being cast to, and IPTV players using your Xtream, M3U or Stremio links.") {
+            state.activityError?.let { Text(it, color = SwColors.Live, style = MaterialTheme.typography.bodySmall) }
+            if (a == null) {
+                if (state.activityError == null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                return@Card
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).background(if (a.portal.connected) Color(0xFF30A46C) else SwColors.Muted, CircleShape))
+                Text(portalSummary(a.portal), color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
+            }
+            if (a.streams.isEmpty()) {
+                Text("Nothing is playing right now.", color = SwColors.Muted, modifier = Modifier.padding(vertical = 12.dp))
+            }
+            a.streams.forEach { s ->
+                // Focusable, so a TV remote can scroll through them.
+                Row(
+                    Modifier.fillMaxWidth().tvFocus().focusable().padding(vertical = 6.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    ViewerAvatar(s.viewer?.name ?: "?", s.viewer?.color, 30.dp)
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(s.title, color = SwColors.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            val badge = kindLabel(s)
+                            Surface(color = if (badge == "Live") SwColors.Live.copy(alpha = 0.15f) else SwColors.Surface2, shape = RoundedCornerShape(4.dp)) {
+                                Text(badge.uppercase(), color = if (badge == "Live") SwColors.Live else SwColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp))
+                            }
+                        }
+                        if (s.subtitle.isNotBlank()) Text(s.subtitle, color = SwColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val via = viaLabel(s).let { if (it.isEmpty()) "" else " · $it" }
+                        Text("${s.viewer?.name ?: "Unknown viewer"} · ${s.device}$via · ${s.ip}", color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(playingFor(s.startedAt, a.now), color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            a.downloads.forEach { d ->
+                Text("Downloading ${d.title}${d.percent?.let { " $it%" } ?: ""}", color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
+            }
+            Text("Updates every few seconds. A stream drops off about 30 s after it stops.", color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
 
 // ── App ───────────────────────────────────────────────────────────────────────
 

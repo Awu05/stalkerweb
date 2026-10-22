@@ -27,6 +27,7 @@ import {
   setActiveProfile, getActiveProfileId,
 } from '@/lib/profiles'
 import ViewersCard from '@/components/ViewersCard'
+import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
@@ -1302,6 +1303,12 @@ export default function SetupPage() {
           </div>
         </Card>
           </>
+        )}
+
+        {tab === 'activity' && (
+          <Card title="Activity" description="Everything playing through this server right now — who's watching, what, and on which device: the website and the apps, TVs being cast to, and IPTV players using your Xtream, M3U or Stremio links.">
+            <ActivityPanel />
+          </Card>
         )}
 
         {tab === 'logos' && (

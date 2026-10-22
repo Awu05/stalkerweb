@@ -79,6 +79,40 @@ data class NowNextEntry(
     val next: NextInfo? = null,
 )
 
+// ── Settings → Activity (backend routes/activity.js) ──────────────────────────
+
+@JsonClass(generateAdapter = false)
+data class ActivityViewer(val id: String, val name: String, val color: String? = null)
+
+/** A stream playing now: kind live | vod (an episode's id is show:season:episode); via app | cast | xtream | link. */
+@JsonClass(generateAdapter = false)
+data class ActivityStream(
+    val kind: String,
+    val id: String,
+    val via: String = "app",
+    val title: String = "",
+    val subtitle: String = "",
+    val viewer: ActivityViewer? = null,
+    val device: String = "",
+    val ip: String = "",
+    val startedAt: Long = 0,
+    val lastSeen: Long = 0,
+)
+
+@JsonClass(generateAdapter = false)
+data class ActivityPortal(val connected: Boolean = false, val host: String? = null, val openStreams: Int = 0, val casting: Int = 0)
+
+@JsonClass(generateAdapter = false)
+data class ActivityDownload(val title: String, val percent: Int? = null)
+
+@JsonClass(generateAdapter = false)
+data class ActivityResponse(
+    val streams: List<ActivityStream> = emptyList(),
+    val portal: ActivityPortal = ActivityPortal(),
+    val downloads: List<ActivityDownload> = emptyList(),
+    val now: Long = 0,
+)
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 @JsonClass(generateAdapter = false)
