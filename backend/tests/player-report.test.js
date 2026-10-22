@@ -71,3 +71,13 @@ describe('describeStreams', () => {
     expect(describeStreams(null, null, null)).toBe('no video, no audio, in ?')
   })
 })
+
+describe('browserDirectPlayable', () => {
+  it('copies what browsers play (H.264, HEVC, AAC, MP3) and converts the rest', async () => {
+    const { browserDirectPlayable } = await import('../stalker/FfmpegService.js')
+    expect(browserDirectPlayable({ video: 'h264', audio: 'aac' })).toBe(true)
+    expect(browserDirectPlayable({ video: 'hevc', audio: 'mp3' })).toBe(true)
+    expect(browserDirectPlayable({ video: 'mpeg2video', audio: 'aac' })).toBe(false)
+    expect(browserDirectPlayable({ video: 'h264', audio: 'ac3' })).toBe(false)
+  })
+})
