@@ -5,6 +5,7 @@
 // on a viewer switch, when the VOD page opens), and each save answers with the
 // viewer's lists, which replace it.
 
+import { startedTitleIds } from './seriesProgress'
 import { getWatch, saveWatch, removeWatchTitle, clearWatchHistory, addToWatchList, removeFromWatchList, setWatchListCompleted, setWatchedEpisode } from '../stalkerApi'
 
 // Mirrors backend viewers/WatchStore.js.
@@ -100,10 +101,7 @@ export function clearVodHistory() {
 
 /** Ids of titles the viewer started or finished — for the "Not watched" filter. */
 export function getWatchedVodIds() {
-  const ids = new Set(watch.watched)
-  for (const e of watch.history) ids.add(String(e.id))
-  for (const e of watch.progress) ids.add(String(e.key).split(':')[0])
-  return ids
+  return startedTitleIds(watch)
 }
 
 // ── My List ───────────────────────────────────────────────────────────────

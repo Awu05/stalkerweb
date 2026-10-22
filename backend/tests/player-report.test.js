@@ -81,3 +81,49 @@ describe('browserDirectPlayable', () => {
     expect(browserDirectPlayable({ video: 'h264', audio: 'ac3' })).toBe(false)
   })
 })
+
+describe('the codec probe', () => {
+  it("keys its cache by the stream, not its per-play token — a portal's channels share a path", async () => {
+    const { probeCacheKey } = await import('../stalker/FfmpegService.js')
+    const a = 'http://host/play/live.php?mac=00:1A&stream=101&extension=ts&play_token=AAA'
+    const b = 'http://host/play/live.php?mac=00:1A&stream=202&extension=ts&play_token=BBB'
+    expect(probeCacheKey(a)).not.toBe(probeCacheKey(b))
+    expect(probeCacheKey(a)).toBe(probeCacheKey(a.replace('AAA', 'CCC')))
+    expect(probeCacheKey('http://cdn/x/index.m3u8?token=1')).toBe(probeCacheKey('http://cdn/x/index.m3u8?token=2'))
+  })
+
+  it("gives ffprobe's error as the reason, not decoder chatter", async () => {
+    const { probeFailureReason } = await import('../stalker/FfmpegService.js')
+    expect(probeFailureReason('http://x: Server returned 403 Forbidden (access denied)\n[h264 @ 0x1] non-existing PPS 0 referenced\n'))
+      .toBe('http://x: Server returned 403 Forbidden (access denied)')
+    expect(probeFailureReason('[h264 @ 0x1] decode_slice_header error\n')).toBe('[h264 @ 0x1] decode_slice_header error')
+    expect(probeFailureReason('')).toBeNull()
+  })
+
+  it('hands FLV to mpegts.js, not a plain <video>', async () => {
+    const { _containerFromFormat } = await import('../stalker/FfmpegService.js')
+    expect(_containerFromFormat('flv')).toBe('mpegts')
+    expect(_containerFromFormat('mpegts')).toBe('mpegts')
+    expect(_containerFromFormat('mov,mp4,m4a,3gp,3g2,mj2')).toBe('native')
+    expect(_containerFromFormat('hls')).toBe('hls')
+  })
+
+  it('downloads the streams it probed (the first video and audio)', async () => {
+    const { buildDownloadArgs } = await import('../stalker/FfmpegService.js')
+    const a = buildDownloadArgs('http://x/v.m3u8', null, '/tmp/o.mp4.part', { video: 'h264', audio: 'aac' })
+    expect(a.join(' ')).toContain('-map 0:v:0? -map 0:a:0?')
+  })
+})
+
+describe('isWebBrowser', () => {
+  it('is the web player — not an IPTV app, the StalkerWeb apps, a TV or Apple’s player', async () => {
+    const { isWebBrowser } = await import('../lib/device.js')
+    expect(isWebBrowser(WIN_CHROME)).toBe(true)
+    expect(isWebBrowser(IPHONE_CHROME)).toBe(true)
+    expect(isWebBrowser('TiviMate/5.1')).toBe(false)
+    expect(isWebBrowser('VLC/3.0.20 LibVLC/3.0.20')).toBe(false)
+    expect(isWebBrowser('StalkerWeb-Android/0.4.46 (TV)')).toBe(false)
+    expect(isWebBrowser('Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 CrKey/1.56')).toBe(false)
+    expect(isWebBrowser('AppleCoreMedia/1.0.0.21E (iPhone; U; CPU OS 18_1 like Mac OS X)')).toBe(false)
+  })
+})

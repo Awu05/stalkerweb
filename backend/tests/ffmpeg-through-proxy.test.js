@@ -18,7 +18,8 @@ import { CastHls } from '../stalker/CastHls.js'
 // that path, end to end.
 
 const hasFfmpeg = (() => {
-  try { return spawnSync('ffmpeg', ['-version'], { timeout: 5000 }).status === 0 } catch { return false }
+  // Both: the probe runs ffprobe, the packager ffmpeg.
+  try { return ['ffmpeg', 'ffprobe'].every((bin) => spawnSync(bin, ['-version'], { timeout: 5000 }).status === 0) } catch { return false }
 })()
 
 const listen = (handler) => new Promise((resolve) => {

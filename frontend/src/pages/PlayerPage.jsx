@@ -20,7 +20,8 @@ import { useFavorites } from '@/lib/useFavorites'
 import { showToast } from '@/lib/toast'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { resumePosition, rangesOf, watchdogTick } from '@/lib/stallRecovery'
-import { releaseMedia } from '@/lib/mediaRelease'
+import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
+import { ClearSearch } from '@/components/ui/clear-search'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import { useCasting } from '@/lib/useCasting'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
@@ -341,8 +342,9 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
               placeholder="Search…"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              className="w-full rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-7 pr-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] outline-none focus:border-[var(--color-primary-light)]"
+              className="w-full rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-7 pr-7 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] outline-none focus:border-[var(--color-primary-light)]"
             />
+            <ClearSearch value={query} onClear={() => setQuery('')} />
           </div>
           <button
             onClick={toggleFavsOnly}
@@ -603,6 +605,7 @@ export default function PlayerPage() {
       keepSrcRef.current = url !== airplayUrlRef.current
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
       if (mpegtsRef.current) { try { mpegtsRef.current.destroy() } catch { /* already gone */ } mpegtsRef.current = null }
+      allowRemotePlayback(v)
       v.src = url
       v.play().catch(() => {})
       setAirplaySrc({ key: String(activeChannel?.uniqueId), url })
@@ -866,6 +869,7 @@ export default function PlayerPage() {
         })
 
     const playNative = (src) => {
+      allowRemotePlayback(video)
       video.src = src
       video.volume = volumeRef.current / 100
       video.muted = userMutedRef.current

@@ -33,13 +33,13 @@ function isAvailable() {
 }
 
 // ── Browser-playable codec sets (mpegts.js path) ──────────────────────────────
-// Our browser players pull MPEG-TS through mpegts.js, which only decodes H.264
-// video + AAC/MP3 audio. (It does NOT support MPEG-2, HEVC/H.265, AC-3/E-AC-3 or
-// MP2 — those play in STBemu/VLC because they feed native ffmpeg, not a browser.)
-// A stream whose codecs are all in these sets can be copied straight into the
-// output TS (cheap remux); anything else must be transcoded by ffmpeg.
-// H.265 too: mpegts.js 1.8 plays HEVC over MPEG-TS, and browsers that decode
-// it (Chrome with hardware, Safari) shouldn't have a 4K channel re-encoded.
+// The web player pulls raw MPEG-TS through mpegts.js, which plays H.264 and
+// H.265 video with AAC/MP3 audio. MPEG-2 video and AC-3/E-AC-3/MP2 audio play
+// in STBemu/VLC (native FFmpeg) but not in a browser: for a browser those are
+// transcoded (routes/proxy.js). HEVC is passed through, as it always has been —
+// browsers that decode it (Chrome with hardware, Safari) play it, and
+// re-encoding a 4K channel would cost far more than it saves; one a browser
+// can't decode reports a decode failure (lib/playerReport.js).
 const COPY_VIDEO = new Set(['h264', 'hevc']);
 const COPY_AUDIO = new Set(['aac', 'mp3']);
 
@@ -61,8 +61,9 @@ function _containerFromFormat(formatName) {
   if (!formatName) return null;
   const names = formatName.toLowerCase().split(',');
   if (names.some(n => n === 'hls' || n === 'applehttp')) return 'hls';
-  if (names.includes('mpegts')) return 'mpegts';
-  if (names.some(n => ['mov', 'mp4', 'matroska', 'webm', 'm4a', 'flv'].includes(n))) return 'native';
+  // FLV too: mpegts.js plays it (a plain <video> can't).
+  if (names.includes('mpegts') || names.includes('flv')) return 'mpegts';
+  if (names.some(n => ['mov', 'mp4', 'matroska', 'webm', 'm4a'].includes(n))) return 'native';
   return null;
 }
 
@@ -70,13 +71,38 @@ function _containerFromFormat(formatName) {
 // Returns { video: 'h264'|null, audio: 'aac'|null } or null on error.
 // `headers` (optional) are the portal auth headers — required for tokenized
 // portal/CDN stream URLs, or ffprobe gets a 403 and we'd misjudge the codecs.
-// Results are cached per stream path (query string stripped) since the codec is
-// a property of the channel, not the per-play token.
-const _probeCache = new Map();   // urlPath → { probe, ts }
+// Results are cached per stream since the codec is a property of the channel,
+// not of its per-play token (probeCacheKey). Only results that read something:
+// a probe that read nothing is tried again next time.
+const _probeCache = new Map();   // probeCacheKey → { probe, ts }
 const PROBE_TTL_MS = 60 * 60 * 1000;
 
+// Query parameters that change with every play (tokens, signatures, expiries) —
+// left out of the cache key. The rest stays: on a portal's play/live.php?…
+// every channel shares the path and only `stream=` tells them apart.
+const VOLATILE_PARAM = /^(play_?token|token|sig|signature|expires?|exp|ts|hash|auth|key|session|sid|e|st)$/i;
+
+/** The cache key for a stream link: the link without its per-play parameters. */
+function probeCacheKey(streamUrl) {
+  try {
+    const u = new URL(streamUrl);
+    const kept = [...u.searchParams.entries()].filter(([k]) => !VOLATILE_PARAM.test(k)).sort(([a], [b]) => a.localeCompare(b));
+    return `${u.origin}${u.pathname}${kept.length ? `?${new URLSearchParams(kept)}` : ''}`;
+  } catch {
+    return String(streamUrl);
+  }
+}
+
+// ffprobe's reason for reading nothing: its error line, not decoder chatter
+// from stream detection (which also comes out at -v error).
+const PROBE_NOISE = /\[(h264|hevc|mpeg2video|aac|ac3|mp3|eac3)[^\]]*\]|non-existing (PPS|SPS)|decode_slice_header|no frame!|missing picture/i;
+function probeFailureReason(stderr) {
+  const lines = String(stderr || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return lines.filter((l) => !PROBE_NOISE.test(l)).pop() || lines.pop() || null;
+}
+
 async function probeCodecs(streamUrl, headers = null) {
-  const cacheKey = streamUrl.split('?')[0];
+  const cacheKey = probeCacheKey(streamUrl);
   const hit = _probeCache.get(cacheKey);
   if (hit && Date.now() - hit.ts < PROBE_TTL_MS) return hit.probe;
 
@@ -99,7 +125,8 @@ async function probeCodecs(streamUrl, headers = null) {
     probe.stderr.on('data', d => { if (errOut.length < 4000) errOut += d.toString(); });
 
     const finish = (result) => {
-      if (result) _probeCache.set(cacheKey, { probe: result, ts: Date.now() });
+      // A probe that read nothing (a stalled source, a stale token) isn't kept.
+      if (result && (result.video || result.audio)) _probeCache.set(cacheKey, { probe: result, ts: Date.now() });
       resolve(result);
     };
 
@@ -121,7 +148,7 @@ async function probeCodecs(streamUrl, headers = null) {
         const container = _containerFromFormat(json.format?.format_name);
         const direct = browserDirectPlayable({ video, audio });
         // Nothing read: why, from ffprobe itself (its last error line).
-        const why = !vs && !as ? errOut.trim().split(/\r?\n/).filter(Boolean).pop() : null;
+        const why = !vs && !as ? probeFailureReason(errOut) : null;
         const describe = describeStreams(vs, as, container) + (why ? ` — ffprobe: ${why}` : '');
         log.info(TAG, `probe: ${describe} browser-direct=${direct}`);
         finish({ video, audio, container, describe });
@@ -224,7 +251,9 @@ function _codecArgs(probe) {
 // filter is needed; it only applies when the audio is actually AAC.
 function buildDownloadArgs(streamUrl, headers, outPath, probe = null) {
   const inputArgs = _inputArgs(streamUrl, headers);
-  const args = ['-hide_banner', '-loglevel', 'warning', '-y', ...inputArgs, '-i', streamUrl, '-c', 'copy'];
+  // The first video and audio — the ones the probe described (FFmpeg's own pick
+  // is the audio with the most channels, which may not be the probed AAC).
+  const args = ['-hide_banner', '-loglevel', 'warning', '-y', ...inputArgs, '-i', streamUrl, '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy'];
   if (!probe || probe.audio === 'aac') args.push('-bsf:a', 'aac_adtstoasc');
   // outPath is a ".mp4.part" staging file — force the muxer explicitly since
   // ffmpeg would otherwise guess it from the (unrecognized) ".part" extension.
@@ -246,7 +275,8 @@ async function transcode(streamUrl, req, res, headers = null) {
   const outputArgs = ['-f', 'mpegts', 'pipe:1'];
   const mode = codecArgs.includes('libx264') ? 're-encode' : 'copy';
 
-  const args = ['-hide_banner', '-loglevel', 'warning', ...inputArgs, '-i', streamUrl, ...codecArgs, ...outputArgs];
+  // The first video and audio, as probed (see buildDownloadArgs).
+  const args = ['-hide_banner', '-loglevel', 'warning', ...inputArgs, '-i', streamUrl, '-map', '0:v:0?', '-map', '0:a:0?', ...codecArgs, ...outputArgs];
   log.info(TAG, `spawning FFmpeg [${mode}]: ffmpeg ${args.join(' ')}`);
 
   const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -301,4 +331,4 @@ async function transcode(streamUrl, req, res, headers = null) {
   });
 }
 
-module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams };
+module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams, probeCacheKey, probeFailureReason, _containerFromFormat };

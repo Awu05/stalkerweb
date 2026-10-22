@@ -2,9 +2,9 @@
 
 // Live channels as HLS, for cast devices (Chromecast, Apple TV): they can't
 // play the raw MPEG-TS most portals send. While a channel is being cast,
-// FFmpeg reads it from this server's own /proxy/stream/<id> — which already
-// resolves the portal link and turns codecs a browser can't decode into
-// H.264/AAC — and only re-wraps it into HLS segments in a temp folder (no
+// FFmpeg reads it from this server's own /proxy/stream/<id> — which resolves
+// the portal link (and, as this isn't a browser, passes the codecs through as
+// they are) — and only re-wraps it into HLS segments in a temp folder (no
 // re-encode, so little CPU). A session ends once the device stops asking for
 // it, or when its FFmpeg exits; the next request starts it again.
 

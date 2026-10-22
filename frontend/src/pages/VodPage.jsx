@@ -10,6 +10,7 @@ import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatc
 import { continueTarget, hasWatchedShow, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
 import VodFilters from '@/components/VodFilters'
+import { ClearSearch } from '@/components/ui/clear-search'
 import { useCategoryListing } from '@/lib/useCategoryListing'
 import { NO_FILTERS, filtersActive, applyVodFilters, sortVodItems, filterOptions } from '@/lib/vodFilters'
 import { queueDownload } from '@/lib/downloads'
@@ -402,7 +403,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
   // Open straight at Continue's season, its episode highlighted — for a show
   // the viewer has started. (One not started opens at its seasons; at the
   // show's end there's nothing to continue: the seasons list shows.)
-  const started = hasWatchedShow({ showId: item.id, history: watch.history, progress: watch.progress, watchedEpisodes: watch.watchedEpisodes })
+  const started = useMemo(() => hasWatchedShow({ showId: item.id, ...watch }), [item.id, watch])
   useEffect(() => {
     if (!next || !started || picked.current) return
     setSelectedSeason(next.season)
@@ -1005,9 +1006,11 @@ export default function VodPage() {
               placeholder={selectedCategory ? `Search in ${selectedCategory.title}…` : 'Select a category first'}
               value={search}
               onChange={e => handleSearchChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape' && search) handleSearchChange('') }}
               disabled={!selectedCategory}
-              className="w-full rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-8 pr-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] outline-none focus:border-[var(--color-primary-light)] disabled:opacity-40"
+              className="w-full rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] pl-8 pr-7 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] outline-none focus:border-[var(--color-primary-light)] disabled:opacity-40"
             />
+            <ClearSearch value={search} onClear={() => handleSearchChange('')} />
           </div>
           {selectedCategory && (
             <span className="hidden sm:inline text-xs text-[var(--color-muted)]">

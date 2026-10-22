@@ -22,16 +22,24 @@ const parts = (key, showId, seasons) => {
 }
 
 /**
- * Whether the viewer has watched any of a show: a Recently watched entry, a
- * resume point, or an episode ticked. Only then does its sheet open at
- * Continue's season — a show not started opens at its seasons.
+ * The titles the viewer has started: finished, in Recently watched, with a
+ * resume point, or with an episode ticked. One rule for the "Not watched"
+ * filter and for where a show's sheet opens (the apps' SeriesProgress.kt too).
  */
-export function hasWatchedShow({ showId, history = [], progress = [], watchedEpisodes = [] }) {
-  const id = String(showId)
-  const prefix = `${id}:`
-  return history.some((e) => String(e.id) === id) ||
-    progress.some((e) => String(e.key).startsWith(prefix)) ||
-    watchedEpisodes.some((k) => String(k).startsWith(prefix))
+export function startedTitleIds({ watched = [], history = [], progress = [], watchedEpisodes = [] } = {}) {
+  const ids = new Set(watched.map(String))
+  for (const e of history) ids.add(String(e.id))
+  for (const e of progress) ids.add(String(e.key).split(':')[0])
+  for (const k of watchedEpisodes) ids.add(String(k).split(':')[0])
+  return ids
+}
+
+/**
+ * Whether the viewer has started a show (startedTitleIds). Only then does its
+ * sheet open at Continue's season — a show not started opens at its seasons.
+ */
+export function hasWatchedShow({ showId, ...lists }) {
+  return startedTitleIds(lists).has(String(showId))
 }
 
 /**

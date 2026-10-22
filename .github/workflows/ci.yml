@@ -28,7 +28,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
       # FFmpeg for the tests that run it (casting live TV as HLS), as in the image.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      # Checks only: if it can't be installed, its tests skip (the release requires it).
+      - timeout-minutes: 12
+        continue-on-error: true
+        # Retried: a package mirror that hangs is given up on and tried again.
+        run: |
+          for i in 1 2 3; do
+            timeout 120 sudo apt-get update -qq && timeout 180 sudo apt-get install -y -qq ffmpeg && break
+            echo "FFmpeg install attempt $i failed — retrying"; sleep 5
+          done
       - run: npm ci
       - run: npm run lint
       - run: npm test

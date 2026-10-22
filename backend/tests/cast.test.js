@@ -231,7 +231,8 @@ describe('CastHls', () => {
 // With a real FFmpeg (CI, the Docker image): a generated MPEG-TS stream, served
 // over HTTP as /proxy/stream would, comes out as an HLS playlist and segments.
 const hasFfmpeg = (() => {
-  try { return spawnSync('ffmpeg', ['-version'], { timeout: 5000 }).status === 0 } catch { return false }
+  // Both: the probe runs ffprobe, the packager ffmpeg.
+  try { return ['ffmpeg', 'ffprobe'].every((bin) => spawnSync(bin, ['-version'], { timeout: 5000 }).status === 0) } catch { return false }
 })()
 
 describe.skipIf(!hasFfmpeg)('CastHls with FFmpeg', () => {

@@ -179,7 +179,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
         title = { Text("Set logo — ${channel.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(search, { search = it }, singleLine = true, label = { Text("Search by channel name") })
+                OutlinedTextField(search, { search = it }, singleLine = true, label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 found?.let { logo ->
                     Row(
                         Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { url = logo }
@@ -286,7 +286,7 @@ fun GroupEditDialog(
                         }
                     }
                 }
-                OutlinedTextField(query, { query = it }, singleLine = true, label = { Text("Search channels to add…") })
+                OutlinedTextField(query, { query = it }, singleLine = true, label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 LazyColumn(Modifier.heightIn(max = 180.dp)) {
                     items(suggestions, key = { "s" + it.uniqueId }) { c ->
                         Row(
