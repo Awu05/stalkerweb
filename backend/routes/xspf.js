@@ -30,7 +30,7 @@ function xmlEscape(str) {
 
 // Builds the XSPF document. Tracks carry the streams; the trailing VLC
 // extension arranges them into one <vlc:node> folder per category by track id.
-function buildXspf(channels, groups, base, logoFor = () => '') {
+function buildXspf(channels, groups, base, logoFor = () => '', streamQuery = '') {
   const tracks = [];
   const folders = new Map(); // category → [track id]
 
@@ -38,7 +38,7 @@ function buildXspf(channels, groups, base, logoFor = () => '') {
     const logo = logoFor(ch);
     tracks.push(
       '    <track>',
-      `      <location>${xmlEscape(`${base}/proxy/stream/${ch.uniqueId}`)}</location>`,
+      `      <location>${xmlEscape(`${base}/proxy/stream/${ch.uniqueId}${streamQuery}`)}</location>`,
       `      <title>${xmlEscape(ch.name)}</title>`,
       ...(logo ? [`      <image>${xmlEscape(logo)}</image>`] : []),
       `      <extension application="${VLC_EXT}"><vlc:id>${tid}</vlc:id></extension>`,
@@ -94,7 +94,9 @@ module.exports = function xspfModule(appState, logoManager) {
     const base = baseUrl(req);
     // Hidden genres/languages and adult channels are left out (?all=1 keeps them).
     const shown = channels.filter(exportFilterFor(req, appState).keep);
-    const xml   = buildXspf(shown, channelManager.getGroups(), base, logoFor);
+    // A viewer's playlist names them on each stream too (Settings → Activity).
+    const own   = typeof req.query.viewer === 'string' && req.query.viewer ? `?viewer=${encodeURIComponent(req.query.viewer)}` : '';
+    const xml   = buildXspf(shown, channelManager.getGroups(), base, logoFor, own);
 
     log.info(TAG, `serving playlist: ${shown.length} of ${channels.length} channels`);
     res.set('Content-Type', 'application/xspf+xml; charset=utf-8');

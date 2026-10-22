@@ -85,6 +85,8 @@ module.exports = function m3uModule(appState, logoManager) {
     const prefix = req.query.prefix === '1';
 
     const base  = baseUrl(req);
+    // A viewer's playlist names them on each stream too (Settings → Activity).
+    const own   = typeof req.query.viewer === 'string' && req.query.viewer ? `?viewer=${encodeURIComponent(req.query.viewer)}` : '';
     const lines = ['#EXTM3U x-tvg-url=""'];
 
     for (const { ch, group } of groupChannels(shown, groups)) {
@@ -101,7 +103,7 @@ module.exports = function m3uModule(appState, logoManager) {
         // Some players (older VLC, several TV apps) group on #EXTGRP rather
         // than the group-title attribute.
         `#EXTGRP:${group}`,
-        `${base}/proxy/stream/${ch.uniqueId}`
+        `${base}/proxy/stream/${ch.uniqueId}${own}`
       );
     }
 

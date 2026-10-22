@@ -335,7 +335,8 @@ module.exports = function stremioModule(appState, { logoManager = null, idStore,
 
     res.json({
       streams: [{
-        url: `${baseUrl(req)}/proxy${path}`,
+        // The addon's viewer named on the stream too (Settings → Activity).
+        url: `${baseUrl(req)}/proxy${path}${req.viewerInPath && req.viewer ? `${path.includes('?') ? '&' : '?'}viewer=${encodeURIComponent(req.viewer.id)}` : ''}`,
         name: 'StalkerWeb',
         title,
         // Portal streams are HLS or MPEG-TS, not browser-ready MP4: Stremio's

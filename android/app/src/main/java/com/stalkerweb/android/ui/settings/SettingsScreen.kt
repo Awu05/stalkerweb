@@ -250,9 +250,19 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 
 @Composable
 private fun ActivityTab(viewModel: SettingsViewModel, state: SettingsState) {
-    DisposableEffect(viewModel) {
-        viewModel.watchActivity(true)
-        onDispose { viewModel.watchActivity(false) }
+    // Polled while the tab is on screen and the app in front — not after Home
+    // or with the screen off (the composition stays, so onDispose alone won't).
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(viewModel, lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.watchActivity(true)
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.watchActivity(false)
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)   // ON_START comes at once when already started
+        onDispose { lifecycle.removeObserver(observer); viewModel.watchActivity(false) }
     }
     val a = state.activity
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -69,9 +69,14 @@ class SettingsViewModel(
         if (!on) return
         activityJob = viewModelScope.launch {
             while (isActive) {
-                runCatching { settings.activity() }
-                    .onSuccess { _state.value = _state.value.copy(activity = it, activityError = null) }
-                    .onFailure { _state.value = _state.value.copy(activityError = it.toApiError().message ?: "Could not load the activity") }
+                try {
+                    val a = settings.activity()
+                    _state.value = _state.value.copy(activity = a, activityError = null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e   // the tab left the screen: not an error
+                } catch (e: Exception) {
+                    _state.value = _state.value.copy(activityError = e.toApiError().message ?: "Could not load the activity")
+                }
                 delay(5_000)
             }
         }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import express from 'express'
-import { ActivityTracker, streamOf } from '../lib/activity.js'
+import { ActivityTracker, streamOf, vodKey } from '../lib/activity.js'
 import { deviceOf } from '../lib/device.js'
 import activityRoutes from '../routes/activity.js'
 
@@ -17,6 +17,22 @@ describe('streamOf', () => {
     expect(streamOf('/vod/stream.m3u8', { videoId: '200', seasonId: 's1', episodeId: 'e3' })).toEqual({ kind: 'vod', id: '200:s1:e3', via: 'app' })
   })
 
+  it("knows an HLS movie's playlists and segments by their key", () => {
+    expect(streamOf('/hls/seg/abc.ts', { v: '200:s1:e3' })).toEqual({ kind: 'vod', id: '200:s1:e3', via: 'app' })
+    expect(streamOf('/hls', { url: 'x', v: '100' })).toEqual({ kind: 'vod', id: '100', via: 'app' })
+  })
+
+  it('takes a malformed id as it is', () => {
+    expect(streamOf('/stream/%E0', {})).toEqual({ kind: 'live', id: '%E0', via: 'app' })
+  })
+
+  it('keys an episode as Continue Watching does — empty parts left out', () => {
+    expect(vodKey({ videoId: '200', seasonId: 's1', episodeId: 'e3' })).toBe('200:s1:e3')
+    expect(vodKey({ videoId: '200', seasonId: 's1' })).toBe('200:s1')
+    expect(vodKey({ videoId: '100', seasonId: '', episodeId: '' })).toBe('100')
+    expect(streamOf('/vod/stream.m3u8', { videoId: '200', seasonId: 's1' }).id).toBe('200:s1')
+  })
+
   it('leaves out what plays nothing', () => {
     expect(streamOf('/hls/seg/abc.ts', {})).toBeNull()      // no channel tag
     expect(streamOf('/logos/1.png', {})).toBeNull()
@@ -31,6 +47,9 @@ describe('deviceOf', () => {
     expect(deviceOf('TiviMate/5.1.6 (Android 12)')).toBe('TiviMate')
     expect(deviceOf('VLC/3.0.20 LibVLC/3.0.20')).toBe('VLC')
     expect(deviceOf('ExoPlayerLib/2.19.1')).toBe('Android app')
+    expect(deviceOf('StalkerWeb-Android/0.4.43 (phone)')).toBe('StalkerWeb Android app')
+    expect(deviceOf('StalkerWeb-Android/0.4.43 (TV)')).toBe('StalkerWeb TV app')
+    expect(deviceOf('Dalvik/2.1.0 (Linux; U; Android 14; Pixel 8 Build/AP1A)')).toBe('Android device')
     expect(deviceOf('Lavf/60.16.100')).toBe('FFmpeg-based player')
     expect(deviceOf(IPHONE)).toBe('iPhone · Chrome (iOS 18.1)')
     expect(deviceOf('')).toBe('Unknown device')
@@ -67,11 +86,37 @@ describe('ActivityTracker', () => {
     expect(a.list()[0].startedAt).toBe(1_000)
   })
 
-  it('drops the last channel when a device moves on to another', () => {
+  it('drops the last channel when the website or app zaps to another', () => {
     make()
     a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '5' })()
+    a.claim({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '6', viewerId: 'andy' })   // the player resolving channel 6
     a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '6' })()
     expect(a.list().map((s) => s.id)).toEqual(['6'])
+  })
+
+  it("keeps an IPTV app's multiview channels, however their requests interleave", () => {
+    make()
+    for (let i = 0; i < 6; i++) {
+      a.touch({ ip: '10.0.0.7', ua: 'TiviMate/5', kind: 'live', id: '5' })(); t += 1_000
+      a.touch({ ip: '10.0.0.7', ua: 'TiviMate/5', kind: 'live', id: '6' })(); t += 1_000
+    }
+    expect(a.list().map((s) => s.id).sort()).toEqual(['5', '6'])
+    expect(a.list().every((s) => s.startedAt === 1_000 || s.startedAt === 2_000)).toBe(true)
+  })
+
+  it('knows a TV fetching a cast movie, and whose it is', () => {
+    make()
+    a.claim({ ip: '10.0.0.5', kind: 'vod', id: '100', viewerId: 'andy', cast: true })
+    a.touch({ ip: '10.0.0.9', ua: 'Mozilla/5.0 (X11; Linux aarch64) CrKey/1.56', kind: 'vod', id: '100' })()
+    expect(a.list()[0]).toMatchObject({ via: 'cast', viewerId: 'andy', device: 'Chromecast' })
+  })
+
+  it('forgets what nobody watches even while no one looks at Activity', () => {
+    make()
+    a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'vod', id: '100' })()
+    t += 2 * 60_000
+    a.touch({ ip: '10.0.0.6', ua: DESKTOP, kind: 'live', id: '5' })()   // any request prunes, once a minute
+    expect(a.size).toBe(1)
   })
 
   it('keeps two devices on one address apart', () => {
