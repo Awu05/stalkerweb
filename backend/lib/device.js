@@ -17,7 +17,10 @@ const APPS = [
   [/Plex/i, 'Plex'],
   [/Stremio/i, 'Stremio'],
   [/Dispatcharr/i, 'Dispatcharr'],
-  [/ExoPlayerLib|androidx\.media3|okhttp/i, 'Android app'],
+  [/StalkerWeb-Android\/\S+ \(TV\)/i, 'StalkerWeb TV app'],
+  [/StalkerWeb-Android/i, 'StalkerWeb Android app'],
+  [/ExoPlayerLib|AndroidXMedia3|androidx\.media3|okhttp/i, 'Android app'],
+  [/Dalvik\//i, 'Android device'],
   [/Lavf\//i, 'FFmpeg-based player'],   // Jellyfin, Dispatcharr and others pull streams through FFmpeg
 ];
 

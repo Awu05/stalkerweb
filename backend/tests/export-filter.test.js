@@ -68,6 +68,12 @@ describe('export routes', () => {
     expect(streamIds(await get('/api/xspf'))).toEqual(['1', '6'])
   })
 
+  it("a viewer's playlist names them on each stream (Settings → Activity)", async () => {
+    expect(await get('/api/m3u?viewer=v1')).toMatch(/\/proxy\/stream\/1\?viewer=v1\b/)
+    expect(await get('/api/xspf?viewer=v1')).toMatch(/\/proxy\/stream\/1\?viewer=v1\b/)
+    expect(await get('/api/m3u')).not.toMatch(/\?viewer=/)
+  })
+
   it('XMLTV guide lists the same channels as the M3U', async () => {
     expect(guideIds(await get('/api/xmltv'))).toEqual(['1', '6'])
   })

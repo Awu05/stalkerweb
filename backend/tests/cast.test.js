@@ -152,6 +152,34 @@ describe('CastHls', () => {
     expect(hls.segment('9', 'seg00001.ts')).toBeNull()
   })
 
+  it('reopens a source that ended (an MPEG-TS restart) while the TV watches, carrying the playlist on', async () => {
+    hls = make()
+    const p = hls.playlist('21'); writePlaylist('21'); await p
+    procs[0].emit('close', 0)
+    expect(procs).toHaveLength(2)
+    expect(procs[1].args.join(' ')).toContain('append_list+discont_start')
+    expect(hls.size).toBe(1)
+    expect(fs.existsSync(dirOf('21'))).toBe(true)
+  })
+
+  it('gives up on a source that keeps ending, or that FFmpeg fails on', async () => {
+    hls = make({ maxRestartsPerMinute: 2 })
+    const p = hls.playlist('22'); writePlaylist('22'); await p
+    procs[0].emit('close', 0)
+    procs[1].emit('close', 0)
+    procs[2].emit('close', 0)
+    expect(procs).toHaveLength(3)
+    expect(hls.size).toBe(0)
+    hls.playlist('23').catch(() => {})
+    procs[3].emit('close', 1)
+    expect(procs).toHaveLength(4)
+  })
+
+  it("reads this server's stream with its own user agent", () => {
+    const a = hlsArgs('http://x', '/tmp/x', { userAgent: 'StalkerWeb-internal/abc' })
+    expect(a[a.indexOf('-user_agent') + 1]).toBe('StalkerWeb-internal/abc')
+  })
+
   it('stops a channel when asked, and only that one', async () => {
     hls = make()
     hls.playlist('11').catch(() => {})

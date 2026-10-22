@@ -18,15 +18,20 @@ const TAG = 'cast';
 // seg + its number — the clock's (YYYYMMDDhhmmss…), see -hls_start_number_source.
 const SEGMENT = /^seg\d{1,20}\.ts$/;
 
-/** FFmpeg's arguments: copy the streams, 4 s segments, the last 10 listed, old ones deleted. */
-function hlsArgs(inputUrl, dir) {
+/**
+ * FFmpeg's arguments: copy the streams, 4 s segments, the last 10 listed, old
+ * ones deleted. `append`: carry on a session whose source ended (its playlist
+ * kept, a discontinuity marked before the new segments).
+ */
+function hlsArgs(inputUrl, dir, { userAgent = null, append = false } = {}) {
   return [
     '-hide_banner', '-loglevel', 'warning',
+    ...(userAgent ? ['-user_agent', userAgent] : []),
     // No -reconnect_at_eof: for an HLS channel the input is a playlist, which
     // ends after every download — FFmpeg then re-requested it ~10 times a
     // second, burning portal tokens until the source answered 403. A source
-    // that really ends makes FFmpeg exit, and the TV's next request starts the
-    // session again (numbered on from the clock, so it carries on).
+    // that really ends (an MPEG-TS pipe at a restart) makes FFmpeg exit, and
+    // the session starts it again (see _spawn).
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
     '-fflags', '+genpts',
     '-i', inputUrl,
@@ -35,7 +40,7 @@ function hlsArgs(inputUrl, dir) {
     '-f', 'hls',
     '-hls_time', '4',
     '-hls_list_size', '10',
-    '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
+    '-hls_flags', `delete_segments+independent_segments+omit_endlist${append ? '+append_list+discont_start' : ''}`,
     // Numbered by the clock: a session started again carries on from the
     // TV's last segment number instead of going back to 0.
     '-hls_start_number_source', 'datetime',
@@ -54,8 +59,11 @@ class CastHls {
    * @param {number} [o.maxSessions]     channels cast at once; the least recently used gives way
    */
   constructor({ inputUrlFor, root = path.join(os.tmpdir(), 'stalkerweb-cast'), idleMs = 30_000, startTimeoutMs = 20_000,
-    maxSessions = 3, spawn = childProcess.spawn, now = Date.now, pollMs = 250, available = () => true } = {}) {
+    maxSessions = 3, spawn = childProcess.spawn, now = Date.now, pollMs = 250, available = () => true, userAgent = null,
+    maxRestartsPerMinute = 5 } = {}) {
     this._inputUrlFor = inputUrlFor;
+    this._userAgent = userAgent;
+    this._maxRestarts = maxRestartsPerMinute;
     this.available = available;
     this._root = root;
     this._idleMs = idleMs;
@@ -112,24 +120,45 @@ class CastHls {
     const dir = path.join(this._root, id.replace(/[^\w-]/g, '_'));
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
-    const input = this._inputUrlFor(id);
     log.info(TAG, `ch ${id}: casting as HLS`);
-    const proc = this._spawn('ffmpeg', hlsArgs(input, dir), { stdio: ['ignore', 'ignore', 'pipe'] });
-    const s = { proc, dir, lastUsed: this._now(), exited: false, lastError: '' };
+    const s = { proc: null, dir, lastUsed: this._now(), exited: false, lastError: '', restarts: [] };
+    this._sessions.set(id, s);
+    this._spawnFor(id, s, false);
+    return s;
+  }
+
+  // FFmpeg for a session. When it ends on its own while the TV is still
+  // watching — an MPEG-TS source that restarted ends its pipe — it's started
+  // again into the same folder (playlist kept, a discontinuity marked); more
+  // than a few times a minute and the session ends.
+  _spawnFor(id, s, append) {
+    const proc = this._spawn('ffmpeg', hlsArgs(this._inputUrlFor(id), s.dir, { userAgent: this._userAgent, append }), { stdio: ['ignore', 'ignore', 'pipe'] });
+    s.proc = proc;
     proc.stderr?.on('data', (d) => {
       const t = String(d).trim();
       if (!t) return;
       s.lastError = t.split(/\r?\n/).pop();
       log.debug(TAG, t);
     });
-    const ended = (why) => {
+    let over = false;
+    const ended = (why, code) => {
+      if (over) return;
+      over = true;
+      if (this._sessions.get(id) !== s) return;   // stopped on purpose
+      const t = this._now();
+      s.restarts = s.restarts.filter((at) => t - at < 60_000);
+      const watched = t - s.lastUsed < this._idleMs;
+      if (code === 0 && watched && s.restarts.length < this._maxRestarts) {
+        s.restarts.push(t);
+        log.info(TAG, `ch ${id}: the source ended — reopening it`);
+        this._spawnFor(id, s, true);
+        return;
+      }
       s.exited = true;
-      if (this._sessions.get(id) === s) this._stop(id, why);
+      this._stop(id, why);
     };
-    proc.on('error', (e) => ended(`ffmpeg failed: ${e.message}`));
-    proc.on('close', (code) => ended(`ffmpeg exited (${code})`));
-    this._sessions.set(id, s);
-    return s;
+    proc.on('error', (e) => ended(`ffmpeg failed: ${e.message}`, null));
+    proc.on('close', (code) => ended(`ffmpeg exited (${code})`, code));
   }
 
   _stop(id, why) {
@@ -137,7 +166,7 @@ class CastHls {
     if (!s) return;
     this._sessions.delete(id);
     log.info(TAG, `ch ${id}: cast stream stopped — ${why}`);
-    if (!s.exited) { try { s.proc.kill('SIGKILL'); } catch { /* already gone */ } }
+    if (!s.exited) { try { s.proc?.kill('SIGKILL'); } catch { /* already gone */ } }
     try { fs.rmSync(s.dir, { recursive: true, force: true }); } catch { /* removed on the next start */ }
   }
 

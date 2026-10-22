@@ -321,15 +321,25 @@ const downloadsRoutes = require('./routes/downloads')(downloadManager, appState)
 
 const channelRoutes = require('./routes/channels')(appState);
 const epgRoutes = require('./routes/epg')(appState);
+// This server pulling its own /proxy/stream (the cast packager, a format probe):
+// under the share token, with a user agent of its own — so Settings → Activity
+// can leave these out without guessing (a real FFmpeg-based player on this
+// machine still shows).
+appState.internalUA = `StalkerWeb-internal/${require('crypto').randomBytes(8).toString('hex')}`;
+function selfStreamUrl(id) {
+  const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
+  return `http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}`;
+}
+
 // Cast devices: links under the playback-only share token, and live channels
 // re-wrapped as HLS while they're cast (FFmpeg reading this server's own
 // /proxy/stream, under the same token).
 appState.shareToken = access.shareToken;
 {
   const { CastHls } = require('./stalker/CastHls');
-  const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
   appState.castHls = new CastHls({
-    inputUrlFor: (id) => `http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}`,
+    inputUrlFor: selfStreamUrl,
+    userAgent: appState.internalUA,
     available: () => require('./stalker/FfmpegService').isAvailable(),   // checked when first needed
   });
 }
@@ -338,8 +348,7 @@ appState.shareToken = access.shareToken;
 appState.describeChannel = async (id) => {
   const ffmpegSvc = require('./stalker/FfmpegService');
   if (!ffmpegSvc.isAvailable()) return null;
-  const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
-  const probe = await ffmpegSvc.probeCodecs(`http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}`);
+  const probe = await ffmpegSvc.probeCodecs(selfStreamUrl(id), { 'User-Agent': appState.internalUA });
   return probe?.describe ?? null;
 };
 const streamRoutes = require('./routes/stream')(appState, config);

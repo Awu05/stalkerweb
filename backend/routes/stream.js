@@ -106,7 +106,7 @@ module.exports = function streamRoutes(appState) {
 
     appState.touchActivity?.();
     // Settings → Activity: this address plays the channel for this viewer.
-    appState.activity?.claim({ ip: req.ip, kind: 'live', id: String(channel.uniqueId ?? uniqueId), viewerId: req.viewer?.id, title: channel.name });
+    appState.activity?.claim({ ip: req.ip, ua: req.get('user-agent') || '', kind: 'live', id: String(channel.uniqueId ?? uniqueId), viewerId: req.viewer?.id, title: channel.name });
 
     // Resolve once up-front to tell the player which engine to use (hls.js vs
     // mpegts.js vs native). The result is cached by ChannelManager so the

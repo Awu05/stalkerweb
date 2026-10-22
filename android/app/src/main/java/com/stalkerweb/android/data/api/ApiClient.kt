@@ -40,6 +40,7 @@ object ApiClient {
             if (guard?.blocked == true) return@Interceptor refusedResponse(request, guard.message)
             val builder = request.newBuilder()
             requestHeaders(accessKey(), viewerId()).forEach { (k, v) -> builder.header(k, v) }
+            builder.header("User-Agent", APP_USER_AGENT)   // as the player's streams (Settings → Activity)
             val send = {
                 val response: Response = chain.proceed(builder.build())
                 if (guard != null) {

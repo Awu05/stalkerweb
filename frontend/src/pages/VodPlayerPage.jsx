@@ -312,7 +312,7 @@ export default function VodPlayerPage() {
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
       hlsRef.current = hls
-      let mediaRecovered = false
+      let lastRecover = 0   // one recoverMediaError a minute (a film's hiccups are hours apart; a video that can't be decoded fails at once)
       hls.loadSource(url)
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -324,15 +324,18 @@ export default function VodPlayerPage() {
         if (data.fatal) {
           const t = hlsErrorText(data)
           reportPlayerError({ title: displayTitleRef.current, engine: 'hls.js', kind: t.kind, detail: t.detail })
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
-            mediaRecovered = true   // once: a video this device can't decode fails again
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && Date.now() - lastRecover > 60_000) {
+            lastRecover = Date.now()
             hls.recoverMediaError()
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             // Can't be decoded here: the device's own player (Safari's takes
-            // formats the page player won't), or say so.
+            // formats the page player won't) from where it was, or say so.
+            const at = video.currentTime
             hls.destroy(); hlsRef.current = null
-            if (video.canPlayType('application/vnd.apple.mpegurl')) playNative(url)
-            else { setStatus('error'); setErrorMsg(`This video can't be played on this device (${t.detail || 'decode failed'}).`) }
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              if (at > 0) video.addEventListener('loadedmetadata', () => { try { video.currentTime = at } catch { /* seek rejected */ } }, { once: true })
+              playNative(url)
+            } else { setStatus('error'); setErrorMsg(`This video can't be played on this device (${t.detail || 'decode failed'}).`) }
           } else {
             hls.destroy(); hlsRef.current = null
             playNative(url)

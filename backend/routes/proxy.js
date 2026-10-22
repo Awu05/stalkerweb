@@ -19,7 +19,7 @@ const https = require('https');
 const crypto = require('crypto');
 const log = require('../logger');
 const { baseUrl } = require('../lib/publicUrl');
-const { streamOf } = require('../lib/activity');
+const { streamOf, vodKey } = require('../lib/activity');
 const { channelIdRules, hlsUrlRules } = require('../middleware/validate');
 const { readyForClient } = require('../lib/clientSession');
 const { StreamDiagnostics, firstTimestamps } = require('../lib/streamDiagnostics');
@@ -138,7 +138,9 @@ function isPlaylistUrl(url) {
 // `channelId` (optional) tags emitted URLs with `ch=<id>` so the /hls and
 // /hls/seg routes can attribute a CDN 403/404 (expired token) back to the
 // channel — recording health and evicting its stale resolved-stream cache.
-function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = null) {
+// `extra` (optional, already encoded: "v=<key>") rides along on every URL too —
+// an HLS movie's key, so Settings → Activity sees its playlists and segments.
+function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = null, extra = null) {
   const sig = (abs) => (secret ? signProxyUrl(abs, secret) : null);
   const ch = (channelId !== null && channelId !== undefined) ? String(channelId) : null;
   return body
@@ -156,6 +158,7 @@ function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = 
           let u = `${proxyOrigin}/proxy/hls?url=${encodeProxyUrl(abs)}`;
           if (s)  u += `&sig=${s}`;
           if (ch) u += `&ch=${ch}`;
+          if (extra) u += `&${extra}`;
           return `URI="${u}"`;
         });
       }
@@ -167,6 +170,7 @@ function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = 
         let u = `${proxyOrigin}/proxy/hls?url=${encodeProxyUrl(abs)}`;
         if (s)  u += `&sig=${s}`;
         if (ch) u += `&ch=${ch}`;
+        if (extra) u += `&${extra}`;
         return u;
       }
       // .ts stays the path suffix (FFmpeg's extension check); sig/ch ride the query.
@@ -174,6 +178,7 @@ function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = 
       const qp = [];
       if (s)  qp.push(`sig=${s}`);
       if (ch) qp.push(`ch=${ch}`);
+      if (extra) qp.push(extra);
       if (qp.length) u += `?${qp.join('&')}`;
       return u;
     })
@@ -249,12 +254,12 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
   const router = express.Router();
 
   // Settings → Activity (lib/activity.js): each stream request, for as long as
-  // it's open. Not this server's own pulls (the cast packager, a probe — FFmpeg
-  // on this machine).
+  // it's open. Not this server's own pulls (the cast packager, a probe): they
+  // carry its private user agent (appState.internalUA).
   router.use((req, res, next) => {
     const what = appState.activity ? streamOf(req.path, req.query) : null;
     const ua = req.get('user-agent') || '';
-    if (what && !(/^(::1|127\.|::ffff:127\.)/.test(req.ip || '') && /^Lavf\//.test(ua))) {
+    if (what && !(appState.internalUA && ua === appState.internalUA)) {
       const named = req.get('x-viewer') || (typeof req.query.viewer === 'string' ? req.query.viewer : null) || req.viewerFromPath || null;
       const viewers = appState.viewers;
       const viewerId = (named && viewers?.get(String(named))?.id) || (req.activityViewerName && viewers?.findByName(req.activityViewerName)?.id) || null;
@@ -454,6 +459,13 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     return f.stopped ? null : f;
   }
 
+  // An HLS movie's playlists keep its key on every URL (v=), for Settings → Activity.
+  const tagsOf = (req) => {
+    const v = typeof req.query?.v === 'string' && req.query.v ? req.query.v
+      : /^\/vod\/stream/.test(req.path) && req.query?.videoId ? vodKey(req.query) : null;
+    return v ? `v=${encodeURIComponent(v)}` : null;
+  };
+
   // The buffer's playlist for a player, rewritten through the proxy; null to
   // serve the source directly (buffer off, or this stream can't be buffered).
   async function bufferedPlaylist(req, channelId, realUrl) {
@@ -461,7 +473,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     if (!seconds || !channelId) return null;
     const f = await liveFeeder(channelId, realUrl, seconds);
     if (!f || !(await f.buffer.ready(10_000))) return null;
-    return rewriteM3u8(f.buffer.playlist(), realUrl, baseUrl(req), proxySecret, channelId);
+    return rewriteM3u8(f.buffer.playlist(), realUrl, baseUrl(req), proxySecret, channelId, tagsOf(req));
   }
 
   function heldSegment(ch, url) {
@@ -604,7 +616,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       if (channelId) diag.playlist(channelId, realUrl, body.toString('utf8'), 0);
       const smoothed = await smoothPlaylist(channelId, realUrl, body.toString('utf8'));
       if (channelId) diag.served(channelId, realUrl, smoothed);
-      const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId);
+      const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId, tagsOf(req));
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
       setCors();
@@ -724,7 +736,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     const proxyOrigin = baseUrl(req);
     const smoothed = await smoothPlaylist(channelId, realUrl, body);
     if (channelId) diag.served(channelId, realUrl, smoothed);
-    const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId);
+    const rewritten = rewriteM3u8(smoothed, realUrl, proxyOrigin, proxySecret, channelId, tagsOf(req));
 
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Cache-Control', 'no-cache, no-store');
@@ -853,7 +865,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
           response.data.on('error', reject);
         });
         const proxyOrigin = baseUrl(req);
-        const rewritten   = rewriteM3u8(Buffer.concat(allChunks).toString('utf8'), streamUrl, proxyOrigin, proxySecret);
+        const rewritten   = rewriteM3u8(Buffer.concat(allChunks).toString('utf8'), streamUrl, proxyOrigin, proxySecret, null, tagsOf(req));
         res.set('Content-Type', 'application/vnd.apple.mpegurl');
         res.set('Cache-Control', 'no-cache, no-store');
         res.set('Access-Control-Allow-Origin', '*');
@@ -1141,7 +1153,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
         return res.status(502).send(`Fetch failed: ${e.message}`);
       }
       const proxyOrigin = baseUrl(req);
-      const rewritten = rewriteM3u8(Buffer.concat(rest).toString('utf8'), realUrl, proxyOrigin, proxySecret, ch);
+      const rewritten = rewriteM3u8(Buffer.concat(rest).toString('utf8'), realUrl, proxyOrigin, proxySecret, ch, tagsOf(req));
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
       res.set('Access-Control-Allow-Origin', '*');

@@ -23,6 +23,7 @@ const tabOfCombined = (id) => Object.keys(COMBINED_ALL).find((tab) => COMBINED_A
 
 const log = require('../logger');
 const { castLink, vodContentType } = require('../lib/castLink');
+const { vodKey } = require('../lib/activity');
 const TAG = 'vod';
 
 module.exports = function vodRoutes(appState, config, { watchStore = null } = {}) {
@@ -296,9 +297,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
 
   // Settings → Activity: a movie or episode keyed as Continue Watching keys it.
   const claimVod = (req, { cast = false, title = '', subtitle = '' } = {}) => {
-    const q = req.query;
-    const id = q.seasonId && q.episodeId ? `${q.videoId}:${q.seasonId}:${q.episodeId}` : String(q.videoId ?? '');
-    appState.activity?.claim({ ip: req.ip, kind: 'vod', id, viewerId: req.viewer?.id, cast, title, subtitle });
+    appState.activity?.claim({ ip: req.ip, kind: 'vod', id: vodKey(req.query), viewerId: req.viewer?.id, cast, title, subtitle });
   };
 
   router.get('/stream', guard, async (req, res) => {
@@ -349,7 +348,12 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
   router.put('/watch', watchAnswer((req) => {
     // Every 10 s while it plays: the title and whose it is, for Settings → Activity.
     const b = req.body ?? {};
-    if (b.key) appState.activity?.claim({ ip: req.ip, kind: 'vod', id: String(b.key), viewerId: req.viewer.id, title: b.title, subtitle: b.episodeTitle });
+    if (b.key && appState.activity) {
+      appState.activity.claim({ ip: req.ip, kind: 'vod', id: String(b.key), viewerId: req.viewer.id, title: b.title, subtitle: b.episodeTitle });
+      // And it's still playing: an HLS movie between requests, or one the
+      // proxy sent to a CDN (the browser and the app save from the same device that plays).
+      appState.activity.touch({ ip: req.ip, ua: req.get('user-agent') || '', kind: 'vod', id: String(b.key), viewerId: req.viewer.id })();
+    }
     return watchStore.record(req.viewer.id, portalOf(), b);
   }));
   router.delete('/watch/history/:id', watchAnswer((req) => watchStore.removeTitle(req.viewer.id, portalOf(), req.params.id)));

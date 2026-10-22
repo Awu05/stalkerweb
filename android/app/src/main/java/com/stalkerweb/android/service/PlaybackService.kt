@@ -4,7 +4,13 @@ import android.content.Intent
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.stalkerweb.android.data.api.APP_USER_AGENT
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -32,9 +38,14 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val player = ExoPlayer.Builder(this).build()
+        // Streams fetched as the app (Settings → Activity names it), not as "Dalvik".
+        val http = DefaultHttpDataSource.Factory().setUserAgent(APP_USER_AGENT)
+        val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+            .build()
         mediaSession = MediaSession.Builder(this, player).build()
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
     }

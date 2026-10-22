@@ -502,6 +502,7 @@ export default function PlayerPage() {
   // starve the others, which previously let a single shared counter cause an
   // endless reconnect loop on some misclassified/extensionless streams.
   const mediaErrorRetryRef  = useRef(0)
+  const lastMediaRecoverRef = useRef(0)
   const hlsFallbackTriedRef = useRef(false)
   const networkErrorRetriedRef = useRef(false)
   // Mid-playback auto-recovery: live links/tokens expire and CDN/ffmpeg pipes
@@ -825,7 +826,9 @@ export default function PlayerPage() {
       reportIssue(engineRef.current, 'video error', text)
       // The device's own player couldn't decode it either: that's the end of it.
       // (With hls.js the same error comes back through it, and is handled there.)
-      if (!hlsRef.current && !mpegtsRef.current && (video.error?.code === 3 || video.error?.code === 4)) unplayable(text)
+      // Only 3 (decode): 4 is also what a source that fails to load (a 502, an
+      // expired token) raises — that's a reconnect, not "can't be played here".
+      if (!hlsRef.current && !mpegtsRef.current && video.error?.code === 3) unplayable(text)
     }
     video.addEventListener('error', onVideoError)
     engineRef.current = airplayUrl ? 'native (AirPlay)' : streamType === 'native' ? 'native' : streamType === 'mpegts' ? 'mpegts.js' : 'hls.js'
@@ -974,8 +977,12 @@ export default function PlayerPage() {
           const decodeFailed = data.type === Hls.ErrorTypes.MEDIA_ERROR &&
             (video.error?.code === 3 || video.error?.code === 4 || /^buffer(Append|AddCodec|IncompatibleCodecs)/.test(data.details || ''))
 
+          // One recovery a minute: a hiccup hours into a channel is recovered
+          // again, while a video that can't be decoded fails within seconds of it.
+          if (Date.now() - lastMediaRecoverRef.current > 60_000) mediaErrorRetryRef.current = 0
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaErrorRetryRef.current < 1) {
             mediaErrorRetryRef.current++
+            lastMediaRecoverRef.current = Date.now()
             hls.recoverMediaError()
           } else if (decodeFailed) {
             hls.destroy()
