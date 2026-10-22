@@ -83,7 +83,7 @@ async function probeCodecs(streamUrl, headers = null) {
     const probe = spawn('ffprobe', [
       ...inputArgs,
       '-i', streamUrl,
-      '-v', 'quiet',
+      '-v', 'error',                  // errors on stderr: said when nothing could be read
       '-print_format', 'json',
       '-show_format',                 // format_name → container (hls/mpegts/mp4…)
       '-show_streams',
@@ -91,7 +91,9 @@ async function probeCodecs(streamUrl, headers = null) {
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let out = '';
+    let errOut = '';
     probe.stdout.on('data', d => { out += d.toString(); });
+    probe.stderr.on('data', d => { if (errOut.length < 4000) errOut += d.toString(); });
 
     const finish = (result) => {
       if (result) _probeCache.set(cacheKey, { probe: result, ts: Date.now() });
@@ -115,7 +117,9 @@ async function probeCodecs(streamUrl, headers = null) {
         }
         const container = _containerFromFormat(json.format?.format_name);
         const direct = browserDirectPlayable({ video, audio });
-        const describe = describeStreams(vs, as, container);
+        // Nothing read: why, from ffprobe itself (its last error line).
+        const why = !vs && !as ? errOut.trim().split(/\r?\n/).filter(Boolean).pop() : null;
+        const describe = describeStreams(vs, as, container) + (why ? ` — ffprobe: ${why}` : '');
         log.info(TAG, `probe: ${describe} browser-direct=${direct}`);
         finish({ video, audio, container, describe });
       } catch {
