@@ -603,6 +603,9 @@ export default function PlayerPage() {
       keepSrcRef.current = url !== airplayUrlRef.current
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
       if (mpegtsRef.current) { try { mpegtsRef.current.destroy() } catch { /* already gone */ } mpegtsRef.current = null }
+      // hls.js and mpegts.js turn AirPlay off on the <video> (Apple's managed media
+      // source needs it) and never back on: a plain link is AirPlay's to send.
+      v.disableRemotePlayback = false
       v.src = url
       v.play().catch(() => {})
       setAirplaySrc({ key: String(activeChannel?.uniqueId), url })
@@ -866,6 +869,7 @@ export default function PlayerPage() {
         })
 
     const playNative = (src) => {
+      video.disableRemotePlayback = false   // after hls.js/mpegts.js turned it off (AirPlay)
       video.src = src
       video.volume = volumeRef.current / 100
       video.muted = userMutedRef.current

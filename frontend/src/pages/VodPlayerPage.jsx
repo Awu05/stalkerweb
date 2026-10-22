@@ -300,6 +300,7 @@ export default function VodPlayerPage() {
         })
 
     const playNative = (src) => {
+      video.disableRemotePlayback = false   // after hls.js turned it off (AirPlay)
       video.src = src
       video.volume = volumeRef.current / 100
       video.muted  = mutedRef.current
@@ -469,6 +470,9 @@ export default function VodPlayerPage() {
       const saved = getVodProgress(progressKey)?.position || 0
       const at = mediaKeyRef.current === progressKey ? v.currentTime : saved >= VOD_RESUME_MIN_SECS ? saved : 0
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      // hls.js and mpegts.js turn AirPlay off on the <video> (Apple's managed media
+      // source needs it) and never back on: a plain link is AirPlay's to send.
+      v.disableRemotePlayback = false
       v.src = url
       if (at > 0) v.addEventListener('loadedmetadata', () => { try { v.currentTime = at } catch { /* seek rejected */ } }, { once: true })
       v.play().catch(() => {})
