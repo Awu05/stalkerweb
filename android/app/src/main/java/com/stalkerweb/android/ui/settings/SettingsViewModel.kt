@@ -2,6 +2,7 @@ package com.stalkerweb.android.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stalkerweb.android.data.api.ActivityResponse
 import com.stalkerweb.android.data.api.LogosInfo
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.ProfilesResponse
@@ -16,6 +17,9 @@ import com.stalkerweb.android.data.repo.FiltersToSave
 import com.stalkerweb.android.data.repo.ServerRepository
 import com.stalkerweb.android.data.repo.SettingsRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -24,7 +28,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-val SETTINGS_TABS = listOf("viewers" to "Viewers", "connection" to "Connection", "links" to "Links", "playback" to "Playback", "logos" to "Logos", "app" to "App")
+val SETTINGS_TABS = listOf("viewers" to "Viewers", "connection" to "Connection", "links" to "Links", "playback" to "Playback", "logos" to "Logos", "activity" to "Activity", "app" to "App")
 
 data class SettingsState(
     val tab: String = "viewers",
@@ -37,6 +41,8 @@ data class SettingsState(
     val status: StatusResponse? = null,
     val logos: LogosInfo? = null,
     val stripWords: List<String> = emptyList(),
+    val activity: ActivityResponse? = null,
+    val activityError: String? = null,
     val busy: Boolean = false,
 )
 
@@ -55,6 +61,21 @@ class SettingsViewModel(
     init { load() }
 
     fun setTab(tab: String) { prefs.settingsTab = tab; _state.value = _state.value.copy(tab = tab); load() }
+
+    // Settings → Activity: refreshed every 5 s while the tab is on screen (and only then).
+    private var activityJob: Job? = null
+    fun watchActivity(on: Boolean) {
+        activityJob?.cancel()
+        if (!on) return
+        activityJob = viewModelScope.launch {
+            while (isActive) {
+                runCatching { settings.activity() }
+                    .onSuccess { _state.value = _state.value.copy(activity = it, activityError = null) }
+                    .onFailure { _state.value = _state.value.copy(activityError = it.toApiError().message ?: "Could not load the activity") }
+                delay(5_000)
+            }
+        }
+    }
 
     /** What the open tab needs. */
     fun load() {

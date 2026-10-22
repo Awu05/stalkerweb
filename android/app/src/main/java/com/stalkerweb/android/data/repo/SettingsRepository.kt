@@ -16,6 +16,7 @@ import com.stalkerweb.android.data.prefs.AppPrefs
 class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
     suspend fun settings(): SettingsResponse = apis.get().getSettings().also { prefs.keepShareToken(it.accessShareToken) }
     suspend fun save(update: SettingsUpdate) = apis.get().saveSettings(update)
+    suspend fun activity() = apis.get().getActivity()
 
     // Viewers
     suspend fun renameViewer(id: String, name: String) = apis.get().updateViewer(id, ViewerUpdate(name = name.trim()))

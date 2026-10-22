@@ -72,6 +72,10 @@ interface StalkerApi {
     @GET("api/settings")
     suspend fun getSettings(): SettingsResponse
 
+    // What's playing through the server now, whose, and on what (Settings → Activity).
+    @GET("api/activity")
+    suspend fun getActivity(): ActivityResponse
+
     // ── Portal connect / disconnect ───────────────────────────────────────────
     @POST("api/auth/connect")
     suspend fun connectPortal(@Body body: PortalConnectRequest): PortalActionResponse
