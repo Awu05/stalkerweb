@@ -329,6 +329,15 @@ appState.shareToken = access.shareToken;
     available: () => require('./stalker/FfmpegService').isAvailable(),   // checked when first needed
   });
 }
+// A channel's format in a line, for the log when a device can't decode it
+// (probing this server's own /proxy/stream, as the cast packager reads it).
+appState.describeChannel = async (id) => {
+  const ffmpegSvc = require('./stalker/FfmpegService');
+  if (!ffmpegSvc.isAvailable()) return null;
+  const prefix = access.shareToken ? `/k/${access.shareToken}` : '';
+  const probe = await ffmpegSvc.probeCodecs(`http://127.0.0.1:${config.port}${prefix}/proxy/stream/${encodeURIComponent(id)}`);
+  return probe?.describe ?? null;
+};
 const streamRoutes = require('./routes/stream')(appState, config);
 const settingsRoutes = require('./routes/settings')(config, appState, access);
 const proxyRoutes = require('./routes/proxy')(appState);

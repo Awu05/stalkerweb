@@ -312,6 +312,7 @@ export default function VodPlayerPage() {
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
       hlsRef.current = hls
+      let mediaRecovered = false
       hls.loadSource(url)
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -323,8 +324,15 @@ export default function VodPlayerPage() {
         if (data.fatal) {
           const t = hlsErrorText(data)
           reportPlayerError({ title: displayTitleRef.current, engine: 'hls.js', kind: t.kind, detail: t.detail })
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
+            mediaRecovered = true   // once: a video this device can't decode fails again
             hls.recoverMediaError()
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            // Can't be decoded here: the device's own player (Safari's takes
+            // formats the page player won't), or say so.
+            hls.destroy(); hlsRef.current = null
+            if (video.canPlayType('application/vnd.apple.mpegurl')) playNative(url)
+            else { setStatus('error'); setErrorMsg(`This video can't be played on this device (${t.detail || 'decode failed'}).`) }
           } else {
             hls.destroy(); hlsRef.current = null
             playNative(url)

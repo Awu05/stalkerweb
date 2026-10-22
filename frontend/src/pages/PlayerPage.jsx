@@ -726,6 +726,10 @@ export default function PlayerPage() {
   // phone it's otherwise out of sight. The last few warnings ride along with
   // the final "gave up", for a stream that stalls without a fatal error.
   const engineRef = useRef('hls.js')
+  // A channel whose video this browser's page player couldn't decode, played
+  // by the device's own HLS player instead (Safari's, on an iPhone — it takes
+  // formats the page player won't). Kept across reconnects, for that channel.
+  const nativeForRef = useRef(null)
   const recentIssuesRef = useRef([])
   const reportIssue = useCallback((engine, kind, detail, extra = {}) => {
     const ch = activeChannelRef.current
@@ -789,6 +793,15 @@ export default function PlayerPage() {
     // (e.g. a network-error retry) never starves the others.
     mediaErrorRetryRef.current = 0
     hlsFallbackTriedRef.current = false
+    const ownHls = !!video.canPlayType?.('application/vnd.apple.mpegurl')
+    const nativeHere = () => nativeForRef.current === String(activeChannelRef.current?.uniqueId)
+    // Nothing on this device can decode it: say so, rather than reconnecting to the same thing.
+    const unplayable = (why) => {
+      reportIssue(engineRef.current, 'unplayable', why, { gaveUp: true })
+      teardown()
+      setStatus('error')
+      setErrorMsg(`This channel's video can't be played on this device (${why}).`)
+    }
     networkErrorRetriedRef.current = false
 
     // Once media actually flows, clear the recovery state so the next drop gets
@@ -810,6 +823,9 @@ export default function PlayerPage() {
       if (!text) return
       noteIssue(text)
       reportIssue(engineRef.current, 'video error', text)
+      // The device's own player couldn't decode it either: that's the end of it.
+      // (With hls.js the same error comes back through it, and is handled there.)
+      if (!hlsRef.current && !mpegtsRef.current && (video.error?.code === 3 || video.error?.code === 4)) unplayable(text)
     }
     video.addEventListener('error', onVideoError)
     engineRef.current = airplayUrl ? 'native (AirPlay)' : streamType === 'native' ? 'native' : streamType === 'mpegts' ? 'mpegts.js' : 'hls.js'
@@ -952,9 +968,27 @@ export default function PlayerPage() {
             return
           }
 
+          // The video arrived but can't be decoded here (a format the page player
+          // won't take — 10-bit or 4K HEVC on an iPhone). Switching demuxer or
+          // reconnecting gets the same video: try the device's own player, once.
+          const decodeFailed = data.type === Hls.ErrorTypes.MEDIA_ERROR &&
+            (video.error?.code === 3 || video.error?.code === 4 || /^buffer(Append|AddCodec|IncompatibleCodecs)/.test(data.details || ''))
+
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaErrorRetryRef.current < 1) {
             mediaErrorRetryRef.current++
             hls.recoverMediaError()
+          } else if (decodeFailed) {
+            hls.destroy()
+            hlsRef.current = null
+            if (ownHls && !nativeHere()) {
+              nativeForRef.current = String(activeChannelRef.current?.uniqueId)
+              engineRef.current = 'native (after hls.js)'
+              noteIssue('hls.js could not decode it — trying the device player')
+              reportIssue('hls.js', 'decode failed', 'trying the device player')
+              playNative(src)
+            } else {
+              unplayable(hlsErrorText(data).detail || 'decode failed')
+            }
           } else if (!hlsFallbackTriedRef.current) {
             hlsFallbackTriedRef.current = true
             // Not a valid HLS playlist — the server may be piping raw MPEG-TS
@@ -981,6 +1015,9 @@ export default function PlayerPage() {
     if (airplayUrl) {
       if (handedOver && video.src === airplayUrl) tryPlay()
       else playNative(airplayUrl)
+    } else if (streamType === 'hls' && ownHls && nativeHere()) {
+      engineRef.current = 'native (after hls.js)'
+      playNative(streamUrl)
     } else if (streamType === 'unsupported') {
       setStatus('error')
       setErrorMsg('This channel uses a protocol (UDP/RTP/RTSP) that browsers can’t play directly.')

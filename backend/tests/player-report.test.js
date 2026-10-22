@@ -21,7 +21,7 @@ describe('reportLine', () => {
     expect(reportLine({ channelId: '1896', title: 'HGTV 4K', engine: 'hls.js', kind: 'mediaError', detail: 'bufferAppendError: codecs hvc1', attempt: 3 }, IPHONE_CHROME))
       .toBe('ch 1896 "HGTV 4K" on iPhone · Chrome (iOS 18.1): hls.js mediaError — bufferAppendError: codecs hvc1 (reconnect 3)')
     expect(reportLine({ channelId: '1896', engine: 'hls.js', kind: 'gave up', gaveUp: true }, IPHONE_CHROME))
-      .toContain('gave up, showed "Lost connection"')
+      .toContain('the player gave up')
     expect(reportLine({ title: 'Heat', engine: 'native', kind: 'MediaError 4', detail: 'format not supported' }, WIN_CHROME))
       .toBe('"Heat" on Windows · Chrome: native MediaError 4 — format not supported')
   })
@@ -47,5 +47,27 @@ describe('rateLimiter', () => {
     expect(allow('b')).toBe(true)
     t += 61_000
     expect(allow('a')).toBe(true)
+  })
+})
+
+describe('isDecodeFailure', () => {
+  it("knows a device that couldn't decode from one that lost the stream", async () => {
+    const { isDecodeFailure } = await import('../lib/playerReport.js')
+    expect(isDecodeFailure({ kind: 'video error', detail: 'MediaError 3 (decode): Media failed to decode' })).toBe(true)
+    expect(isDecodeFailure({ kind: 'mediaError', detail: 'bufferAppendError: The object is in an invalid state.' })).toBe(true)
+    expect(isDecodeFailure({ kind: 'video error', detail: 'MediaError 4 (format not supported)' })).toBe(true)
+    expect(isDecodeFailure({ kind: 'ended', detail: 'the stream ended — reconnecting' })).toBe(false)
+    expect(isDecodeFailure({ kind: 'networkError', detail: 'fragLoadError: HTTP 502' })).toBe(false)
+  })
+})
+
+describe('describeStreams', () => {
+  it('puts what decides whether a device can play it in one line', async () => {
+    const { describeStreams } = await import('../stalker/FfmpegService.js')
+    const v = { codec_name: 'hevc', profile: 'Main 10', codec_tag_string: '[36][0][0][0]', width: 3840, height: 2160, pix_fmt: 'yuv420p10le', field_order: 'progressive', avg_frame_rate: '50/1' }
+    const a = { codec_name: 'aac', channels: 2, sample_rate: '48000' }
+    expect(describeStreams(v, a, 'hls')).toBe('video hevc Main 10 3840x2160 yuv420p10le progressive 50fps, audio aac 2ch 48000Hz, in hls')
+    expect(describeStreams({ ...v, codec_tag_string: 'hev1' }, null, 'mp4')).toBe('video hevc Main 10 (hev1) 3840x2160 yuv420p10le progressive 50fps, no audio, in mp4')
+    expect(describeStreams(null, null, null)).toBe('no video, no audio, in ?')
   })
 })

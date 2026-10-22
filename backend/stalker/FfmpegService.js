@@ -108,15 +108,16 @@ async function probeCodecs(streamUrl, headers = null) {
       clearTimeout(timer);
       try {
         const json = JSON.parse(out);
-        let video = null, audio = null;
+        let video = null, audio = null, vs = null, as = null;
         for (const s of json.streams || []) {
-          if (s.codec_type === 'video' && !video) video = (s.codec_name || '').toLowerCase();
-          if (s.codec_type === 'audio' && !audio) audio = (s.codec_name || '').toLowerCase();
+          if (s.codec_type === 'video' && !video) { video = (s.codec_name || '').toLowerCase(); vs = s; }
+          if (s.codec_type === 'audio' && !audio) { audio = (s.codec_name || '').toLowerCase(); as = s; }
         }
         const container = _containerFromFormat(json.format?.format_name);
         const direct = browserDirectPlayable({ video, audio });
-        log.info(TAG, `probe: container=${container ?? '?'} video=${video ?? 'none'} audio=${audio ?? 'none'} browser-direct=${direct}`);
-        finish({ video, audio, container });
+        const describe = describeStreams(vs, as, container);
+        log.info(TAG, `probe: ${describe} browser-direct=${direct}`);
+        finish({ video, audio, container, describe });
       } catch {
         log.warn(TAG, 'ffprobe output parse failed — codecs unknown');
         finish(null);
@@ -129,6 +130,23 @@ async function probeCodecs(streamUrl, headers = null) {
       finish(null);
     });
   });
+}
+
+/**
+ * A stream's format in a line — what decides whether a device can play it:
+ * "video hevc Main 10 (hev1) 3840x2160 yuv420p10le progressive 50fps, audio aac 2ch 48000Hz, in hls".
+ */
+function describeStreams(v, a, container) {
+  const parts = [];
+  if (v) {
+    const tag = v.codec_tag_string && !/^\[/.test(v.codec_tag_string) ? ` (${v.codec_tag_string})` : '';
+    const fps = /^(\d+)\/(\d+)$/.exec(v.avg_frame_rate || '');
+    const rate = fps && Number(fps[2]) ? ` ${Math.round(Number(fps[1]) / Number(fps[2]))}fps` : '';
+    parts.push(`video ${v.codec_name || '?'}${v.profile ? ` ${v.profile}` : ''}${tag} ${v.width || '?'}x${v.height || '?'} ${v.pix_fmt || '?'}${v.field_order ? ` ${v.field_order}` : ''}${rate}`);
+  } else parts.push('no video');
+  if (a) parts.push(`audio ${a.codec_name || '?'}${a.channels ? ` ${a.channels}ch` : ''}${a.sample_rate ? ` ${a.sample_rate}Hz` : ''}`);
+  else parts.push('no audio');
+  return `${parts.join(', ')}, in ${container || '?'}`;
 }
 
 // ── Input args for each protocol ─────────────────────────────────────────────
@@ -276,4 +294,4 @@ async function transcode(streamUrl, req, res, headers = null) {
   });
 }
 
-module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs };
+module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams };
