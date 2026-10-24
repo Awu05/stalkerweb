@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.channels
 
+import com.stalkerweb.android.ui.components.SearchField
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.rememberScrollState
@@ -154,14 +155,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
         // Search · count · hide flaky · refresh
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = state.query, onValueChange = viewModel::setQuery,
-                placeholder = { Text("Search channels…") },
-                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-                trailingIcon = if (state.query.isNotEmpty()) ({ IconButton(onClick = { viewModel.setQuery("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
-                singleLine = true, shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.weight(1f).onFocusChanged { searchFocused = it.isFocused },
-            )
+            SearchField(state.query, viewModel::setQuery, "Search channels…", Modifier.weight(1f), onFocusChange = { searchFocused = it })
             if (state.flaky > 0) {
                 Pill(if (state.hideFlaky) "Flaky hidden" else "Hide flaky (${state.flaky})", state.hideFlaky,
                     { viewModel.setHideFlaky(!state.hideFlaky) }, leading = Icons.Default.Warning)

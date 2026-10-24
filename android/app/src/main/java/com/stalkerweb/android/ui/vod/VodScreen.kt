@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.vod
 
+import com.stalkerweb.android.ui.components.SearchField
 import androidx.compose.material3.Button
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.LinearProgressIndicator
@@ -174,16 +175,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
         // Search · count · sort
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = state.search,
-                onValueChange = viewModel::setSearch,
-                placeholder = { Text(if (state.isMyList) "Search in My List…" else "Search…") },
-                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-                trailingIcon = if (state.search.isNotEmpty()) ({ IconButton(onClick = { viewModel.setSearch("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.weight(1f),
-            )
+            SearchField(state.search, viewModel::setSearch, if (state.isMyList) "Search in My List…" else "Search…", Modifier.weight(1f))
             Pill("A–Z", state.sort == "name", { viewModel.setSort("name") })
             Pill("Newest", state.sort == "added", { viewModel.setSort("added") })
         }

@@ -85,6 +85,7 @@ import com.stalkerweb.android.cast.CastManager
 import com.stalkerweb.android.cast.RemoteState
 import com.stalkerweb.android.ui.components.CastButton
 import com.stalkerweb.android.ui.components.Pill
+import com.stalkerweb.android.ui.components.highlightControllerFocus
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.utils.rememberIsTV
@@ -180,6 +181,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                         useController = true
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
+                        highlightControllerFocus()
                     }
                 },
                 update = { it.player = player },
