@@ -228,19 +228,26 @@ function _httpHeaderArgs(headers) {
 // Decided independently for video and audio so the common "H.264 video + AC-3
 // audio" case only re-encodes the audio (cheap) and copies the video untouched.
 // A null probe means codecs are unknown → re-encode both as a safe fallback.
-function _codecArgs(probe) {
-  const args = [];
-  if (!probe || (probe.video && !COPY_VIDEO.has(probe.video))) {
-    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency');
-  } else {
-    args.push('-c:v', 'copy');
-  }
-  if (!probe || (probe.audio && !COPY_AUDIO.has(probe.audio))) {
-    args.push('-c:a', 'aac', '-b:a', '128k');
-  } else {
-    args.push('-c:a', 'copy');
-  }
-  return args;
+// { args, video, audio }: what each becomes — 'copy', or the codec it's re-encoded to.
+function _codecPlan(probe) {
+  const video = !probe || (probe.video && !COPY_VIDEO.has(probe.video)) ? 'H.264' : 'copy';
+  const audio = !probe || (probe.audio && !COPY_AUDIO.has(probe.audio)) ? 'AAC' : 'copy';
+  const args = [
+    ...(video === 'copy' ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency']),
+    ...(audio === 'copy' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k']),
+  ];
+  return { args, video, audio };
+}
+
+/**
+ * How a codec plan sends a stream, for the player's Stats (lib/activity.js
+ * deliver()): 'repackaged' when both are copied, else 'converted' and what.
+ */
+function deliveryOf(plan) {
+  const converted = [];
+  if (plan.video !== 'copy') converted.push(`video → ${plan.video}`);
+  if (plan.audio !== 'copy') converted.push(`audio → ${plan.audio}`);
+  return converted.length ? { mode: 'converted', detail: converted.join(', ') } : { mode: 'repackaged', detail: '' };
 }
 
 // ── Args for remuxing a stream (e.g. HLS) straight to a local file ──────────
@@ -265,15 +272,16 @@ function buildDownloadArgs(streamUrl, headers, outPath, probe = null) {
 // Probes the source, chooses copy vs re-encode, spawns FFmpeg, pipes to res.
 // Returns a Promise that resolves when the FFmpeg process has started (or rejects
 // on immediate failure — e.g. spawn error).
-
-async function transcode(streamUrl, req, res, headers = null) {
+async function transcode(streamUrl, req, res, headers = null, { onDelivery } = {}) {
   // Probe first so we pick the right codec args
   const probe = await probeCodecs(streamUrl, headers);
 
   const inputArgs  = _inputArgs(streamUrl, headers);
-  const codecArgs  = _codecArgs(probe);
+  const plan       = _codecPlan(probe);
+  const codecArgs  = plan.args;
   const outputArgs = ['-f', 'mpegts', 'pipe:1'];
-  const mode = codecArgs.includes('libx264') ? 're-encode' : 'copy';
+  const mode = plan.video === 'copy' ? 'copy' : 're-encode';
+  onDelivery?.(deliveryOf(plan));
 
   // The first video and audio, as probed (see buildDownloadArgs).
   const args = ['-hide_banner', '-loglevel', 'warning', ...inputArgs, '-i', streamUrl, '-map', '0:v:0?', '-map', '0:a:0?', ...codecArgs, ...outputArgs];
@@ -331,4 +339,4 @@ async function transcode(streamUrl, req, res, headers = null) {
   });
 }
 
-module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams, probeCacheKey, probeFailureReason, _containerFromFormat };
+module.exports = { isAvailable, transcode, deliveryOf, _codecPlan, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams, probeCacheKey, probeFailureReason, _containerFromFormat };

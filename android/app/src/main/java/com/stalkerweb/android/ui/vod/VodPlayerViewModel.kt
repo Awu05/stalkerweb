@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.vod
 
+import com.stalkerweb.android.data.repo.StatsRepository
 import android.app.Application
 import android.content.ComponentName
 import androidx.annotation.OptIn
@@ -74,6 +75,8 @@ class VodPlayerViewModel(
     private val watch: WatchRepository,
     private val links: MediaLinks,
     private val downloads: DownloadsRepository,
+    /** The Stats panel's questions for the server. */
+    val stats: StatsRepository,
 ) : AndroidViewModel(application) {
 
     /** The viewer's watch state — the top bar's My List button reads it. */

@@ -46,6 +46,7 @@ class PlaybackService : MediaSessionService() {
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
             .build()
+        PlaybackStats.attach(player)
         mediaSession = MediaSession.Builder(this, player).build()
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
     }
@@ -65,6 +66,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(appLifecycleObserver)
         mediaSession?.run {
+            (player as? ExoPlayer)?.let(PlaybackStats::detach)
             player.release()
             release()
         }

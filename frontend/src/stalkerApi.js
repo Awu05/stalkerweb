@@ -176,6 +176,13 @@ export const reorderFavoriteGroups   = (order) => _put('/favorites/groups/order'
 export const getStreamUrl = (channelId) => _get(`/stream/${channelId}`)
 // What's playing through this server now, whose, and on what (Settings → Activity).
 export const getActivity = () => _get('/activity')
+// How the server sends this stream to this device: { delivery: { mode, detail } | null } (the player's Stats).
+export const getStreamDelivery = (kind, id) => _get(`/activity/delivery?kind=${kind}&id=${encodeURIComponent(id)}`)
+// The round trip to the server, in ms (the player's Stats); null when it doesn't answer.
+export async function pingServer() {
+  const t0 = performance.now()
+  try { await _get('/health'); return Math.round(performance.now() - t0) } catch { return null }
+}
 // The links a cast device (Chromecast, Apple TV) opens itself: { url, contentType, live, reachable }.
 export const getChannelCastLink = (channelId) => _get(`/stream/${encodeURIComponent(channelId)}/cast`)
 // The TV left the channel: the server stops repackaging it (and lets go of its portal connection).

@@ -16,6 +16,14 @@ module.exports = function activityRoutes(appState, { viewers, downloads } = {}) 
     return appState.catalog?.findMovie?.(movieId)?.name || appState.catalog?.findShow?.(movieId)?.name || `Title ${movieId}`;
   };
 
+  // GET /api/activity/delivery?kind=live|vod&id= — how the server sends that
+  // stream to the device asking (lib/activity.js deliver()): the player's Stats.
+  router.get('/delivery', (req, res) => {
+    const { kind, id } = req.query;
+    if ((kind !== 'live' && kind !== 'vod') || typeof id !== 'string' || !id) return res.status(400).json({ error: 'kind (live|vod) and id are required' });
+    res.json({ delivery: appState.activity?.deliveryFor({ ip: req.ip, ua: req.get('user-agent') || '', kind, id }) ?? null });
+  });
+
   router.get('/', (req, res) => {
     const streams = (appState.activity?.list() ?? []).map((s) => {
       const v = s.viewerId ? viewers?.get(s.viewerId) : null;

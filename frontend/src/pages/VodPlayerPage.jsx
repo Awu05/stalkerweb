@@ -14,6 +14,8 @@ import { resumeAfterCast } from '@/lib/cast'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
 import { formatTime } from '@/lib/formatTime'
 import EpisodePanel from '@/components/EpisodePanel'
+import { StreamStats, StatsButton } from '@/components/StreamStats'
+import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
@@ -108,6 +110,8 @@ export default function VodPlayerPage() {
   const [panelSeason, setPanelSeason]   = useState(seasonId)
   const [episodesOpen, setEpisodesOpen] = useState(false)  // the pop-up list on narrow screens
   const [sideOpen, setSideOpen]         = useState(readSideOpen)  // the details/episodes panel on wide screens
+  const [statsOpen, setStatsOpen]       = useState(false)
+  const statsSources = useCallback(() => ({ hls: hlsRef.current, engine: hlsRef.current ? 'hls.js' : 'browser' }), [])
   const [upNext, setUpNext]             = useState(null)   // { season, episode } after the end
   // What's watched, for the panel's ticks and progress bars.
   const [watchState, setWatchState]     = useState(() => getWatchState())
@@ -324,6 +328,7 @@ export default function VodPlayerPage() {
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
       hlsRef.current = hls
+      trackHlsStats(hls, Hls.Events)
       let lastRecover = 0   // one recoverMediaError a minute (a film's hiccups are hours apart; a video that can't be decoded fails at once)
       hls.loadSource(url)
       hls.attachMedia(video)
@@ -593,6 +598,8 @@ export default function VodPlayerPage() {
           onClick={togglePlayPause}
         >
           <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
+          <StreamStats open={statsOpen && !cast.mode} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
+            kind="vod" id={makeVodKey({ videoId, seasonId, episodeId })} />
           <CastingOverlay cast={cast} />
         </div>
 
@@ -715,6 +722,7 @@ export default function VodPlayerPage() {
             >
               {sideOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
             </button>
+            <StatsButton open={statsOpen} onToggle={() => setStatsOpen(o => !o)} />
             <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (
               <button

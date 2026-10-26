@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.vod
 
+import com.stalkerweb.android.ui.components.StatsButton
+import com.stalkerweb.android.ui.components.StreamStatsOverlay
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.height
@@ -141,6 +143,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     var controlsVisible by remember { mutableStateOf(true) }
     var panelOpen by remember { mutableStateOf(false) }
+    var statsOpen by remember { mutableStateOf(false) }
     val p = state.params ?: params
     val watchState by viewModel.watchState.collectAsStateWithLifecycle()
     val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
@@ -228,6 +231,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     IconButton(onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
                     IconButton(onClick = { panelOpen = !panelOpen }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
                 }
+                StatsButton(statsOpen) { statsOpen = !statsOpen }
                 if (!isTV && cast != null) CastButton(cast)
                 IconButton(onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
                 IconButton(onClick = viewModel::toggleMyList) {
@@ -235,6 +239,10 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                         if (inMyList) "Remove from My List" else "Add to My List", tint = Color.White)
                 }
             }
+        }
+
+        if (statsOpen && !casting) {
+            StreamStatsOverlay(viewModel.stats, "vod", p.key, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp, bottom = 12.dp))
         }
 
         // "Resumed from 12:34 · Start over"

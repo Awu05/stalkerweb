@@ -140,6 +140,44 @@ describe('ActivityTracker', () => {
     expect(a.list()[0]).toMatchObject({ viewerId: 'dad', via: 'xtream' })
   })
 
+  it("remembers how a stream is sent to each device, for the player's Stats", () => {
+    make()
+    a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })
+    a.touch({ ip: '10.0.0.6', ua: DESKTOP, kind: 'live', id: '7' })
+    a.deliver({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' }, { mode: 'converted', detail: 'audio → AAC' })
+    a.deliver({ ip: '10.0.0.6', ua: DESKTOP, kind: 'live', id: '7' }, { mode: 'relayed', detail: 'HLS' })
+    expect(a.deliveryFor({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })).toEqual({ mode: 'converted', detail: 'audio → AAC' })
+    expect(a.deliveryFor({ ip: '10.0.0.6', ua: DESKTOP, kind: 'live', id: '7' })).toEqual({ mode: 'relayed', detail: 'HLS' })
+    expect(a.deliveryFor({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '8' })).toBeNull()
+  })
+
+  it("finds an iPhone page's stream that its own player fetched under another name — after that fetch is over too", () => {
+    make()
+    const CORE = 'AppleCoreMedia/1.0.0.22B83 (iPhone; U; CPU OS 18_1 like Mac OS X)'
+    a.touch({ ip: '10.0.0.5', ua: CORE, kind: 'vod', id: '100' })()
+    a.deliver({ ip: '10.0.0.5', ua: CORE, kind: 'vod', id: '100' }, { mode: 'direct', detail: '' })
+    a.touch({ ip: '10.0.0.5', ua: IPHONE, kind: 'vod', id: '100' })()   // the page's progress saves
+    t += 5 * 60_000
+    a.list()   // prunes the finished fetch
+    expect(a.deliveryFor({ ip: '10.0.0.5', ua: IPHONE, kind: 'vod', id: '100' })).toEqual({ mode: 'direct', detail: '' })
+    expect(a.deliveryFor({ ip: '10.0.0.9', ua: IPHONE, kind: 'vod', id: '100' })).toBeNull()
+  })
+
+  it("never gives one device another's delivery, though they share an address", () => {
+    make()
+    a.touch({ ip: '1.2.3.4', ua: 'StalkerWeb-Android/0.4.51 (TV)', kind: 'live', id: '7' })
+    a.deliver({ ip: '1.2.3.4', ua: 'StalkerWeb-Android/0.4.51 (TV)', kind: 'live', id: '7' }, { mode: 'relayed', detail: 'MPEG-TS' })
+    expect(a.deliveryFor({ ip: '1.2.3.4', ua: DESKTOP, kind: 'live', id: '7' })).toBeNull()
+  })
+
+  it('forgets a delivery when a new attempt starts', () => {
+    make()
+    a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })
+    a.deliver({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' }, { mode: 'converted', detail: 'audio → AAC' })
+    a.deliver({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' }, null)
+    expect(a.deliveryFor({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })).toBeNull()
+  })
+
   it('names a movie and its episode from the progress the player saves', () => {
     make()
     a.claim({ ip: '10.0.0.5', kind: 'vod', id: '200:s1:e3', viewerId: 'andy', title: 'Bluey', subtitle: 'E3 · Hammerbarn' })
@@ -181,5 +219,32 @@ describe('GET /api/activity', () => {
     expect(r.streams.find((s) => s.id === '100')).toMatchObject({ title: 'Heat', viewer: null, device: 'VLC' })
     expect(r.portal).toEqual({ connected: true, host: 'portal.example', openStreams: 2, casting: 1 })
     expect(r.downloads).toEqual([{ title: 'Bluey · E1', percent: 25 }])
+  })
+})
+
+describe('GET /api/activity/delivery', () => {
+  let server, base
+  beforeAll(async () => {
+    const activity = new ActivityTracker()
+    activity.touch({ ip: '10.0.0.5', ua: 'TestUA', kind: 'live', id: '1896' })
+    activity.deliver({ ip: '10.0.0.5', ua: 'TestUA', kind: 'live', id: '1896' }, { mode: 'repackaged', detail: '' })
+    const app = express()
+    app.set('trust proxy', true)
+    app.use('/api/activity', activityRoutes({ activity }))
+    await new Promise((r) => { server = app.listen(0, r) })
+    base = `http://127.0.0.1:${server.address().port}`
+  })
+  afterAll(() => { server.closeAllConnections(); server.close() })
+
+  const get = (q) => fetch(`${base}/api/activity/delivery?${q}`, { headers: { 'user-agent': 'TestUA', 'x-forwarded-for': '10.0.0.5' } })
+
+  it("says how this device's stream is sent", async () => {
+    expect(await (await get('kind=live&id=1896')).json()).toEqual({ delivery: { mode: 'repackaged', detail: '' } })
+    expect(await (await get('kind=vod&id=1896')).json()).toEqual({ delivery: null })
+  })
+
+  it('needs a kind and an id', async () => {
+    expect((await get('kind=live')).status).toBe(400)
+    expect((await get('kind=radio&id=1')).status).toBe(400)
   })
 })

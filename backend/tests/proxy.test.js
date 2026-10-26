@@ -113,3 +113,21 @@ describe('rewriteM3u8', () => {
     expect(subLine).toContain(`&sig=${signProxyUrl(subAbs, secret)}`)
   })
 })
+
+describe("delivery, for the player's Stats", () => {
+  it("names a movie file's container", () => {
+    expect(helpers.containerLabel('video/mp4')).toBe('MP4')
+    expect(helpers.containerLabel('video/x-matroska; charset=binary')).toBe('MKV')
+    expect(helpers.containerLabel('application/octet-stream')).toBe('')
+    expect(helpers.containerLabel(undefined)).toBe('')
+  })
+
+  it("says what FFmpeg re-encodes, or that it only repackages — from its own plan", async () => {
+    const { deliveryOf, _codecPlan } = await import('../stalker/FfmpegService.js')
+    expect(deliveryOf(_codecPlan({ video: 'h264', audio: 'aac' }))).toEqual({ mode: 'repackaged', detail: '' })
+    expect(deliveryOf(_codecPlan({ video: 'h264', audio: 'ac3' }))).toEqual({ mode: 'converted', detail: 'audio → AAC' })
+    expect(deliveryOf(_codecPlan({ video: 'mpeg2video', audio: 'mp2' }))).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+    expect(deliveryOf(_codecPlan(null))).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+    expect(_codecPlan({ video: 'hevc', audio: 'aac' }).args).toEqual(['-c:v', 'copy', '-c:a', 'copy'])
+  })
+})

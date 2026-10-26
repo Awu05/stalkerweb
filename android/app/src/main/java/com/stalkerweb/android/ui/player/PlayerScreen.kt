@@ -1,5 +1,8 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.data.repo.StatsRepository
+import com.stalkerweb.android.ui.components.StatsButton
+import com.stalkerweb.android.ui.components.StreamStatsOverlay
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -107,6 +110,8 @@ private class LiveControls(
     val audio: List<TrackOption>,
     val subtitles: List<TrackOption>,
     val isTV: Boolean,
+    val statsOpen: Boolean = false,   // the Stats panel over the video
+    val stats: StatsRepository? = null,
 )
 
 /** What the controls can do. */
@@ -133,6 +138,7 @@ private class LiveActions(
     val onPickTrack: (TrackOption) -> Unit,
     val onSubtitlesOff: () -> Unit,
     val onExitFullscreen: () -> Unit,
+    val onToggleStats: () -> Unit,
     val onGoFullscreen: () -> Unit,
 )
 
@@ -278,6 +284,8 @@ fun PlayerScreen(
         )
     }
 
+    // Above the Picture-in-Picture return, so a trip there keeps it open.
+    var statsOpen by remember { mutableStateOf(false) }
     if (isInPipMode) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             ExoPlayerSurface(player = player, modifier = Modifier.fillMaxSize())
@@ -290,7 +298,7 @@ fun PlayerScreen(
         castingTo = if (state.isCasting) castDevice ?: "TV" else null,
         isPlaying = isPlaying, isBuffering = isBuffering, playerError = playerError, showControls = showControls,
         nowSecs = nowSecs, audio = trackOptions(tracks, C.TRACK_TYPE_AUDIO), subtitles = trackOptions(tracks, C.TRACK_TYPE_TEXT),
-        isTV = isTV,
+        isTV = isTV, statsOpen = statsOpen, stats = viewModel.stats,
     )
     val actions = LiveActions(
         onBack                 = onBack,
@@ -326,6 +334,7 @@ fun PlayerScreen(
             }
         },
         onExitFullscreen       = { if (!isTV) activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
+        onToggleStats          = { statsOpen = !statsOpen },
         onGoFullscreen         = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE },
     )
 
@@ -377,6 +386,8 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     Key.DirectionRight             -> { if (!s.showChannelList) { a.onToggleChannelList(); true } else false }
                     Key.DirectionLeft              -> { if (s.showChannelList) { a.onCloseChannelList(); true } else false }
                     Key.Info, Key.Guide, Key.G     -> { a.onToggleGuide(); true }
+                    // The remote's ≡ (focus stays on the picture, so the top bar's button is out of its reach).
+                    Key.Menu, Key.S                -> { a.onToggleStats(); true }
                     else                           -> false
                 }
             }
@@ -390,6 +401,10 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
         PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry, castingTo = c.castingTo)
 
         JumpBubble(s.jumpDigits, Modifier.align(Alignment.TopCenter).padding(top = 72.dp))
+
+        if (c.statsOpen && c.castingTo == null && c.stats != null) {
+            StreamStatsOverlay(c.stats, "live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp, bottom = 12.dp))
+        }
 
         // Top bar
         AnimatedVisibility(
@@ -420,6 +435,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                 SleepTimerChip(s.sleepTimerEndsAt)
                 LiveBadge()
                 Spacer(Modifier.width(4.dp))
+                StatsButton(c.statsOpen, a.onToggleStats)
                 IconButton(onClick = a.onSleepTimer) {
                     Icon(Icons.Default.Bedtime, "Sleep timer", tint = if (s.sleepTimerEndsAt != null) MaterialTheme.colorScheme.primary else Color.White)
                 }
@@ -527,6 +543,11 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
 
             PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry, castingTo = c.castingTo)
 
+            // Clear of the back button, and as tall as the small portrait picture allows (it scrolls).
+            if (c.statsOpen && c.castingTo == null && c.stats != null) {
+                StreamStatsOverlay(c.stats, "live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).padding(start = 56.dp, top = 8.dp, bottom = 8.dp))
+            }
+
             if (c.showControls) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
                     IconButton(
@@ -540,6 +561,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
                         horizontalArrangement = Arrangement.spacedBy(0.dp),
                     ) {
                         TrackButtons(c.audio, c.subtitles, a)
+                        StatsButton(c.statsOpen, a.onToggleStats)
                         IconButton(onClick = a.onSleepTimer) {
                             Icon(
                                 Icons.Default.Bedtime, "Sleep timer",

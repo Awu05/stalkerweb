@@ -41,6 +41,7 @@ class AppContainer(context: Context) {
     val vod = VodRepository(apis, links)
     val watch = WatchRepository(apis, links, viewers)
     val guide = GuideRepository(apis)
+    val stats = StatsRepository(apis)
     val downloads = DownloadsRepository(apis, prefs, httpClient)
     val settings = SettingsRepository(apis, prefs)
     val reminders = RemindersRepository(context.applicationContext, prefs)

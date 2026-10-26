@@ -27,6 +27,8 @@ const PRUNE_EVERY_MS = 60_000;
 
 // A TV fetching what it was cast (Chromecast; an Apple TV, AirPlay included).
 const CAST_DEVICE = /CrKey|Apple ?TV|tvOS/i;
+// An iPhone/Mac page's <video> playing the stream itself, under its own name.
+const MEDIA_FETCHER = /AppleCoreMedia/i;
 
 /** A movie's or episode's key, as Continue Watching keys it: "100", "200:s1:e3" (empty parts left out). */
 function vodKey({ videoId, seasonId = '', episodeId = '' } = {}) {
@@ -43,6 +45,7 @@ class ActivityTracker {
     this._stale = staleMs;
     this._streams = new Map();   // ip|ua|kind|id → entry
     this._claims = new Map();    // ip|kind|id (ip '*' for a cast link) → { viewerId, title, subtitle, at }
+    this._fetched = new Map();   // ip|kind|id → { delivery, at }: what a page's own player was sent (MEDIA_FETCHER)
     this._prunedAt = now();
   }
 
@@ -98,10 +101,40 @@ class ActivityTracker {
     };
   }
 
+  /**
+   * How the server sends `kind`/`id` to this device — { mode, detail }, mode
+   * 'direct' (the provider's own link), 'relayed' (as it comes), 'repackaged'
+   * (FFmpeg, codecs copied) or 'converted' (FFmpeg re-encoding). The player's Stats.
+   */
+  deliver({ ip, ua = '', kind, id }, delivery) {
+    const e = this._streams.get(`${ip}|${ua}|${kind}|${id}`);
+    if (e) e.delivery = delivery;
+    if (MEDIA_FETCHER.test(ua)) {
+      // Kept past the fetch: a movie it was redirected for asks nothing more of this server.
+      const key = `${ip}|${kind}|${id}`;
+      this._fetched.delete(key);
+      if (delivery) this._fetched.set(key, { delivery, at: this._now() });
+      if (this._fetched.size > MAX_CLAIMS) this._fetched.delete(this._fetched.keys().next().value);
+    }
+  }
+
+  /**
+   * What deliver() said for this device, or null. An iPhone/Mac page asks as
+   * the browser while its <video> fetched as AppleCoreMedia: that's its own
+   * player's. No other device's — two on one address (a shared connection, a
+   * reverse proxy) can be sent the same channel differently.
+   */
+  deliveryFor({ ip, ua = '', kind, id }) {
+    const own = this._streams.get(`${ip}|${ua}|${kind}|${id}`);
+    if (own?.delivery) return own.delivery;
+    return this._fetched.get(`${ip}|${kind}|${id}`)?.delivery ?? null;
+  }
+
   _prune(t) {
     this._prunedAt = t;
     for (const [k, e] of this._streams) if (e.open === 0 && t - e.lastSeen > this._stale) this._streams.delete(k);
     for (const [k, c] of this._claims) if (t - c.at > CLAIM_MS) this._claims.delete(k);
+    for (const [k, f] of this._fetched) if (t - f.at > CLAIM_MS) this._fetched.delete(k);
   }
 
   /** What's playing now, newest first: { kind, id, viewerId, title, subtitle, device, ip, via, startedAt, lastSeen }. */
