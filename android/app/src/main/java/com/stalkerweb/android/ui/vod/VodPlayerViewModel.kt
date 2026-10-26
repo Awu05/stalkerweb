@@ -299,14 +299,15 @@ class VodPlayerViewModel(
 
     private fun checkSkip() {
         val p = _player.value
-        val (key, parts) = skipParts ?: (null to null)
-        if (p == null || parts == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
+        val key = skipParts?.first
+        val parts = skipParts?.second
+        if (p == null || key == null || parts == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
             if (_state.value.skip != null) _state.value = _state.value.copy(skip = null)
             return
         }
         val t = p.currentPosition / 1000.0
         if (parts.autoSkip) {
-            if (autoSkipped?.first != key) autoSkipped = key to mutableSetOf()
+            if (autoSkipped?.first != key) autoSkipped = key to mutableSetOf<String>()
             val done = autoSkipped!!.second
             autoSkipTo(parts, t, done)?.let { s ->
                 done += s.kind
