@@ -140,6 +140,21 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val isTV = rememberIsTV()
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     var controlsVisible by remember { mutableStateOf(true) }
+    var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    // The top bar follows Media3's controls, but its listener only reports a
+    // change: when they never show (the episode already loading as the view
+    // got the player, or the next one starting), "visible" stuck from the start
+    // and the bar stayed over the video. Read their real state on every event.
+    DisposableEffect(player, playerView) {
+        val view = playerView
+        val listener = object : Player.Listener {
+            override fun onEvents(p: Player, events: Player.Events) {
+                if (view != null) controlsVisible = view.controllerShown()
+            }
+        }
+        player?.addListener(listener)
+        onDispose { player?.removeListener(listener) }
+    }
     var panelOpen by remember { mutableStateOf(false) }
     val p = state.params ?: params
     val watchState by viewModel.watchState.collectAsStateWithLifecycle()
@@ -184,7 +199,11 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                         highlightControllerFocus()
                     }
                 },
-                update = { it.player = player },
+                update = {
+                    it.player = player
+                    playerView = it
+                    controlsVisible = it.controllerShown()
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -346,3 +365,8 @@ private fun UpNextCard(title: String, onPlay: () -> Unit, onCancel: () -> Unit, 
         }
     }
 }
+
+/** Whether Media3's controls are on screen (fading in or out counts), as its visibility listener reports them. */
+@OptIn(UnstableApi::class)
+private fun PlayerView.controllerShown(): Boolean =
+    findViewById<View>(androidx.media3.ui.R.id.exo_controller)?.visibility == View.VISIBLE
