@@ -99,12 +99,22 @@ jobs:
           retention-days: 7
 
   # ── Docker build check (not published) ────────────────────────────────────
-  # Verifies the image still builds. Images are published only from version
-  # tags (release.yml), so the registry lists releases — not one entry per
-  # merge, each of which GitHub would label "Latest". amd64 only: the arm64
-  # leg runs under QEMU and is several times slower; release.yml builds both.
+  # Verifies the image still builds, on both platforms, each on a runner of its
+  # own kind as release.yml builds them (no QEMU). Images are published only
+  # from version tags (release.yml), so the registry lists releases — not one
+  # entry per merge, each of which GitHub would label "Latest".
   build-docker:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            scope: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            scope: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -117,7 +127,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.scope }}
