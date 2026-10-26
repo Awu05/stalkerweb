@@ -30,6 +30,7 @@ import {
 import ViewersCard from '@/components/ViewersCard'
 import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
+import { AutoSkipSetting } from '@/components/SkipControls'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
@@ -1001,6 +1002,13 @@ export default function SetupPage() {
           description="Which categories you see in Live TV and Movies & Series, and whether adult content is shown. These belong to you — other viewers keep their own."
         >
           <ChannelFilters />
+        </Card>
+
+        <Card
+          title={viewer ? `My playback (${viewer.name})` : 'My playback'}
+          description="How movies and episodes play for you. Other viewers keep their own."
+        >
+          <AutoSkipSetting />
         </Card>
           </>
         )}

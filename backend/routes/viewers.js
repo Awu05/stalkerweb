@@ -2,7 +2,7 @@
 // GET    /api/viewers              — { defaultViewerId, viewers: [{ id, name, color }] }
 // POST   /api/viewers              — { name, color? } create
 // GET    /api/viewers/me           — the viewer this request is for, with its filters
-// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult? }
+// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult?, autoSkip? }
 // PUT    /api/viewers/:id          — { name?, color? }
 // DELETE /api/viewers/:id          — not the last one
 
@@ -30,6 +30,7 @@ module.exports = function viewersModule(viewers) {
     disabledLanguages: v.disabledLanguages ?? [],
     disabledVodCategories: v.disabledVodCategories ?? [],
     showAdult: v.showAdult === true,
+    autoSkip: v.autoSkip === true,   // skip intros and recaps without asking (lib/skipSegments.js)
   });
 
   // Runs a change and answers with its result, or with the error it raised.

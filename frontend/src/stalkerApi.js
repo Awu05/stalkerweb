@@ -244,6 +244,19 @@ export const getVodStreamUrl = ({ videoId, cmd = '', series = 0, seasonId = '', 
   return _get(`/vod/stream?${p}`)
 }
 
+// Skip intro / recap / credits (backend lib/skipSegments.js): `name` the
+// movie's or show's title, season and episode numbers for an episode.
+export const getVodSkip = ({ videoId, name, year = '', season = '', episode = '', movie = false }) => {
+  const p = new URLSearchParams({ videoId: String(videoId), name: name || '' })
+  if (year)    p.set('year', String(year))
+  if (season)  p.set('season', String(season))
+  if (episode) p.set('episode', String(episode))
+  if (movie)   p.set('movie', '1')
+  return _get(`/vod/skip?${p}`)
+}
+/** The show's IMDb match by hand: "tt…" (or its IMDb link), "off", or null to find it by name. */
+export const setVodSkipMatch = (videoId, imdbId) => _put(`/vod/skip/match/${encodeURIComponent(videoId)}`, { imdbId })
+
 // ── Downloads (save VOD to server disk) ──────────────────────────────────
 export const getDownloads     = ()       => _get('/downloads')
 export const enqueueDownloads = (items)  => _post('/downloads', { items })

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
@@ -15,6 +15,8 @@ import EpisodePanel from '@/components/EpisodePanel'
 import { StreamStats, StatsButton } from '@/components/StreamStats'
 import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
+import { SkipButton, SkipMatch } from '@/components/SkipControls'
+import { skipAt, autoSkipTo } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
@@ -253,6 +255,44 @@ export default function VodPlayerPage() {
       setResumedFrom(0)
     }
   }, [progressKey, duration, mediaKey])
+
+  // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
+  // The parts that can be skipped, from the server: for this title only
+  // (`for`), so the last episode's never show on the next while it loads.
+  const [skipFound, setSkipFound] = useState(null)   // { for, imdbId, match, intro, recap, outro, autoSkip }
+  const [skipAsk, setSkipAsk]     = useState(0)      // goes up when the show's match is changed
+  const seasonNo = searchParams.get('season') || ''
+  const year     = searchParams.get('year') || ''
+  useEffect(() => {
+    if (!videoId) return
+    let cancelled = false
+    getVodSkip({ videoId, name: title, year, season: seasonNo, episode: isEpisode ? seriesNo : '', movie: !isEpisode })
+      .then((r) => { if (!cancelled) setSkipFound({ ...r, for: progressKey }) })
+      .catch(() => { if (!cancelled) setSkipFound(null) })
+    return () => { cancelled = true }
+  }, [videoId, title, year, seasonNo, seriesNo, isEpisode, progressKey, skipAsk])
+  const skipParts = skipFound?.for === progressKey && mediaKey === progressKey && !onTv ? skipFound : null
+  const skipNow = upNext ? null : skipAt(skipParts, currentTime)
+  // Auto-skip: each intro or recap once, so going back to watch it stays put.
+  const autoSkippedRef = useRef({ key: null, done: new Set() })
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !skipParts?.autoSkip) return
+    if (autoSkippedRef.current.key !== progressKey) autoSkippedRef.current = { key: progressKey, done: new Set() }
+    const done = autoSkippedRef.current.done
+    const to = autoSkipTo(skipParts, currentTime, done)
+    if (to == null) return
+    done.add(skipAt(skipParts, currentTime).kind)
+    try { v.currentTime = Math.min(to, v.duration) } catch { /* seek rejected */ }
+  }, [skipParts, currentTime, progressKey])
+  function doSkip(toNextEpisode) {
+    if (toNextEpisode && neighbours.next) { playEpisode(neighbours.next.season, neighbours.next.episode); return }
+    const v = videoRef.current
+    if (!v || !skipNow) return
+    const t = Math.min(skipNow.to, v.duration)
+    try { v.currentTime = t } catch { /* seek rejected */ }
+    setCurrentTime(t)
+  }
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -632,6 +672,8 @@ export default function VodPlayerPage() {
           </div>
         )}
 
+        <SkipButton skip={skipNow} onSkip={doSkip} nextEpisode={!!neighbours.next} raised={showControls || status !== 'playing'} />
+
         {upNext && (
           <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
         )}
@@ -785,6 +827,8 @@ export default function VodPlayerPage() {
               <p className="text-xs text-[var(--color-text)]">{decodeURIComponent(searchParams.get('actors'))}</p>
             </div>
           )}
+
+          <SkipMatch videoId={videoId} found={skipFound?.for === progressKey ? skipFound : null} onChanged={() => setSkipAsk((n) => n + 1)} />
 
           {isEpisode && (
             <div className="pt-3 border-t border-[var(--color-border)]">

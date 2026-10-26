@@ -312,7 +312,9 @@ function logStateSummary() {
 const _summaryTimer = setInterval(logStateSummary, 10_000);
 if (_summaryTimer.unref) _summaryTimer.unref();
 
-const vodRoutes    = require('./routes/vod')(appState, config, { watchStore });
+// Skip intro / credits: each show's IMDb match, kept on disk (lib/skipSegments.js).
+const skipSegments = new (require('./lib/skipSegments').SkipSegments)(path.join(config.dataDir, 'skip-matches.json'));
+const vodRoutes    = require('./routes/vod')(appState, config, { watchStore, skipSegments });
 
 const DownloadManager = require('./downloads/DownloadManager');
 const downloadsCache = new (require('./cache/CacheManager'))(config.dataDir);
@@ -530,6 +532,7 @@ function shutdown(signal) {
   log.info('server', `${signal} received — shutting down`);
   xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   watchStore.flush();      // positions from the last few seconds
+  skipSegments.flush();    // shows matched in the last second
   appState.castHls?.stopAll();   // FFmpeg for channels being cast
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');

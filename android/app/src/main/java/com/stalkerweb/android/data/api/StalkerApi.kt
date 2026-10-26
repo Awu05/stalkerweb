@@ -152,6 +152,21 @@ interface StalkerApi {
         @Query("episodeId") episodeId: String = "",
     ): VodStreamResponse
 
+    // Skip intro / recap / credits (backend lib/skipSegments.js): [name] the
+    // movie's or show's title; season and episode numbers for an episode.
+    @GET("api/vod/skip")
+    suspend fun getVodSkip(
+        @Query("videoId") videoId: String,
+        @Query("name") name: String,
+        @Query("year") year: String = "",
+        @Query("season") season: String = "",
+        @Query("episode") episode: String = "",
+        @Query("movie") movie: String = "",
+    ): SkipResponse
+
+    @PUT("api/viewers/me/filters")
+    suspend fun saveAutoSkip(@Body body: AutoSkipRequest): ViewerDetails
+
     // A cast device's link for a movie or episode (as api/vod/stream).
     @GET("api/vod/cast")
     suspend fun getVodCastLink(

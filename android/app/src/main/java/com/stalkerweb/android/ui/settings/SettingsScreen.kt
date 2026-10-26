@@ -213,6 +213,15 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
             CheckRow(c, c in shownCats) { on -> shownCats = if (on) shownCats + c else shownCats - c }
         }
         item {
+            Card("${me?.name ?: "Your"}'s playback", "Skip intros and recaps without asking, where their times are known (from IntroDB, a community database). Otherwise a Skip button shows while they play; credits are never skipped by themselves.") {
+                Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable(enabled = me != null && !state.busy) { viewModel.setAutoSkip(me?.autoSkip != true) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Skip intros & recaps automatically", color = SwColors.Text, modifier = Modifier.weight(1f))
+                    Switch(checked = me?.autoSkip == true, onCheckedChange = null)
+                }
+            }
+        }
+        item {
             Card("Adult content") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Show adult channels and categories", color = SwColors.Text, modifier = Modifier.weight(1f))

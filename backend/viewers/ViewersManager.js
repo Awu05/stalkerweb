@@ -51,6 +51,7 @@ function blankViewer(name, color) {
     disabledLanguages: [],
     disabledVodCategories: [],
     showAdult: false,
+    autoSkip: false,
   };
 }
 
@@ -236,12 +237,13 @@ class ViewersManager {
     this._save(d);
   }
 
-  setFilters(id, { disabledGenres, disabledLanguages, disabledVodCategories, showAdult } = {}) {
+  setFilters(id, { disabledGenres, disabledLanguages, disabledVodCategories, showAdult, autoSkip } = {}) {
     const list = (value, label) => {
       if (!Array.isArray(value) || value.some((s) => typeof s !== 'string')) throw new ViewerError(400, `${label} must be a list of names.`);
       return [...new Set(value)];
     };
     if (showAdult !== undefined && typeof showAdult !== 'boolean') throw new ViewerError(400, 'showAdult must be true or false.');
+    if (autoSkip !== undefined && typeof autoSkip !== 'boolean') throw new ViewerError(400, 'autoSkip must be true or false.');
     const genres    = disabledGenres    !== undefined ? list(disabledGenres, 'disabledGenres') : undefined;
     const languages = disabledLanguages !== undefined ? list(disabledLanguages, 'disabledLanguages') : undefined;
     const vod       = disabledVodCategories !== undefined ? list(disabledVodCategories, 'disabledVodCategories') : undefined;
@@ -250,6 +252,7 @@ class ViewersManager {
       if (languages) v.disabledLanguages = languages;
       if (vod) v.disabledVodCategories = vod;
       if (showAdult !== undefined) v.showAdult = showAdult;
+      if (autoSkip !== undefined) v.autoSkip = autoSkip;
     });
   }
 

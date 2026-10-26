@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -270,6 +271,18 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
             )
         }
 
+        state.skip?.takeIf { !casting && state.error == null }?.let { now ->
+            val next = now.kind == "outro" && state.neighbours.next != null
+            SkipButton(
+                label = if (next) "Next episode" else now.label,
+                next = next,
+                takeFocus = isTV,
+                onClick = { viewModel.skip(next) },
+                // Above Media3's seek bar while its controls show.
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
+            )
+        }
+
         state.upNext?.let { next ->
             UpNextCard(
                 title = com.stalkerweb.android.data.repo.episodeRowLabel(next.episode),
@@ -339,6 +352,25 @@ private fun EpisodesPanel(
         }
     }
     LaunchedEffect(state.episodes[seasonId]) { runCatching { currentFocus.requestFocus() } }
+}
+
+/**
+ * Skip intro / recap / credits, over the video while one plays. On a TV it
+ * takes the focus when it appears, so one press of OK skips.
+ */
+@Composable
+private fun SkipButton(label: String, next: Boolean, takeFocus: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(label) { if (takeFocus) runCatching { focus.requestFocus() } }
+    OutlinedButton(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+        modifier = modifier.focusRequester(focus).tvFocus(RoundedCornerShape(50)),
+    ) {
+        Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
+        Text(" $label")
+    }
 }
 
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */

@@ -26,7 +26,12 @@ data class ViewerDetails(
     val disabledLanguages: List<String> = emptyList(),
     val disabledVodCategories: List<String> = emptyList(),
     val showAdult: Boolean = false,
+    /** Skip intros and recaps without asking (the player's Skip button otherwise). */
+    val autoSkip: Boolean = false,
 )
+
+@JsonClass(generateAdapter = false)
+data class AutoSkipRequest(val autoSkip: Boolean)
 
 @JsonClass(generateAdapter = false)
 data class CreateViewerRequest(
