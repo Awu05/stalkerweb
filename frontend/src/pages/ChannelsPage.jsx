@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, us
 import { isLanguageDisabled } from '../lib/languages'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Search, Tv2, AlertCircle, AlertTriangle, RefreshCw, Heart, Clock, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  Search, Tv2, AlertCircle, AlertTriangle, RefreshCw, Heart, X, Check, ChevronDown, ChevronUp, History,
+} from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ClearSearch } from '@/components/ui/clear-search'
 import { Button } from '@/components/ui/button'
@@ -488,7 +490,7 @@ export default function ChannelsPage() {
         {recentChannels.length > 0 && !query && (
           <section>
             <div className="flex items-center gap-2 mb-1">
-              <Clock size={14} className="text-[var(--color-muted)]" />
+              <History size={14} className="text-[var(--color-muted)]" />
               <span className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wide">Recently Watched</span>
             </div>
             {/* overflow-x-auto also clips vertically, which cut off the card hover

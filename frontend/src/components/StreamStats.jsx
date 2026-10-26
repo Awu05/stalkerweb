@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, X } from 'lucide-react'
+import { ChartColumn, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { bufferAhead, deliveryText, formatBitrate, sampleEngine } from '@/lib/streamStats'
 import { getStreamDelivery, pingServer } from '../stalkerApi'
@@ -15,7 +15,7 @@ export function StatsButton({ open, onToggle, className }) {
       aria-pressed={open}
       title="Stats"
     >
-      <Activity size={18} />
+      <ChartColumn size={18} />
     </button>
   )
 }
