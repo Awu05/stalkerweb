@@ -4,7 +4,7 @@ import Hls from 'hls.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   ChevronLeft, AlertCircle, Loader2, Clock, Calendar, X, PictureInPicture2,
-  SkipBack, SkipForward, ListVideo, PanelRightClose, PanelRightOpen,
+  SkipBack, SkipForward, List, Info,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
@@ -711,16 +711,17 @@ export default function VodPlayerPage() {
             <div className="flex-1" />
             {isEpisode && (
               <button onClick={() => setEpisodesOpen(true)} className="lg:hidden text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors" aria-label="Episodes" title="Episodes">
-                <ListVideo size={18} />
+                <List size={18} />
               </button>
             )}
             <button
               onClick={() => setSideOpen(o => { saveSideOpen(!o); return !o })}
-              className="hidden lg:inline-flex text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors"
+              className={cn('hidden lg:inline-flex p-1.5 rounded transition-colors', sideOpen ? 'text-[var(--color-primary-light)] bg-white/10' : 'text-white/80 hover:text-white hover:bg-white/10')}
               aria-label={sideOpen ? 'Hide panel' : 'Show panel'} aria-pressed={sideOpen}
               title={sideOpen ? (isEpisode ? 'Hide episodes' : 'Hide details') : (isEpisode ? 'Show episodes' : 'Show details')}
             >
-              {sideOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              {/* The episode list, as the apps show it (a movie's panel is its details) */}
+              {isEpisode ? <List size={18} /> : <Info size={18} />}
             </button>
             <StatsButton open={statsOpen} onToggle={() => setStatsOpen(o => !o)} />
             <CastButtons cast={cast} />
