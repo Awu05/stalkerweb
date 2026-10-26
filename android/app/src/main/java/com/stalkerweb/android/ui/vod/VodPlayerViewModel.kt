@@ -266,7 +266,8 @@ class VodPlayerViewModel(
 
     private fun startPlayback(url: String, params: PlayerParams) {
         val p = _player.value ?: return
-        val title = if (params.episodeTitle.isNotEmpty()) "${params.title} · ${params.episodeTitle}" else params.title
+        val episodeName = if (params.isEpisode) com.stalkerweb.android.data.repo.episodeLabel(params.season, params.series, params.episodeTitle) else ""
+        val title = if (episodeName.isNotEmpty()) "${params.title} · $episodeName" else params.title
         val builder = MediaItem.Builder().setUri(url).setMediaId(params.key)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) builder.setMimeType(MimeTypes.APPLICATION_M3U8)

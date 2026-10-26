@@ -18,7 +18,7 @@ import MyListButton from '@/components/MyListButton'
 import { SkipButton, SkipMatch } from '@/components/SkipControls'
 import { skipAt, autoSkipTo } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
-import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
+import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import {
@@ -53,7 +53,11 @@ export default function VodPlayerPage() {
   const episodeId    = searchParams.get('episodeId') || ''
   const episodeTitle = searchParams.get('episodeTitle') || ''
 
-  const displayTitle = episodeTitle ? `${title} · ${episodeTitle}` : title
+  // "S1 · E3 · The Light of Day": the season and episode numbers with the episode's name.
+  const episodeName = episodeTitle || seriesNo > 0
+    ? episodeLabel({ season: searchParams.get('season') || '', episode: seriesNo > 0 ? String(seriesNo) : '', name: episodeTitle })
+    : ''
+  const displayTitle = episodeName ? `${title} · ${episodeName}` : title
   const displayTitleRef = useRef(displayTitle)
   displayTitleRef.current = displayTitle
 
@@ -787,8 +791,8 @@ export default function VodPlayerPage() {
         <div className="p-4 flex flex-col gap-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--color-text)] leading-snug">{title}</h2>
-            {episodeTitle && (
-              <p className="text-sm text-[var(--color-primary-light)] mt-0.5">{episodeTitle}</p>
+            {episodeName && (
+              <p className="text-sm text-[var(--color-primary-light)] mt-0.5">{episodeName}</p>
             )}
           </div>
 

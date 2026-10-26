@@ -225,7 +225,9 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
                 Column(Modifier.weight(1f)) {
                     Text(p.title, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (p.episodeTitle.isNotEmpty()) Text(p.episodeTitle, color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // "S1 · E3 · The Light of Day"
+                    val episodeName = if (p.isEpisode) com.stalkerweb.android.data.repo.episodeLabel(p.season, p.series, p.episodeTitle) else ""
+                    if (episodeName.isNotEmpty()) Text(episodeName, color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (p.isEpisode) {
                     IconButton(onClick = viewModel::playPrevious, enabled = state.neighbours.prev != null) { Icon(Icons.Default.SkipPrevious, "Previous episode", tint = Color.White) }
