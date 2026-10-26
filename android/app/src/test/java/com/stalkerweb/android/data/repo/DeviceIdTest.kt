@@ -22,4 +22,8 @@ class DeviceIdTest {
         assertEquals("", macDeviceId("00:1A:79:AA:BB"))
         assertEquals("", normalizeMac("00:1A:79:AA:BB:CC:DD"))
     }
+
+    @Test fun `only ASCII hex digits count, as on the web`() {
+        assertEquals("", macDeviceId("００:１２:３４:５６:７８:９０"))
+    }
 }

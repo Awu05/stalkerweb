@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,10 +44,10 @@ fun StreamOverrideSheet(
                 label         = { Text("Override URL (leave blank to use default)") },
                 placeholder   = { Text("https://…") },
                 singleLine    = true,
-                keyboardOptions = KeyboardOptions(
+                keyboardOptions = tvKeyboardOptions(KeyboardOptions(
                     keyboardType = KeyboardType.Uri,
                     imeAction    = ImeAction.Done,
-                ),
+                )),
                 keyboardActions = KeyboardActions(onDone = { onSave(text.ifBlank { null }) }),
                 modifier = Modifier.fillMaxWidth(),
             )

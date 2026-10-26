@@ -4,7 +4,7 @@ import java.security.MessageDigest
 
 /** "00:1a:79-aa bb cc" → "00:1A:79:AA:BB:CC", or "" if it isn't 12 hex digits. */
 fun normalizeMac(mac: String): String {
-    val hex = mac.filter { it.isDigit() || it.lowercaseChar() in 'a'..'f' }.uppercase()
+    val hex = mac.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }.uppercase()
     return if (hex.length == 12) hex.chunked(2).joinToString(":") else ""
 }
 

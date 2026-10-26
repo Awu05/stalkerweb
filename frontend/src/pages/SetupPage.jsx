@@ -12,7 +12,7 @@ import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { macDeviceId } from '@/lib/macDeviceId'
+import { macDeviceId, normalizeMac } from '@/lib/macDeviceId'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
@@ -222,11 +222,24 @@ function ProfileSheet({ initial, onSave, onClose }) {
     return id ? { ...f, device_id: id, device_id2: id } : f
   }
   const setMac = e => { const mac = e.target.value; setForm(f => idsFromMac ? withMacIds({ ...f, mac }) : { ...f, mac }) }
-  const toggleIdsFromMac = on => { setIdsFromMac(on); if (on) setForm(withMacIds) }
+  // The IDs before ticking, put back on unticking (an STBEmu import's own, say).
+  const idsBefore = useRef(null)
+  const toggleIdsFromMac = on => {
+    setIdsFromMac(on)
+    if (on) {
+      idsBefore.current = { device_id: form.device_id, device_id2: form.device_id2 }
+      setForm(withMacIds)
+    } else if (idsBefore.current) {
+      const before = idsBefore.current
+      idsBefore.current = null
+      setForm(f => ({ ...f, ...before }))
+    }
+  }
 
   function handleSubmit(e) {
     e.preventDefault()
-    const p = { ...form, portal: normalizePortal(form.portal) }
+    // The portal is sent the MAC as saved: the same form its device IDs were hashed from.
+    const p = { ...form, portal: normalizePortal(form.portal), mac: normalizeMac(form.mac) || form.mac }
     onSave(p)
   }
 

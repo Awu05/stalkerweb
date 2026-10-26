@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.channels
 
+import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -179,7 +180,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
         title = { Text("Set logo — ${channel.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(search, { search = it }, singleLine = true, label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                OutlinedTextField(search, { search = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 found?.let { logo ->
                     Row(
                         Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { url = logo }
@@ -191,7 +192,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
                     }
                 }
                 if (notFound) Text("No logo found", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(url, { url = it }, singleLine = true, label = { Text("Or paste a logo URL") })
+                OutlinedTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Or paste a logo URL") })
             }
         },
         confirmButton = { Button(onClick = { onSave(url); onDismiss() }, enabled = url.isNotBlank()) { Text("Save") } },
@@ -276,7 +277,7 @@ fun GroupEditDialog(
         title = { Text("Edit group") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") })
+                OutlinedTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Name") })
                 Text("Channels in group", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
                 LazyColumn(Modifier.heightIn(max = 160.dp)) {
                     items(members, key = { "m" + it.uniqueId }) { c ->
@@ -286,7 +287,7 @@ fun GroupEditDialog(
                         }
                     }
                 }
-                OutlinedTextField(query, { query = it }, singleLine = true, label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                OutlinedTextField(query, { query = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 LazyColumn(Modifier.heightIn(max = 180.dp)) {
                     items(suggestions, key = { "s" + it.uniqueId }) { c ->
                         Row(

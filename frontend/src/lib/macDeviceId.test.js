@@ -29,4 +29,8 @@ describe('macDeviceId', () => {
     expect(macDeviceId('00:1A:79:AA:BB')).toBe('')
     expect(normalizeMac('00:1A:79:AA:BB:CC:DD')).toBe('')
   })
+
+  it('only counts ASCII hex digits, as the apps do', () => {
+    expect(macDeviceId('００:１２:３４:５６:７８:９０')).toBe('')
+  })
 })

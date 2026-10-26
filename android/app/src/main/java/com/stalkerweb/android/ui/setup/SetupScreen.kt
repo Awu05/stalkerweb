@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.setup
 
+import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -157,10 +158,10 @@ fun SetupScreen(
                 placeholder = { Text("http://192.168.1.10") },
                 singleLine = true,
                 isError = error != null,
-                keyboardOptions = KeyboardOptions(
+                keyboardOptions = tvKeyboardOptions(KeyboardOptions(
                     keyboardType = KeyboardType.Uri,
                     imeAction = ImeAction.Next,
-                ),
+                )),
                 keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
                 modifier = Modifier.fillMaxWidth().focusRequester(hostFocusRequester),
             )
@@ -174,10 +175,10 @@ fun SetupScreen(
                 placeholder = { Text("3000") },
                 singleLine = true,
                 isError = error != null,
-                keyboardOptions = KeyboardOptions(
+                keyboardOptions = tvKeyboardOptions(KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Next,
-                ),
+                )),
                 keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -193,10 +194,10 @@ fun SetupScreen(
                 isError = error != null,
                 visualTransformation = passwordTransformation(keyShown),
                 trailingIcon = { PasswordEye(keyShown) { keyShown = !keyShown } },
-                keyboardOptions = KeyboardOptions(
+                keyboardOptions = tvKeyboardOptions(KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Go,
-                ),
+                )),
                 keyboardActions = KeyboardActions(onGo = { tryConnect() }),
                 modifier = Modifier.fillMaxWidth(),
             )

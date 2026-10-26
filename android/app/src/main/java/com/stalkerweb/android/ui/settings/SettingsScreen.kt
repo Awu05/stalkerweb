@@ -1,6 +1,8 @@
 package com.stalkerweb.android.ui.settings
 
+import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import com.stalkerweb.android.data.repo.macDeviceId
+import com.stalkerweb.android.data.repo.normalizeMac
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -381,17 +383,28 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
         mutableStateOf(id.isNotEmpty() && initial.deviceId == id && initial.deviceId2 == id)
     }
     fun withMacIds(q: Profile): Profile = macDeviceId(q.mac).let { id -> if (id.isEmpty()) q else q.copy(deviceId = id, deviceId2 = id) }
+    // The IDs before ticking, put back on unticking (an STBEmu import's own, say).
+    var idsBefore by remember { mutableStateOf<Pair<String, String>?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial.id.isBlank()) "Add IPTV connection" else "Edit IPTV connection") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 @Composable fun field(label: String, value: String, readOnly: Boolean = false, set: (String) -> Unit) =
-                    OutlinedTextField(value, set, singleLine = true, readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value, set, singleLine = true, keyboardOptions = tvKeyboardOptions(), readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
                 field("Name", p.name) { p = p.copy(name = it) }
                 field("Portal URL", p.portal) { p = p.copy(portal = it) }
                 field("MAC address", p.mac) { p = p.copy(mac = it).let { q -> if (idsFromMac) withMacIds(q) else q } }
-                CheckRow("Device IDs from the MAC (SHA-256)", idsFromMac) { on -> idsFromMac = on; if (on) p = withMacIds(p) }
+                CheckRow("Device IDs from the MAC (SHA-256)", idsFromMac) { on ->
+                    idsFromMac = on
+                    if (on) {
+                        idsBefore = p.deviceId to p.deviceId2
+                        p = withMacIds(p)
+                    } else idsBefore?.let { (a, b) -> p = p.copy(deviceId = a, deviceId2 = b); idsBefore = null }
+                }
+                if (idsFromMac && p.mac.isNotBlank() && macDeviceId(p.mac).isEmpty()) {
+                    Text("The device IDs fill in once the MAC is complete.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
                 field("Timezone", p.timezone) { p = p.copy(timezone = it) }
                 field("Language", p.lang) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
@@ -399,7 +412,7 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 OutlinedTextField(
                     p.password, { p = p.copy(password = it) }, singleLine = true, label = { Text("Password") },
                     visualTransformation = passwordTransformation(passwordShown),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = tvKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Password)),
                     trailingIcon = { PasswordEye(passwordShown) { passwordShown = !passwordShown } },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -410,7 +423,7 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 field("Signature", p.signature) { p = p.copy(signature = it) }
             }
         },
-        confirmButton = { Button(onClick = { onSave(p); onDismiss() }, enabled = p.portal.isNotBlank() && p.mac.isNotBlank()) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(p.copy(mac = normalizeMac(p.mac).ifEmpty { p.mac })); onDismiss() }, enabled = p.portal.isNotBlank() && p.mac.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -463,7 +476,7 @@ private fun PlaybackTab(viewModel: SettingsViewModel, state: SettingsState) {
             ChoiceRow(listOf(0, 5, 10, 15, 30, 60), buffer, { if (it == 0) "Off" else "$it s" }) { buffer = it }
             Text("Disconnect when idle", color = SwColors.Text)
             ChoiceRow(listOf(0, 15, 30, 60, 120, 240), idle, { if (it == 0) "Never" else if (it < 60) "$it min" else "${it / 60} h" }) { idle = it }
-            OutlinedTextField(dir, { dir = it }, singleLine = true, label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(dir, { dir = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
             Button(onClick = {
                 viewModel.savePlayback(SettingsUpdate(epgEnabled = epg, vodEnabled = vod, downloadDir = dir.trim().ifBlank { null },
                     idleTimeoutMinutes = idle, liveBufferSeconds = buffer))
@@ -505,8 +518,8 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
         }
         item {
             Card("Logo overrides", "A logo for a channel name, used before anything else.") {
-                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Channel name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(url, { url = it }, singleLine = true, label = { Text("Logo URL") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Channel name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Logo URL") }, modifier = Modifier.fillMaxWidth())
                 Button(onClick = { viewModel.addOverride(name, url); name = ""; url = "" }, enabled = name.isNotBlank() && url.isNotBlank()) { Text("Add override") }
             }
         }
@@ -522,7 +535,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
         item {
             Card("Logo strip words", "Removed from channel names before logo matching (e.g. CANADA, so BBC CANADA matches BBC).") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(word, { word = it }, singleLine = true, label = { Text("Word") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(word, { word = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Word") }, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = { viewModel.addStripWord(word); word = "" }, enabled = word.isNotBlank()) { Text("Add") }
                 }

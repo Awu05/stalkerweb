@@ -67,12 +67,13 @@ private val SwShapes = Shapes(
 
 /**
  * On a TV the remote's focus is the only pointer: Material's 10% focus layer
- * barely shows on this dark palette, so buttons, the sidebar and menus get a
- * bright white one (Modifier.tvFocus draws the ring on our own tiles).
+ * barely shows on this palette, so buttons, the sidebar and menus get a much
+ * stronger one (Modifier.tvFocus draws the ring on our own tiles). Its colour
+ * stays the content's — light on dark buttons, dark on the near-white filled
+ * ones, where a white layer wouldn't show at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 private val TvRipple = RippleConfiguration(
-    color = SwColors.PrimaryLight,
     rippleAlpha = RippleAlpha(draggedAlpha = 0.16f, focusedAlpha = 0.32f, hoveredAlpha = 0.08f, pressedAlpha = 0.20f),
 )
 

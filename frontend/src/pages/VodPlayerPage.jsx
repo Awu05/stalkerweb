@@ -24,6 +24,8 @@ import {
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
+const SEEK_STEP_SECS = 10   // ← / →
+
 // The side panel's open/closed, remembered on this browser (open if unknown).
 const SIDE_KEY = 'vodPlayerSidePanel'
 function readSideOpen() {
@@ -419,6 +421,25 @@ export default function VodPlayerPage() {
   }, [playing, isFullscreen])
 
   useEffect(() => { resetHideTimer(); return () => clearTimeout(hideTimer.current) }, [resetHideTimer])
+
+  // ← / →: back or forward 10 seconds. Not while typing, or on a slider (the
+  // seek bar and volume take the arrows themselves).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.code !== 'ArrowLeft' && e.code !== 'ArrowRight') return
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable ||
+          e.target.closest?.('[role="slider"]') || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      const v = videoRef.current
+      if (!v || !Number.isFinite(v.duration)) return
+      e.preventDefault()
+      const t = Math.min(Math.max(v.currentTime + (e.code === 'ArrowRight' ? SEEK_STEP_SECS : -SEEK_STEP_SECS), 0), v.duration)
+      try { v.currentTime = t } catch { /* seek rejected */ }
+      setCurrentTime(t)
+      resetHideTimer()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [resetHideTimer])
 
   // Fullscreen sync
   useEffect(() => {
