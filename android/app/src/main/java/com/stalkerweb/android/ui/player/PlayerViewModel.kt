@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.data.repo.StatsRepository
 import android.app.Application
 import android.content.ComponentName
 import android.widget.Toast
@@ -71,6 +72,8 @@ data class PlayerUiState(
 class PlayerViewModel(
     application: Application,
     private val live: LiveRepository,
+    /** The Stats panel's questions for the server. */
+    val stats: StatsRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(PlayerUiState())

@@ -33,16 +33,15 @@ export function StreamStats({ open, onClose, videoRef, sources, kind, id, classN
   const stalls = useRef(0)
   const frames = useRef(null)   // { at, shown } — for the frame rate actually shown
 
-  // Stalls since this stream started.
+  // Stalls since this channel or title started — reconnects included (they're
+  // what stalls lead to), seeks not (a wait the viewer asked for).
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     stalls.current = 0
-    const onWaiting = () => { if (video.currentTime > 0) stalls.current++ }
-    const onStart = () => { stalls.current = 0 }
+    const onWaiting = () => { if (video.currentTime > 0 && !video.seeking) stalls.current++ }
     video.addEventListener('waiting', onWaiting)
-    video.addEventListener('loadstart', onStart)
-    return () => { video.removeEventListener('waiting', onWaiting); video.removeEventListener('loadstart', onStart) }
+    return () => video.removeEventListener('waiting', onWaiting)
   }, [videoRef, id])
 
   useEffect(() => {
@@ -70,16 +69,20 @@ export function StreamStats({ open, onClose, videoRef, sources, kind, id, classN
         ...sampleEngine(src),
       })
     }
+    // One round at a time, the next 5 s after the last answered: on a slow
+    // server requests don't pile up on the player's connections, and the
+    // round trip isn't time spent queueing.
+    let next = null
     const network = async () => {
       const [ms, d] = await Promise.all([pingServer(), id ? getStreamDelivery(kind, id).catch(() => null) : null])
       if (!live) return
       setPing(ms)
       setDelivery(d?.delivery ?? null)
+      next = setTimeout(network, 5000)
     }
     sample(); network()
     const a = setInterval(sample, 1000)
-    const b = setInterval(network, 5000)
-    return () => { live = false; clearInterval(a); clearInterval(b) }
+    return () => { live = false; clearInterval(a); clearTimeout(next) }
   }, [open, videoRef, sources, kind, id])
 
   if (!open) return null

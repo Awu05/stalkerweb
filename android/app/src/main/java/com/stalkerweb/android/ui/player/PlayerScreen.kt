@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.data.repo.StatsRepository
 import com.stalkerweb.android.ui.components.StatsButton
 import com.stalkerweb.android.ui.components.StreamStatsOverlay
 import android.app.Activity
@@ -110,6 +111,7 @@ private class LiveControls(
     val subtitles: List<TrackOption>,
     val isTV: Boolean,
     val statsOpen: Boolean = false,   // the Stats panel over the video
+    val stats: StatsRepository? = null,
 )
 
 /** What the controls can do. */
@@ -282,6 +284,8 @@ fun PlayerScreen(
         )
     }
 
+    // Above the Picture-in-Picture return, so a trip there keeps it open.
+    var statsOpen by remember { mutableStateOf(false) }
     if (isInPipMode) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             ExoPlayerSurface(player = player, modifier = Modifier.fillMaxSize())
@@ -289,13 +293,12 @@ fun PlayerScreen(
         return
     }
 
-    var statsOpen by remember { mutableStateOf(false) }
     val controls = LiveControls(
         state = state, player = player, displayName = displayName, activeId = activeId,
         castingTo = if (state.isCasting) castDevice ?: "TV" else null,
         isPlaying = isPlaying, isBuffering = isBuffering, playerError = playerError, showControls = showControls,
         nowSecs = nowSecs, audio = trackOptions(tracks, C.TRACK_TYPE_AUDIO), subtitles = trackOptions(tracks, C.TRACK_TYPE_TEXT),
-        isTV = isTV, statsOpen = statsOpen,
+        isTV = isTV, statsOpen = statsOpen, stats = viewModel.stats,
     )
     val actions = LiveActions(
         onBack                 = onBack,
@@ -399,8 +402,8 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
 
         JumpBubble(s.jumpDigits, Modifier.align(Alignment.TopCenter).padding(top = 72.dp))
 
-        if (c.statsOpen && c.castingTo == null) {
-            StreamStatsOverlay("live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp))
+        if (c.statsOpen && c.castingTo == null && c.stats != null) {
+            StreamStatsOverlay(c.stats, "live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp, bottom = 12.dp))
         }
 
         // Top bar
@@ -540,8 +543,9 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
 
             PlaybackOverlay(isBuffering = c.isBuffering, playerError = c.playerError, onRetry = a.onRetry, castingTo = c.castingTo)
 
-            if (c.statsOpen && c.castingTo == null) {
-                StreamStatsOverlay("live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 48.dp))
+            // Clear of the back button, and as tall as the small portrait picture allows (it scrolls).
+            if (c.statsOpen && c.castingTo == null && c.stats != null) {
+                StreamStatsOverlay(c.stats, "live", c.activeId.ifEmpty { null }, Modifier.align(Alignment.TopStart).padding(start = 56.dp, top = 8.dp, bottom = 8.dp))
             }
 
             if (c.showControls) {

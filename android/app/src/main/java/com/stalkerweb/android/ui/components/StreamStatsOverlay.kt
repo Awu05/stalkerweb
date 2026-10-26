@@ -1,6 +1,8 @@
 package com.stalkerweb.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,12 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.stalkerweb.android.StalkerWebApp
 import com.stalkerweb.android.data.api.StreamDelivery
+import com.stalkerweb.android.data.repo.StatsRepository
 import com.stalkerweb.android.data.repo.codecLabel
 import com.stalkerweb.android.data.repo.deliveryText
 import com.stalkerweb.android.data.repo.formatBitrate
@@ -54,8 +55,7 @@ fun StatsButton(open: Boolean, onToggle: () -> Unit) {
  * the movie's key, as the server's Activity knows them.
  */
 @Composable
-fun StreamStatsOverlay(kind: String, id: String?, modifier: Modifier = Modifier) {
-    val apis = (LocalContext.current.applicationContext as StalkerWebApp).container.apis
+fun StreamStatsOverlay(stats: StatsRepository, kind: String, id: String?, modifier: Modifier = Modifier) {
     var snap by remember { mutableStateOf<PlaybackSnapshot?>(null) }
     var pingMs by remember { mutableStateOf<Long?>(null) }
     var delivery by remember { mutableStateOf<StreamDelivery?>(null) }
@@ -65,12 +65,8 @@ fun StreamStatsOverlay(kind: String, id: String?, modifier: Modifier = Modifier)
     }
     LaunchedEffect(kind, id) {
         while (true) {
-            pingMs = runCatching {
-                val t0 = System.nanoTime()
-                apis.get().health()
-                (System.nanoTime() - t0) / 1_000_000
-            }.getOrNull()
-            delivery = if (id.isNullOrEmpty()) null else runCatching { apis.get().getStreamDelivery(kind, id).delivery }.getOrNull()
+            pingMs = runCatching { stats.pingMs() }.getOrNull()
+            delivery = if (id.isNullOrEmpty()) null else runCatching { stats.delivery(kind, id) }.getOrNull()
             delay(5_000)
         }
     }
@@ -92,6 +88,7 @@ fun StreamStatsOverlay(kind: String, id: String?, modifier: Modifier = Modifier)
         modifier
             .widthIn(max = 300.dp)
             .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(10.dp))
+            .verticalScroll(rememberScrollState())   // scrolls where it doesn't fit (a phone's portrait video)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

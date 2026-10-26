@@ -1,3 +1,5 @@
+import { rangesOf } from './stallRecovery'
+
 /**
  * The player's Stats panel (components/StreamStats.jsx): what's playing and
  * how it's getting here. The apps' StreamStats.kt says the same things.
@@ -30,11 +32,8 @@ export function formatBitrate(bps) {
 
 /** Seconds buffered ahead of `t` (a <video>'s buffered ranges). */
 export function bufferAhead(buffered, t) {
-  if (!buffered) return 0
-  for (let i = 0; i < buffered.length; i++) {
-    if (t >= buffered.start(i) && t <= buffered.end(i)) return buffered.end(i) - t
-  }
-  return 0
+  const range = rangesOf(buffered).find(([start, end]) => t >= start && t <= end)
+  return range ? range[1] - t : 0
 }
 
 /** The server's delivery (GET /api/activity/delivery), in words. */
@@ -50,6 +49,26 @@ export function deliveryText(d) {
   }
 }
 
+// What hls.js found in what it plays, for a playlist that doesn't say (a plain
+// media playlist names no CODECS or BANDWIDTH): its codecs, and the bitrate
+// of the last segment loaded.
+const hlsFound = new WeakMap()
+
+/** Watch an hls.js player for sampleEngine. `Events` is Hls.Events. */
+export function trackHlsStats(hls, Events) {
+  const found = {}
+  hlsFound.set(hls, found)
+  hls.on(Events.BUFFER_CODECS, (_e, data) => {
+    found.video = data?.video?.codec || data?.audiovideo?.codec || found.video
+    found.audio = data?.audio?.codec || found.audio
+  })
+  hls.on(Events.FRAG_LOADED, (_e, data) => {
+    const frag = data?.frag
+    const bytes = frag?.stats?.loaded
+    if (frag?.type === 'main' && bytes > 0 && frag.duration > 0) found.bitrate = (bytes * 8) / frag.duration
+  })
+}
+
 /**
  * What the playback engine knows: codecs, the stream's bitrate and the
  * download speed (bits/s). hls.js and mpegts.js say; the browser's own player doesn't.
@@ -57,10 +76,11 @@ export function deliveryText(d) {
 export function sampleEngine({ hls, mpegts } = {}) {
   if (hls) {
     const level = hls.levels?.[hls.currentLevel] ?? {}
+    const found = hlsFound.get(hls) ?? {}
     return {
-      video: codecLabel(level.videoCodec),
-      audio: codecLabel(level.audioCodec),
-      bitrate: level.bitrate || null,
+      video: codecLabel(level.videoCodec || found.video),
+      audio: codecLabel(level.audioCodec || found.audio),
+      bitrate: level.bitrate || found.bitrate || null,
       download: hls.bandwidthEstimate || null,
     }
   }

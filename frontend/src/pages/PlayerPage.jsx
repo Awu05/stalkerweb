@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { StreamStats, StatsButton } from '@/components/StreamStats'
+import { trackHlsStats } from '@/lib/streamStats'
 import { isLanguageDisabled } from '../lib/languages'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
@@ -921,6 +922,7 @@ export default function PlayerPage() {
         playingFragRef.current = null
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true, autoStartLoad: !resume })
         hlsRef.current = hls
+        trackHlsStats(hls, Hls.Events)
         if (resume) {
           // A media playlist arrives with the manifest, so its segments are
           // known before loading starts. A multivariant one only loads its media
@@ -1302,7 +1304,7 @@ export default function PlayerPage() {
       >
         {/* Pinned to the edges, so the whole picture fits any screen shape. */}
         <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
-        <StreamStats open={statsOpen} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
+        <StreamStats open={statsOpen && !cast.mode} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
           kind="live" id={activeChannel ? String(activeChannel.uniqueId) : null} className="top-14" />
         <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { codecLabel, formatBitrate, bufferAhead, deliveryText, sampleEngine } from './streamStats'
+import { codecLabel, formatBitrate, bufferAhead, deliveryText, sampleEngine, trackHlsStats } from './streamStats'
 
 const ranges = (...r) => ({ length: r.length, start: (i) => r[i][0], end: (i) => r[i][1] })
 
@@ -55,6 +55,15 @@ describe('sampleEngine', () => {
   it("reads hls.js's playing level and its speed estimate", () => {
     const hls = { currentLevel: 1, levels: [{}, { width: 1920, height: 1080, bitrate: 6_000_000, videoCodec: 'avc1.640028', audioCodec: 'mp4a.40.2' }], bandwidthEstimate: 25_000_000 }
     expect(sampleEngine({ hls })).toEqual({ video: 'H.264', audio: 'AAC', bitrate: 6_000_000, download: 25_000_000 })
+  })
+
+  it('falls back to what hls.js found playing, when the playlist named no codecs or bitrate', () => {
+    const handlers = {}
+    const hls = { currentLevel: 0, levels: [{ bitrate: 0 }], bandwidthEstimate: 0, on: (e, f) => { handlers[e] = f } }
+    trackHlsStats(hls, { BUFFER_CODECS: 'codecs', FRAG_LOADED: 'frag' })
+    handlers.codecs('codecs', { video: { codec: 'hvc1.2.4.L153' }, audio: { codec: 'mp4a.40.2' } })
+    handlers.frag('frag', { frag: { type: 'main', duration: 4, stats: { loaded: 2_000_000 } } })
+    expect(sampleEngine({ hls })).toEqual({ video: 'H.265', audio: 'AAC', bitrate: 4_000_000, download: null })
   })
 
   it("reads mpegts.js's media info and its download speed (KB/s)", () => {

@@ -167,7 +167,7 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            PlayerViewModel(application, container.live) as T
+                            PlayerViewModel(application, container.live, container.stats) as T
                     }
                 }
                 val updateVmFactory = remember {
@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            VodPlayerViewModel(application, container.vod, container.watch, container.links, container.downloads) as T
+                            VodPlayerViewModel(application, container.vod, container.watch, container.links, container.downloads, container.stats) as T
                     }
                 }
                 val portalVmFactory = remember {

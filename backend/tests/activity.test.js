@@ -151,12 +151,31 @@ describe('ActivityTracker', () => {
     expect(a.deliveryFor({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '8' })).toBeNull()
   })
 
-  it("finds an iPhone page's stream that its own player fetched under another name", () => {
+  it("finds an iPhone page's stream that its own player fetched under another name — after that fetch is over too", () => {
     make()
-    a.touch({ ip: '10.0.0.5', ua: 'AppleCoreMedia/1.0.0.22B83 (iPhone; U; CPU OS 18_1 like Mac OS X)', kind: 'vod', id: '100' })
-    a.deliver({ ip: '10.0.0.5', ua: 'AppleCoreMedia/1.0.0.22B83 (iPhone; U; CPU OS 18_1 like Mac OS X)', kind: 'vod', id: '100' }, { mode: 'direct', detail: '' })
+    const CORE = 'AppleCoreMedia/1.0.0.22B83 (iPhone; U; CPU OS 18_1 like Mac OS X)'
+    a.touch({ ip: '10.0.0.5', ua: CORE, kind: 'vod', id: '100' })()
+    a.deliver({ ip: '10.0.0.5', ua: CORE, kind: 'vod', id: '100' }, { mode: 'direct', detail: '' })
+    a.touch({ ip: '10.0.0.5', ua: IPHONE, kind: 'vod', id: '100' })()   // the page's progress saves
+    t += 5 * 60_000
+    a.list()   // prunes the finished fetch
     expect(a.deliveryFor({ ip: '10.0.0.5', ua: IPHONE, kind: 'vod', id: '100' })).toEqual({ mode: 'direct', detail: '' })
     expect(a.deliveryFor({ ip: '10.0.0.9', ua: IPHONE, kind: 'vod', id: '100' })).toBeNull()
+  })
+
+  it("never gives one device another's delivery, though they share an address", () => {
+    make()
+    a.touch({ ip: '1.2.3.4', ua: 'StalkerWeb-Android/0.4.51 (TV)', kind: 'live', id: '7' })
+    a.deliver({ ip: '1.2.3.4', ua: 'StalkerWeb-Android/0.4.51 (TV)', kind: 'live', id: '7' }, { mode: 'relayed', detail: 'MPEG-TS' })
+    expect(a.deliveryFor({ ip: '1.2.3.4', ua: DESKTOP, kind: 'live', id: '7' })).toBeNull()
+  })
+
+  it('forgets a delivery when a new attempt starts', () => {
+    make()
+    a.touch({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })
+    a.deliver({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' }, { mode: 'converted', detail: 'audio → AAC' })
+    a.deliver({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' }, null)
+    expect(a.deliveryFor({ ip: '10.0.0.5', ua: DESKTOP, kind: 'live', id: '7' })).toBeNull()
   })
 
   it('names a movie and its episode from the progress the player saves', () => {

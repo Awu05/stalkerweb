@@ -122,10 +122,12 @@ describe("delivery, for the player's Stats", () => {
     expect(helpers.containerLabel(undefined)).toBe('')
   })
 
-  it("says what FFmpeg re-encodes, or that it only repackages", async () => {
-    const { deliveryOf } = await import('../stalker/FfmpegService.js')
-    expect(deliveryOf(['-c:v', 'copy', '-c:a', 'copy'])).toEqual({ mode: 'repackaged', detail: '' })
-    expect(deliveryOf(['-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k'])).toEqual({ mode: 'converted', detail: 'audio → AAC' })
-    expect(deliveryOf(['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'])).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+  it("says what FFmpeg re-encodes, or that it only repackages — from its own plan", async () => {
+    const { deliveryOf, _codecPlan } = await import('../stalker/FfmpegService.js')
+    expect(deliveryOf(_codecPlan({ video: 'h264', audio: 'aac' }))).toEqual({ mode: 'repackaged', detail: '' })
+    expect(deliveryOf(_codecPlan({ video: 'h264', audio: 'ac3' }))).toEqual({ mode: 'converted', detail: 'audio → AAC' })
+    expect(deliveryOf(_codecPlan({ video: 'mpeg2video', audio: 'mp2' }))).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+    expect(deliveryOf(_codecPlan(null))).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+    expect(_codecPlan({ video: 'hevc', audio: 'aac' }).args).toEqual(['-c:v', 'copy', '-c:a', 'copy'])
   })
 })

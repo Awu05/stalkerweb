@@ -618,6 +618,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
         }
         body = Buffer.concat(rest);
       }
+      noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
       const proxyOrigin = baseUrl(req);
       if (body.includes('#EXT-X-MEDIA-SEQUENCE')) {
         const buffered = await bufferedPlaylist(req, channelId, realUrl);
@@ -641,6 +642,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     // Raw MPEG-TS / binary container — pipe straight through so it never lands in
     // the Node heap. The player (mpegts.js) demuxes it, mirroring the STB's ffmpeg.
     const ct = response.headers['content-type'] || 'video/MP2T';
+    noteDelivery(req, { mode: 'relayed', detail: containerLabel(ct) || 'MPEG-TS' });
     res.status(response.status);
     res.set('Content-Type', ct);
     setCors();
@@ -713,6 +715,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
 
     const buffered = await bufferedPlaylist(req, channelId, realUrl);
     if (buffered) {
+      noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store');
       setCors();
@@ -756,6 +759,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Cache-Control', 'no-cache, no-store');
     res.set('Access-Control-Allow-Origin', '*');
+    noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
     res.send(rewritten);
   }
 
@@ -766,6 +770,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
   // A RegExp path (rather than the string wildcard '/vod/stream*') sidesteps
   // path-to-regexp entirely, since newer versions reject bare unnamed '*'.
   router.get(/^\/vod\/stream/, async (req, res) => {
+    noteDelivery(req, null);   // until this attempt says how — a failed one shows nothing
     // Fix: use requireSession (not just !client) so channelManager is also checked,
     // and unauthenticated requests are rejected consistently with other proxy routes.
     if (!(await requireSessionReconnecting(res))) return;
@@ -813,7 +818,6 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     // HLS playlist URL (extension-based fast path) — servePlaylist handles buffering + rewrite
     // trusted=true: private/loopback hosts already blocked above
     if (isPlaylistUrl(streamUrl)) {
-      noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
       return servePlaylist(req, res, streamUrl, true);
     }
 
@@ -923,6 +927,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
 
   // ── GET /proxy/stream/:channelId ──────────────────────────────────────────
   router.get('/stream/:channelId', channelIdRules, async (req, res) => {
+    noteDelivery(req, null);   // until this attempt says how — a failed one shows nothing
     if (!(await requireSessionReconnecting(res))) return;
     appState.attachStreamHeartbeat?.(req, res);   // covers both finite playlists and single long-lived pipes
 
@@ -1004,7 +1009,6 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     const fallbackUrl = (rawUrl && /^https?:\/\//i.test(rawUrl) && rawUrl !== streamUrl) ? rawUrl : null;
 
     log.info(TAG, `stream for ch ${channel.number} (${resolved.type}): ${streamUrl}`);
-    noteDelivery(req, { mode: 'relayed', detail: resolved.type === 'hls' ? 'HLS' : resolved.type === 'mpegts' ? 'MPEG-TS' : '' });
     return serveStream(req, res, streamUrl, true, uniqueId, fallbackUrl); // trusted — URL from portal create_link
   });
 

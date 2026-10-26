@@ -26,7 +26,8 @@ data class PlaybackSnapshot(
 /**
  * The ExoPlayer behind every MediaController (PlaybackService), with what a
  * controller can't see: dropped frames, stalls and ExoPlayer's download-speed
- * estimate. Counts start over with each stream. Read on the main thread.
+ * estimate. Counts start over with each stream — not when the same one is
+ * loaded again (a retry or reconnect: what stalls lead to). Read on the main thread.
  */
 @OptIn(UnstableApi::class)
 object PlaybackStats : AnalyticsListener {
@@ -36,13 +37,17 @@ object PlaybackStats : AnalyticsListener {
     private var bandwidth = 0L
     private var wasReady = false
     private var seeking = false
+    private var playing: String? = null   // the stream's address, to tell a new one from a retry
 
     fun attach(p: ExoPlayer) { player = p; p.addAnalyticsListener(this); reset() }
     fun detach(p: ExoPlayer) { p.removeAnalyticsListener(this); if (player === p) player = null }
 
     private fun reset() { dropped = 0; stalls = 0; wasReady = false; seeking = false }
 
-    override fun onMediaItemTransition(eventTime: AnalyticsListener.EventTime, mediaItem: MediaItem?, reason: Int) = reset()
+    override fun onMediaItemTransition(eventTime: AnalyticsListener.EventTime, mediaItem: MediaItem?, reason: Int) {
+        val uri = mediaItem?.localConfiguration?.uri?.toString()
+        if (uri != playing) { playing = uri; reset() }
+    }
 
     override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
         dropped += droppedFrames

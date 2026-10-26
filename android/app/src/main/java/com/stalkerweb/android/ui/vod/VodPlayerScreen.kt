@@ -242,9 +242,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         }
 
         if (statsOpen && !casting) {
-            // The movie's key as the server's Activity has it: "100", "200:s1:e3".
-            val key = listOf(p.videoId, p.seasonId, p.episodeId).filter { it.isNotEmpty() }.joinToString(":")
-            StreamStatsOverlay("vod", key, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp))
+            StreamStatsOverlay(viewModel.stats, "vod", p.key, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 12.dp, top = 64.dp, bottom = 12.dp))
         }
 
         // "Resumed from 12:34 · Start over"
