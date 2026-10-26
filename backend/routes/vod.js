@@ -5,6 +5,8 @@
 // GET    /api/vod/stream?videoId=X&cmd=<encoded>&series=0
 // GET    /api/vod/listing?type&category&from — a whole category, as it is read
 // GET/PUT/DELETE /api/vod/watch…  — what the viewer watched (see below)
+// GET    /api/vod/skip?videoId&name&year&season&episode&movie — intro, recap, credits
+// PUT    /api/vod/skip/match/:videoId { imdbId }  — the show's IMDb match set by hand
 
 'use strict';
 
@@ -26,7 +28,7 @@ const { castLink, vodContentType } = require('../lib/castLink');
 const { vodKey } = require('../lib/activity');
 const TAG = 'vod';
 
-module.exports = function vodRoutes(appState, config, { watchStore = null } = {}) {
+module.exports = function vodRoutes(appState, config, { watchStore = null, skipSegments = null } = {}) {
   const guard = sessionMiddleware(appState);
 
   // GET /api/vod/categories?type=vod|series[&all=1]
@@ -319,6 +321,34 @@ module.exports = function vodRoutes(appState, config, { watchStore = null } = {}
       res.json(castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
     } catch (e) {
       res.status(e.status || 502).json({ error: e.message });
+    }
+  });
+
+  // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
+  // GET /api/vod/skip?videoId=&name=&year=&season=&episode=&movie=1
+  //   → { imdbId, match, intro, recap, outro, autoSkip }: each part { start, end }
+  //   in seconds or null; autoSkip is the viewer's choice. `videoId` is the
+  //   movie or show, `name` its portal title; season and episode numbers for
+  //   an episode. Nothing to skip when the IMDb or IntroDB lookup fails.
+  router.get('/skip', refuseIfGone, async (req, res) => {
+    const q = req.query;
+    const autoSkip = req.viewer?.autoSkip === true;
+    if (!skipSegments) return res.json({ imdbId: null, match: null, intro: null, recap: null, outro: null, autoSkip });
+    const found = await skipSegments.lookup({
+      portal: portalOf(), videoId: q.videoId, name: q.name, year: q.year,
+      season: q.season, episode: q.episode, isMovie: q.movie === '1',
+    });
+    res.json({ ...found, autoSkip });
+  });
+
+  // PUT /api/vod/skip/match/:videoId { imdbId: "tt…" | "off" | null } — the
+  // show is this IMDb title; "off": never skip in it; null: find it by name.
+  router.put('/skip/match/:videoId', refuseIfGone, (req, res) => {
+    if (!skipSegments) return res.status(503).json({ error: 'Skipping is not available.' });
+    try {
+      res.json(skipSegments.setMatch(portalOf(), req.params.videoId, req.body?.imdbId ?? null));
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message });
     }
   });
 

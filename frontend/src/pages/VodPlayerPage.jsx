@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes } from '../stalkerApi'
+import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
@@ -15,8 +15,10 @@ import EpisodePanel from '@/components/EpisodePanel'
 import { StreamStats, StatsButton } from '@/components/StreamStats'
 import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
+import { SkipButton, SkipMatch } from '@/components/SkipControls'
+import { skipAt, autoSkipTo } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
-import { seasonNoOf, episodeRowLabel } from '@/lib/seriesProgress'
+import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import {
@@ -51,7 +53,11 @@ export default function VodPlayerPage() {
   const episodeId    = searchParams.get('episodeId') || ''
   const episodeTitle = searchParams.get('episodeTitle') || ''
 
-  const displayTitle = episodeTitle ? `${title} · ${episodeTitle}` : title
+  // "S1 · E3 · The Light of Day": the season and episode numbers with the episode's name.
+  const episodeName = episodeTitle || seriesNo > 0
+    ? episodeLabel({ season: searchParams.get('season') || '', episode: seriesNo > 0 ? String(seriesNo) : '', name: episodeTitle })
+    : ''
+  const displayTitle = episodeName ? `${title} · ${episodeName}` : title
   const displayTitleRef = useRef(displayTitle)
   displayTitleRef.current = displayTitle
 
@@ -253,6 +259,50 @@ export default function VodPlayerPage() {
       setResumedFrom(0)
     }
   }, [progressKey, duration, mediaKey])
+
+  // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
+  // The parts that can be skipped, from the server: for this title only
+  // (`for`), so the last episode's never show on the next while it loads.
+  const [skipFound, setSkipFound] = useState(null)   // { for, imdbId, match, intro, recap, outro, autoSkip }
+  const [skipAsk, setSkipAsk]     = useState(0)      // goes up when the show's match is changed
+  const seasonNo = searchParams.get('season') || ''
+  const year     = searchParams.get('year') || ''
+  // The portal's own name, not the "Untitled" shown for none (that would be searched for).
+  const portalName = searchParams.get('title') || ''
+  useEffect(() => {
+    if (!videoId) return
+    let cancelled = false
+    getVodSkip({ videoId, name: portalName, year, season: seasonNo, episode: isEpisode ? seriesNo : '', movie: !isEpisode })
+      .then((r) => { if (!cancelled) setSkipFound({ ...r, for: progressKey }) })
+      .catch(() => { if (!cancelled) setSkipFound(null) })
+    return () => { cancelled = true }
+  }, [videoId, portalName, year, seasonNo, seriesNo, isEpisode, progressKey, skipAsk])
+  const skipParts = skipFound?.for === progressKey && mediaKey === progressKey && !onTv ? skipFound : null
+  const skipNow = upNext ? null : skipAt(skipParts, currentTime)
+  // Auto-skip: each intro or recap once, so going back to watch it stays put.
+  // From the video's own position: the state can be a step behind it — still
+  // 0 in the render where the resume above has just sought to 20:00, which
+  // read as "in the recap" would undo the resume.
+  const autoSkippedRef = useRef({ key: null, done: new Set() })
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !skipParts?.autoSkip) return
+    if (autoSkippedRef.current.key !== progressKey) autoSkippedRef.current = { key: progressKey, done: new Set() }
+    const done = autoSkippedRef.current.done
+    const at = v.currentTime
+    const to = autoSkipTo(skipParts, at, done)
+    if (to == null) return
+    done.add(skipAt(skipParts, at).kind)
+    try { v.currentTime = Math.min(to, v.duration) } catch { /* seek rejected */ }
+  }, [skipParts, currentTime, progressKey])
+  function doSkip(toNextEpisode) {
+    if (toNextEpisode && neighbours.next) { playEpisode(neighbours.next.season, neighbours.next.episode); return }
+    const v = videoRef.current
+    if (!v || !skipNow) return
+    const t = Math.min(skipNow.to, v.duration)
+    try { v.currentTime = t } catch { /* seek rejected */ }
+    setCurrentTime(t)
+  }
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -632,6 +682,8 @@ export default function VodPlayerPage() {
           </div>
         )}
 
+        <SkipButton skip={skipNow} onSkip={doSkip} nextEpisode={!!neighbours.next} raised={showControls || status !== 'playing'} />
+
         {upNext && (
           <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
         )}
@@ -745,8 +797,8 @@ export default function VodPlayerPage() {
         <div className="p-4 flex flex-col gap-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--color-text)] leading-snug">{title}</h2>
-            {episodeTitle && (
-              <p className="text-sm text-[var(--color-primary-light)] mt-0.5">{episodeTitle}</p>
+            {episodeName && (
+              <p className="text-sm text-[var(--color-primary-light)] mt-0.5">{episodeName}</p>
             )}
           </div>
 
@@ -785,6 +837,8 @@ export default function VodPlayerPage() {
               <p className="text-xs text-[var(--color-text)]">{decodeURIComponent(searchParams.get('actors'))}</p>
             </div>
           )}
+
+          <SkipMatch videoId={videoId} found={skipFound?.for === progressKey ? skipFound : null} onChanged={() => setSkipAsk((n) => n + 1)} />
 
           {isEpisode && (
             <div className="pt-3 border-t border-[var(--color-border)]">

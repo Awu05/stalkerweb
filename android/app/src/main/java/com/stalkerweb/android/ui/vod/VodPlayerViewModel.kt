@@ -30,6 +30,10 @@ import com.stalkerweb.android.data.repo.EpisodeRef
 import com.stalkerweb.android.data.repo.MediaLinks
 import com.stalkerweb.android.data.repo.Neighbours
 import com.stalkerweb.android.data.repo.PlayerParams
+import com.stalkerweb.android.data.repo.SkipNow
+import com.stalkerweb.android.data.repo.autoSkipTo
+import com.stalkerweb.android.data.repo.skipAt
+import com.stalkerweb.android.data.api.SkipResponse
 import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.WatchRepository
 import com.stalkerweb.android.data.repo.WatchRules
@@ -55,6 +59,7 @@ data class VodPlayerState(
     val seasons: List<VodSeason>? = null,             // a show's seasons, in order (null while loading)
     val episodes: Map<String, List<VodEpisode>> = emptyMap(),
     val upNext: EpisodeRef? = null,                   // after an episode ends
+    val skip: SkipNow? = null,                        // an intro, recap or the credits playing: the Skip button
 ) {
     val neighbours: Neighbours get() {
         val p = params ?: return Neighbours(null, null, emptyList())
@@ -128,6 +133,12 @@ class VodPlayerViewModel(
     private var mediaKey: String? = null
     private var resumedKey: String? = null
 
+    // Skip intro / recap / credits: the parts of the title playing (its key →
+    // what the server found), and the kinds auto-skipped in it — each once, so
+    // going back to watch one stays put.
+    private var skipParts: Pair<String, SkipResponse?>? = null
+    private var autoSkipped: Pair<String, MutableSet<String>>? = null
+
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val p = _player.value ?: return
@@ -174,6 +185,10 @@ class VodPlayerViewModel(
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
         watch.load()
         load(params)
+        // Twice a second: the Skip button, and auto-skip.
+        viewModelScope.launch {
+            while (isActive) { checkSkip(); delay(500) }
+        }
         // Every 10 s while playing (as the web does) — on the TV, from its position.
         saver = viewModelScope.launch {
             while (isActive) {
@@ -225,7 +240,14 @@ class VodPlayerViewModel(
     private var loadJob: Job? = null
 
     private fun load(params: PlayerParams) {
-        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null)
+        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null, skip = null)
+        if (skipParts?.first != params.key) {
+            skipParts = null
+            viewModelScope.launch {
+                val found = vod.skipParts(params)
+                if (_state.value.params?.key == params.key) skipParts = params.key to found
+            }
+        }
         // Next pressed twice: only the last title's stream may start.
         loadJob?.cancel()
         pendingPlay = null
@@ -244,7 +266,8 @@ class VodPlayerViewModel(
 
     private fun startPlayback(url: String, params: PlayerParams) {
         val p = _player.value ?: return
-        val title = if (params.episodeTitle.isNotEmpty()) "${params.title} · ${params.episodeTitle}" else params.title
+        val episodeName = if (params.isEpisode) com.stalkerweb.android.data.repo.episodeLabel(params.season, params.series, params.episodeTitle) else ""
+        val title = if (episodeName.isNotEmpty()) "${params.title} · $episodeName" else params.title
         val builder = MediaItem.Builder().setUri(url).setMediaId(params.key)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -272,6 +295,43 @@ class VodPlayerViewModel(
         val at = WatchRules.resumeAt(saved.position, duration) ?: return
         p.seekTo((at * 1000).toLong())
         _state.value = _state.value.copy(resumedFrom = at)
+    }
+
+    private fun checkSkip() {
+        val p = _player.value
+        val key = skipParts?.first
+        val parts = skipParts?.second
+        if (p == null || key == null || parts == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
+            if (_state.value.skip != null) _state.value = _state.value.copy(skip = null)
+            return
+        }
+        val t = p.currentPosition / 1000.0
+        if (parts.autoSkip) {
+            if (autoSkipped?.first != key) autoSkipped = key to mutableSetOf<String>()
+            val done = autoSkipped!!.second
+            autoSkipTo(parts, t, done)?.let { s ->
+                done += s.kind
+                p.seekTo(seekable(p, s.to))
+                return
+            }
+        }
+        val now = if (_state.value.upNext != null) null else skipAt(parts, t)
+        if (now != _state.value.skip) _state.value = _state.value.copy(skip = now)
+    }
+
+    // A skip's landing point, short of the very end (the end itself is the episode over).
+    private fun seekable(p: Player, secs: Double): Long {
+        val ms = (secs * 1000).toLong()
+        return p.duration.takeIf { it > 0 }?.let { minOf(ms, it) } ?: ms
+    }
+
+    /** The Skip button: past the part playing, or — at the credits, with one to come — the next episode. */
+    fun skip(toNextEpisode: Boolean) {
+        if (toNextEpisode && _state.value.neighbours.next != null) { playNext(); return }
+        val p = _player.value ?: return
+        val s = _state.value.skip ?: return
+        p.seekTo(seekable(p, s.to))
+        _state.value = _state.value.copy(skip = null)
     }
 
     fun startOver() {

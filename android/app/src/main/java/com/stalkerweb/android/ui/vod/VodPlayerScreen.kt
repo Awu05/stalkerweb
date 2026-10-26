@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -169,7 +170,17 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 
     Box(
         Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || !p.isEpisode) return@onPreviewKeyEvent false
+            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            // OK with nothing else on screen: the Skip button's skip (it never
+            // takes the focus — that would pull it out of the controls or the
+            // episodes, and leave it nowhere when the button goes).
+            val skipNow = state.skip
+            if (skipNow != null && !controlsVisible && !panelOpen && state.upNext == null && !casting &&
+                (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter)) {
+                viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
+                return@onPreviewKeyEvent true
+            }
+            if (!p.isEpisode) return@onPreviewKeyEvent false
             when (e.key) {
                 Key.MediaNext, Key.ChannelUp -> { viewModel.playNext(); true }
                 Key.MediaPrevious, Key.ChannelDown -> { viewModel.playPrevious(); true }
@@ -224,7 +235,9 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
                 Column(Modifier.weight(1f)) {
                     Text(p.title, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (p.episodeTitle.isNotEmpty()) Text(p.episodeTitle, color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // "S1 · E3 · The Light of Day"
+                    val episodeName = if (p.isEpisode) com.stalkerweb.android.data.repo.episodeLabel(p.season, p.series, p.episodeTitle) else ""
+                    if (episodeName.isNotEmpty()) Text(episodeName, color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (p.isEpisode) {
                     IconButton(onClick = viewModel::playPrevious, enabled = state.neighbours.prev != null) { Icon(Icons.Default.SkipPrevious, "Previous episode", tint = Color.White) }
@@ -267,6 +280,19 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 onClose = { panelOpen = false },
                 modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(340.dp).fillMaxHeight()
                            else Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
+            )
+        }
+
+        state.skip?.takeIf { !casting && state.error == null }?.let { now ->
+            val next = now.kind == "outro" && state.neighbours.next != null
+            SkipButton(
+                label = if (next) "Next episode" else now.label,
+                next = next,
+                // The remote's OK skips (above); the button says so.
+                hint = isTV && !controlsVisible && !panelOpen,
+                onClick = { viewModel.skip(next) },
+                // Above Media3's seek bar while its controls show.
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
             )
         }
 
@@ -339,6 +365,24 @@ private fun EpisodesPanel(
         }
     }
     LaunchedEffect(state.episodes[seasonId]) { runCatching { currentFocus.requestFocus() } }
+}
+
+/**
+ * Skip intro / recap / credits, over the video while one plays. On a TV the
+ * remote's OK skips while the controls are hidden ([hint] says so).
+ */
+@Composable
+private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    OutlinedButton(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+        modifier = modifier.tvFocus(RoundedCornerShape(50)),
+    ) {
+        Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
+        Text(" $label")
+        if (hint) Text("  · OK", color = SwColors.Muted)
+    }
 }
 
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */

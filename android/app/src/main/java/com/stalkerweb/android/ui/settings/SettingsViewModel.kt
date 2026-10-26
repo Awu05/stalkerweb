@@ -128,6 +128,11 @@ class SettingsViewModel(
         viewers.filtersSaved()
     }
 
+    fun setAutoSkip(on: Boolean) = act("Saved") {
+        settings.saveAutoSkip(on)
+        viewers.refresh()
+    }
+
     // Connection
     // A portal change reloads Channels, VOD and the Guide (as the Portal screen does on Back).
     fun connect(p: Profile) = act { val r = server.connectProfile(p); viewers.sectionsChanged(); if (!r.success) throw IllegalStateException(r.error ?: "Couldn't connect") }

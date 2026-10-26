@@ -355,3 +355,18 @@ data class StreamDelivery(val mode: String = "", val detail: String = "")
 
 @JsonClass(generateAdapter = false)
 data class DeliveryResponse(val delivery: StreamDelivery? = null)
+
+// Skip intro / recap / credits (GET api/vod/skip): each part's start and end
+// in seconds, or null where none is known.
+@JsonClass(generateAdapter = false)
+data class SkipPart(val start: Double = 0.0, val end: Double = 0.0)
+
+@JsonClass(generateAdapter = false)
+data class SkipResponse(
+    val imdbId: String? = null,
+    val intro: SkipPart? = null,
+    val recap: SkipPart? = null,
+    val outro: SkipPart? = null,
+    /** The viewer's choice: intros and recaps skipped without asking. */
+    val autoSkip: Boolean = false,
+)

@@ -1,6 +1,7 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.ListingResponse
+import com.stalkerweb.android.data.api.SkipResponse
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItemsResponse
@@ -22,6 +23,15 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
         val resp = apis.get().getVodListing(type, category, from)
         return resp.copy(items = resp.items.map { it.copy(screenshotUrl = links.absoluteImage(it.screenshotUrl)) })
     }
+
+    /** What can be skipped in a movie or episode; null when the server couldn't say. */
+    suspend fun skipParts(p: PlayerParams): SkipResponse? = runCatching {
+        apis.get().getVodSkip(
+            videoId = p.videoId, name = p.title, year = p.year, season = p.season,
+            episode = if (p.isEpisode) p.series.takeIf { it != "0" }.orEmpty() else "",
+            movie = if (p.isEpisode) "" else "1",
+        )
+    }.getOrNull()
 
     suspend fun getVodSeasons(showId: String): List<VodSeason> =
         runCatching {

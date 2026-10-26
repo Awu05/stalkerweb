@@ -9,10 +9,8 @@
 // restarts (clients such as Jellyfin cache them).
 
 const fs = require('fs');
-const log = require('../logger');
+const { writeJsonAtomic, DebouncedSave } = require('./jsonFile');
 const TAG = 'xtream';
-
-const SAVE_DELAY_MS = 1000;
 
 class XtreamIdStore {
   /** @param {string|null} file  JSON file to persist to; null keeps ids in memory only. */
@@ -21,7 +19,7 @@ class XtreamIdStore {
     this._byKey  = new Map();
     this._byId   = new Map();
     this._next   = 1;
-    this._timer  = null;
+    this._saver  = new DebouncedSave(() => writeJsonAtomic(this._file, { next: this._next, byKey: Object.fromEntries(this._byKey) }), { tag: TAG });
     this._load();
   }
 
@@ -41,23 +39,12 @@ class XtreamIdStore {
   }
 
   _scheduleSave() {
-    if (!this._file || this._timer) return;
-    this._timer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
-    this._timer.unref?.();
+    if (this._file) this._saver.schedule();
   }
 
   /** Writes any unsaved ids now. Called on shutdown so none are lost. */
   flush() {
-    if (!this._timer) return;
-    clearTimeout(this._timer);
-    this._timer = null;
-    try {
-      const tmp = this._file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify({ next: this._next, byKey: Object.fromEntries(this._byKey) }), 'utf8');
-      fs.renameSync(tmp, this._file);
-    } catch (e) {
-      log.error(TAG, `episode id save failed: ${e.message}`);
-    }
+    if (this._file) this._saver.flush();
   }
 
   /**

@@ -16,6 +16,7 @@
 const fs   = require('fs');
 const path = require('path');
 const log  = require('../logger');
+const { writeJsonAtomic } = require('../lib/jsonFile');
 const TAG  = 'WatchStore';
 
 // Mirrors frontend/src/lib/vodProgress.js.
@@ -71,9 +72,7 @@ class WatchStore {
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     this._pending = null;
     try {
-      const tmp = this._file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(d), 'utf8');
-      fs.renameSync(tmp, this._file);
+      writeJsonAtomic(this._file, d);
       const st = fs.statSync(this._file);
       this._cache = { mtimeMs: st.mtimeMs, size: st.size, data: d };
     } catch (e) {
