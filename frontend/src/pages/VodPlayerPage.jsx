@@ -4,7 +4,7 @@ import Hls from 'hls.js'
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   ChevronLeft, AlertCircle, Loader2, Clock, Calendar, X, PictureInPicture2,
-  SkipBack, SkipForward, ListVideo,
+  SkipBack, SkipForward, ListVideo, PanelRightClose, PanelRightOpen,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,14 @@ import {
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
+// The side panel's open/closed, remembered on this browser (open if unknown).
+const SIDE_KEY = 'vodPlayerSidePanel'
+function readSideOpen() {
+  try { return localStorage.getItem(SIDE_KEY) !== 'closed' } catch { return true }
+}
+function saveSideOpen(open) {
+  try { localStorage.setItem(SIDE_KEY, open ? 'open' : 'closed') } catch { /* private mode */ }
+}
 
 export default function VodPlayerPage() {
   const [searchParams] = useSearchParams()
@@ -97,6 +105,7 @@ export default function VodPlayerPage() {
   const [episodesBySeason, setEpisodes] = useState({})     // seasonId → episodes, in order
   const [panelSeason, setPanelSeason]   = useState(seasonId)
   const [episodesOpen, setEpisodesOpen] = useState(false)  // the pop-up list on narrow screens
+  const [sideOpen, setSideOpen]         = useState(readSideOpen)  // the details/episodes panel on wide screens
   const [upNext, setUpNext]             = useState(null)   // { season, episode } after the end
   // What's watched, for the panel's ticks and progress bars.
   const [watchState, setWatchState]     = useState(() => getWatchState())
@@ -677,6 +686,14 @@ export default function VodPlayerPage() {
                 <ListVideo size={18} />
               </button>
             )}
+            <button
+              onClick={() => setSideOpen(o => { saveSideOpen(!o); return !o })}
+              className="hidden lg:inline-flex text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors"
+              aria-label={sideOpen ? 'Hide panel' : 'Show panel'} aria-pressed={sideOpen}
+              title={sideOpen ? (isEpisode ? 'Hide episodes' : 'Hide details') : (isEpisode ? 'Show episodes' : 'Show details')}
+            >
+              {sideOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+            </button>
             <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (
               <button
@@ -696,7 +713,7 @@ export default function VodPlayerPage() {
       </div>
 
       {/* ── Metadata panel (right side on desktop, hidden on mobile) ── */}
-      <aside className="hidden lg:flex flex-col w-72 shrink-0 bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto">
+      <aside className={cn('hidden flex-col w-72 shrink-0 bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto', sideOpen && 'lg:flex')}>
         <div className="p-4 flex flex-col gap-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--color-text)] leading-snug">{title}</h2>
