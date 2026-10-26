@@ -6,9 +6,7 @@ import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
 import mpegts from 'mpegts.js'
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  List, Search, Loader2, AlertCircle, Tv2, Heart, ChevronDown,
-  PictureInPicture2, ChevronLeft, CalendarClock,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize, List, Search, Loader2, AlertCircle, Tv2, Heart, ChevronDown, PictureInPicture2, ArrowLeft, Info,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
@@ -123,7 +121,7 @@ function Controls({
           aria-pressed={showGuide}
           title="Programme guide (G)"
         >
-          <CalendarClock size={18} />
+          <Info size={18} />
         </button>
         <button onClick={onToggleList} className="text-white/80 hover:text-white transition-colors p-1.5 rounded hover:bg-white/10" aria-label="Toggle channel list">
           <List size={18} />
@@ -1321,7 +1319,7 @@ export default function PlayerPage() {
             className="flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-white/85 hover:text-white hover:bg-white/10 transition-colors"
             aria-label="Back"
           >
-            <ChevronLeft size={18} />
+            <ArrowLeft size={18} />
             Back
           </button>
         </div>

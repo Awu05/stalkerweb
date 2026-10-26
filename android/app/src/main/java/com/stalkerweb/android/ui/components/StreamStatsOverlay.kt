@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +44,7 @@ import kotlin.math.roundToInt
 @Composable
 fun StatsButton(open: Boolean, onToggle: () -> Unit) {
     IconButton(onClick = onToggle) {
-        Icon(Icons.Default.QueryStats, if (open) "Hide stats" else "Show stats", tint = if (open) MaterialTheme.colorScheme.primary else Color.White)
+        Icon(Icons.Default.BarChart, if (open) "Hide stats" else "Show stats", tint = if (open) MaterialTheme.colorScheme.primary else Color.White)
     }
 }
 

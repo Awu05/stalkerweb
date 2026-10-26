@@ -2,9 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  ChevronLeft, AlertCircle, Loader2, Clock, Calendar, X, PictureInPicture2,
-  SkipBack, SkipForward, List, Info,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize, AlertCircle, Loader2, Clock, Calendar, X, PictureInPicture2, SkipBack, SkipForward, List, Info, ArrowLeft,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
@@ -565,7 +563,7 @@ export default function VodPlayerPage() {
             onClick={goBack}
             className="flex items-center gap-1.5 text-white/80 hover:text-white transition-colors text-sm"
           >
-            <ChevronLeft size={18} />
+            <ArrowLeft size={18} />
             Back
           </button>
           <span className="flex-1 text-center text-sm font-medium text-white/90 truncate px-4">

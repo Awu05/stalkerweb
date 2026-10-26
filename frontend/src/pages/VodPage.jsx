@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Search, Film, Tv2, ChevronLeft, ChevronRight, ChevronDown, Clock, X, Loader2, Play, Download, Check, CheckCircle2, Circle, Bookmark, RotateCcw } from 'lucide-react'
+import {
+  Search, Film, Tv2, ChevronRight, ChevronDown, Clock, X, Loader2, Play, Download, Check, CheckCircle2, Circle, Bookmark, RotateCcw, ArrowLeft, History,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { useApp } from '@/lib/appContext'
@@ -27,8 +29,8 @@ function RecentlyWatched({ entries, seasonNos = {}, onOpen, onRemove, onClear })
   if (!entries.length) return null
   return (
     <section className="mb-6" aria-label="Recently watched">
-      <div className="flex items-baseline gap-3 mb-2">
-        <h2 className="text-sm font-semibold text-[var(--color-text)]">Recently watched</h2>
+      <div className="flex items-center gap-3 mb-2">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-text)]"><History size={14} className="text-[var(--color-muted)]" />Recently watched</h2>
         <button type="button" onClick={onClear} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">Clear</button>
       </div>
       <div className={TILE_ROW}>
@@ -94,7 +96,7 @@ function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
   return (
     <section className="mb-6" aria-label="My List">
       <div className="flex items-baseline gap-3 mb-2">
-        <h2 className="text-sm font-semibold text-[var(--color-text)]">My List</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-text)]"><Bookmark size={14} className="text-[var(--color-muted)]" />My List</h2>
         <button type="button" onClick={onSeeAll} className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">See all</button>
       </div>
       <div className={TILE_ROW}>
@@ -432,7 +434,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
           {selectedSeason && (
             <button onClick={() => { picked.current = true; setSelectedSeason(null) }} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors" aria-label="Seasons">
-              <ChevronLeft size={18} />
+              <ArrowLeft size={18} />
             </button>
           )}
           <div className="flex-1 min-w-0">
