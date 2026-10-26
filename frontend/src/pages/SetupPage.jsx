@@ -12,6 +12,7 @@ import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
+import { macDeviceId } from '@/lib/macDeviceId'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
@@ -210,6 +211,19 @@ function ProfileSheet({ initial, onSave, onClose }) {
   const set     = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
   const setBool = k => v => setForm(f => ({ ...f, [k]: v }))
 
+  // Device ID 1 and 2 from the MAC's hash, kept in step with it while ticked.
+  // Starts ticked when the saved IDs already are that hash.
+  const [idsFromMac, setIdsFromMac] = useState(() => {
+    const id = macDeviceId(initial?.mac)
+    return !!id && initial?.device_id === id && initial?.device_id2 === id
+  })
+  const withMacIds = f => {
+    const id = macDeviceId(f.mac)
+    return id ? { ...f, device_id: id, device_id2: id } : f
+  }
+  const setMac = e => { const mac = e.target.value; setForm(f => idsFromMac ? withMacIds({ ...f, mac }) : { ...f, mac }) }
+  const toggleIdsFromMac = on => { setIdsFromMac(on); if (on) setForm(withMacIds) }
+
   function handleSubmit(e) {
     e.preventDefault()
     const p = { ...form, portal: normalizePortal(form.portal) }
@@ -249,7 +263,15 @@ function ProfileSheet({ initial, onSave, onClose }) {
           </Field>
 
           <Field label="MAC Address" id="prof-mac">
-            <Input id="prof-mac" placeholder="00:1A:79:XX:XX:XX" value={form.mac} onChange={set('mac')} required />
+            <Input id="prof-mac" placeholder="00:1A:79:XX:XX:XX" value={form.mac} onChange={setMac} required />
+            <label className="flex items-center gap-2 text-xs text-[var(--color-muted)] cursor-pointer w-fit">
+              <input type="checkbox" checked={idsFromMac} onChange={e => toggleIdsFromMac(e.target.checked)}
+                className="size-3.5 accent-[var(--color-primary)]" />
+              Fill Device ID 1 and 2 from the MAC (SHA-256 of it in uppercase)
+            </label>
+            {idsFromMac && !macDeviceId(form.mac) && form.mac.trim() && (
+              <p className="text-xs text-[var(--color-muted)]">The device IDs fill in once the MAC is complete.</p>
+            )}
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -292,7 +314,9 @@ function ProfileSheet({ initial, onSave, onClose }) {
               <Field label="Device ID" id="prof-did"
                 hint={form.send_device_id === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did" value={form.device_id || ''} onChange={set('device_id')} className="font-mono text-xs flex-1" />
+                  <Input id="prof-did" value={form.device_id || ''} onChange={set('device_id')} readOnly={idsFromMac}
+                    title={idsFromMac ? 'From the MAC — untick "Fill Device ID 1 and 2 from the MAC" to edit' : undefined}
+                    className={cn('font-mono text-xs flex-1', idsFromMac && 'opacity-70')} />
                   <Switch checked={form.send_device_id !== false} onCheckedChange={setBool('send_device_id')}
                     title={form.send_device_id !== false ? 'Sent to the portal' : 'Not sent to the portal'} />
                 </div>
@@ -300,7 +324,9 @@ function ProfileSheet({ initial, onSave, onClose }) {
               <Field label="Device ID 2" id="prof-did2"
                 hint={form.send_device_id2 === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={set('device_id2')} className="font-mono text-xs flex-1" />
+                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={set('device_id2')} readOnly={idsFromMac}
+                    title={idsFromMac ? 'From the MAC — untick "Fill Device ID 1 and 2 from the MAC" to edit' : undefined}
+                    className={cn('font-mono text-xs flex-1', idsFromMac && 'opacity-70')} />
                   <Switch checked={form.send_device_id2 !== false} onCheckedChange={setBool('send_device_id2')}
                     title={form.send_device_id2 !== false ? 'Sent to the portal' : 'Not sent to the portal'} />
                 </div>

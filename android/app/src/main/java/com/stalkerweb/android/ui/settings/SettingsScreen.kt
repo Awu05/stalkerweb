@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.settings
 
+import com.stalkerweb.android.data.repo.macDeviceId
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -373,16 +374,24 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
 @Composable
 private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss: () -> Unit) {
     var p by remember { mutableStateOf(initial) }
+    // Device ID 1 and 2 from the MAC's hash, kept in step with it while ticked.
+    // Starts ticked when the saved IDs already are that hash.
+    var idsFromMac by remember {
+        val id = macDeviceId(initial.mac)
+        mutableStateOf(id.isNotEmpty() && initial.deviceId == id && initial.deviceId2 == id)
+    }
+    fun withMacIds(q: Profile): Profile = macDeviceId(q.mac).let { id -> if (id.isEmpty()) q else q.copy(deviceId = id, deviceId2 = id) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial.id.isBlank()) "Add IPTV connection" else "Edit IPTV connection") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                @Composable fun field(label: String, value: String, set: (String) -> Unit) =
-                    OutlinedTextField(value, set, singleLine = true, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
+                @Composable fun field(label: String, value: String, readOnly: Boolean = false, set: (String) -> Unit) =
+                    OutlinedTextField(value, set, singleLine = true, readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
                 field("Name", p.name) { p = p.copy(name = it) }
                 field("Portal URL", p.portal) { p = p.copy(portal = it) }
-                field("MAC address", p.mac) { p = p.copy(mac = it) }
+                field("MAC address", p.mac) { p = p.copy(mac = it).let { q -> if (idsFromMac) withMacIds(q) else q } }
+                CheckRow("Device IDs from the MAC (SHA-256)", idsFromMac) { on -> idsFromMac = on; if (on) p = withMacIds(p) }
                 field("Timezone", p.timezone) { p = p.copy(timezone = it) }
                 field("Language", p.lang) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
@@ -396,8 +405,8 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 )
                 field("Token", p.token) { p = p.copy(token = it) }
                 field("Serial number", p.serialNumber) { p = p.copy(serialNumber = it) }
-                field("Device ID", p.deviceId) { p = p.copy(deviceId = it) }
-                field("Device ID 2", p.deviceId2) { p = p.copy(deviceId2 = it) }
+                field("Device ID", p.deviceId, readOnly = idsFromMac) { p = p.copy(deviceId = it) }
+                field("Device ID 2", p.deviceId2, readOnly = idsFromMac) { p = p.copy(deviceId2 = it) }
                 field("Signature", p.signature) { p = p.copy(signature = it) }
             }
         },
