@@ -98,6 +98,30 @@ class ActivityTracker {
     };
   }
 
+  /**
+   * How the server sends `kind`/`id` to this device — { mode, detail }, mode
+   * 'direct' (the provider's own link), 'relayed' (as it comes), 'repackaged'
+   * (FFmpeg, codecs copied) or 'converted' (FFmpeg re-encoding). The player's Stats.
+   */
+  deliver({ ip, ua = '', kind, id }, delivery) {
+    const e = this._streams.get(`${ip}|${ua}|${kind}|${id}`);
+    if (e) e.delivery = delivery;
+  }
+
+  /**
+   * What deliver() said for this device — else for the latest from its address
+   * (an iPhone page's <video> fetches as AppleCoreMedia, not as the page) — or null.
+   */
+  deliveryFor({ ip, ua = '', kind, id }) {
+    const own = this._streams.get(`${ip}|${ua}|${kind}|${id}`);
+    if (own?.delivery) return own.delivery;
+    let best = null;
+    for (const e of this._streams.values()) {
+      if (e.ip === ip && e.kind === kind && e.id === String(id) && e.delivery && (!best || e.lastSeen > best.lastSeen)) best = e;
+    }
+    return best?.delivery ?? null;
+  }
+
   _prune(t) {
     this._prunedAt = t;
     for (const [k, e] of this._streams) if (e.open === 0 && t - e.lastSeen > this._stale) this._streams.delete(k);

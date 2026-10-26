@@ -346,3 +346,12 @@ data class EpgEvent(
     val endTime: Long = 0,
     val description: String = "",
 )
+
+// ── The player's Stats (backend GET /api/activity/delivery) ──────────────────
+
+/** mode: direct | relayed | repackaged | converted (data/repo/StreamStats.kt deliveryText). */
+@JsonClass(generateAdapter = false)
+data class StreamDelivery(val mode: String = "", val detail: String = "")
+
+@JsonClass(generateAdapter = false)
+data class DeliveryResponse(val delivery: StreamDelivery? = null)

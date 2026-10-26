@@ -186,6 +186,13 @@ function rewriteM3u8(body, playlistUrl, proxyOrigin, secret = null, channelId = 
     .join('\n');
 }
 
+/** "video/mp4" → "MP4", "video/x-matroska" → "MKV" — a movie file's container, for the player's Stats. */
+function containerLabel(contentType) {
+  const t = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const known = { 'video/mp4': 'MP4', 'video/x-matroska': 'MKV', 'video/webm': 'WebM', 'video/mp2t': 'MPEG-TS', 'video/x-msvideo': 'AVI', 'video/quicktime': 'MOV', 'video/mpeg': 'MPEG' };
+  return known[t] || '';
+}
+
 function isM3u8Body(text) {
   return text.includes('#EXTM3U') || text.includes('#EXT-X-');
 }
@@ -246,7 +253,7 @@ async function fetchStreamFromPortal(headers, url, timeoutMs = 15_000, channel =
 // ── Route factory ─────────────────────────────────────────────────────────────
 
 // Exported for unit tests
-module.exports.helpers = { encodeProxyUrl, decodeProxyUrl, rewriteM3u8, isPlaylistUrl, resolveUrl, isM3u8Body, fetchFromPortal, signProxyUrl }
+module.exports.helpers = { encodeProxyUrl, decodeProxyUrl, rewriteM3u8, isPlaylistUrl, resolveUrl, isM3u8Body, fetchFromPortal, signProxyUrl, containerLabel }
 
 // Waits before asking again for a segment the server says it doesn't have.
 const SEGMENT_RETRY_MS = [500, 1000, 1500, 2000];
@@ -257,6 +264,13 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
   // Settings → Activity (lib/activity.js): each stream request, for as long as
   // it's open. Not this server's own pulls (the cast packager, a probe): they
   // carry its private user agent (appState.internalUA).
+  // How this request's stream is sent to the device (lib/activity.js deliver()): the player's Stats.
+  const noteDelivery = (req, delivery) => {
+    const what = streamOf(req.path, req.query);
+    if (what) appState.activity?.deliver({ ip: req.ip, ua: req.get('user-agent') || '', kind: what.kind, id: what.id }, delivery);
+  };
+  const viaFfmpeg = (req) => ({ onDelivery: (d) => noteDelivery(req, d) });
+
   router.use((req, res, next) => {
     const what = appState.activity ? streamOf(req.path, req.query) : null;
     const ua = req.get('user-agent') || '';
@@ -799,6 +813,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     // HLS playlist URL (extension-based fast path) — servePlaylist handles buffering + rewrite
     // trusted=true: private/loopback hosts already blocked above
     if (isPlaylistUrl(streamUrl)) {
+      noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
       return servePlaylist(req, res, streamUrl, true);
     }
 
@@ -867,6 +882,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
         });
         const proxyOrigin = baseUrl(req);
         const rewritten   = rewriteM3u8(Buffer.concat(allChunks).toString('utf8'), streamUrl, proxyOrigin, proxySecret, null, tagsOf(req));
+        noteDelivery(req, { mode: 'relayed', detail: 'HLS' });
         res.set('Content-Type', 'application/vnd.apple.mpegurl');
         res.set('Cache-Control', 'no-cache, no-store');
         res.set('Access-Control-Allow-Origin', '*');
@@ -876,6 +892,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       // Binary video — pipe directly so large files (MP4, MPEG) never land in Node heap.
       const ct = response.headers['content-type'] || 'video/mpeg';
       log.info(TAG, `VOD proxy: videoId=${videoId} → piping binary ${ct}`);
+      noteDelivery(req, { mode: 'relayed', detail: containerLabel(ct) });
       res.status(response.status);
       res.set('Content-Type', ct);
       res.set('Access-Control-Allow-Origin', '*');
@@ -891,6 +908,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     } else {
       // For non-playlist external binary video URLs, redirect directly to the CDN stream URL.
       log.info(TAG, `VOD proxy: redirecting to external CDN stream URL: ${streamUrl}`);
+      noteDelivery(req, { mode: 'direct', detail: '' });
       return res.redirect(302, streamUrl);
     }
   });
@@ -948,7 +966,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
       log.info(TAG, `ch ${channel.number}: remuxing via FFmpeg → ${streamUrl}`);
       channelManager.recordStreamSuccess(uniqueId);
       evictWhenDone(res, target);
-      return ffmpegSvc.transcode(streamUrl, req, res);
+      return ffmpegSvc.transcode(streamUrl, req, res, null, viaFfmpeg(req));
     }
 
     channelManager.recordStreamSuccess(uniqueId);
@@ -973,7 +991,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
         if (!ffmpegSvc.browserDirectPlayable(probe)) {
           log.info(TAG, `ch ${channel.number}: codecs not browser-playable (video=${probe?.video ?? '?'} audio=${probe?.audio ?? '?'}) — routing through FFmpeg`);
           evictWhenDone(res, target);
-          return ffmpegSvc.transcode(streamUrl, req, res, headers);
+          return ffmpegSvc.transcode(streamUrl, req, res, headers, viaFfmpeg(req));
         }
       }
     }
@@ -986,6 +1004,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     const fallbackUrl = (rawUrl && /^https?:\/\//i.test(rawUrl) && rawUrl !== streamUrl) ? rawUrl : null;
 
     log.info(TAG, `stream for ch ${channel.number} (${resolved.type}): ${streamUrl}`);
+    noteDelivery(req, { mode: 'relayed', detail: resolved.type === 'hls' ? 'HLS' : resolved.type === 'mpegts' ? 'MPEG-TS' : '' });
     return serveStream(req, res, streamUrl, true, uniqueId, fallbackUrl); // trusted — URL from portal create_link
   });
 

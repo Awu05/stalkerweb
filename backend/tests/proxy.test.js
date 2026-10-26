@@ -113,3 +113,19 @@ describe('rewriteM3u8', () => {
     expect(subLine).toContain(`&sig=${signProxyUrl(subAbs, secret)}`)
   })
 })
+
+describe("delivery, for the player's Stats", () => {
+  it("names a movie file's container", () => {
+    expect(helpers.containerLabel('video/mp4')).toBe('MP4')
+    expect(helpers.containerLabel('video/x-matroska; charset=binary')).toBe('MKV')
+    expect(helpers.containerLabel('application/octet-stream')).toBe('')
+    expect(helpers.containerLabel(undefined)).toBe('')
+  })
+
+  it("says what FFmpeg re-encodes, or that it only repackages", async () => {
+    const { deliveryOf } = await import('../stalker/FfmpegService.js')
+    expect(deliveryOf(['-c:v', 'copy', '-c:a', 'copy'])).toEqual({ mode: 'repackaged', detail: '' })
+    expect(deliveryOf(['-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k'])).toEqual({ mode: 'converted', detail: 'audio → AAC' })
+    expect(deliveryOf(['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'])).toEqual({ mode: 'converted', detail: 'video → H.264, audio → AAC' })
+  })
+})

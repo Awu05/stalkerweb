@@ -266,7 +266,18 @@ function buildDownloadArgs(streamUrl, headers, outPath, probe = null) {
 // Returns a Promise that resolves when the FFmpeg process has started (or rejects
 // on immediate failure — e.g. spawn error).
 
-async function transcode(streamUrl, req, res, headers = null) {
+/**
+ * How codec args send a stream, for the player's Stats (lib/activity.js
+ * deliver()): 'repackaged' when both are copied, else 'converted' and what.
+ */
+function deliveryOf(codecArgs) {
+  const converted = [];
+  if (codecArgs.includes('libx264')) converted.push('video → H.264');
+  if (codecArgs.includes('aac')) converted.push('audio → AAC');
+  return converted.length ? { mode: 'converted', detail: converted.join(', ') } : { mode: 'repackaged', detail: '' };
+}
+
+async function transcode(streamUrl, req, res, headers = null, { onDelivery } = {}) {
   // Probe first so we pick the right codec args
   const probe = await probeCodecs(streamUrl, headers);
 
@@ -274,6 +285,7 @@ async function transcode(streamUrl, req, res, headers = null) {
   const codecArgs  = _codecArgs(probe);
   const outputArgs = ['-f', 'mpegts', 'pipe:1'];
   const mode = codecArgs.includes('libx264') ? 're-encode' : 'copy';
+  onDelivery?.(deliveryOf(codecArgs));
 
   // The first video and audio, as probed (see buildDownloadArgs).
   const args = ['-hide_banner', '-loglevel', 'warning', ...inputArgs, '-i', streamUrl, '-map', '0:v:0?', '-map', '0:a:0?', ...codecArgs, ...outputArgs];
@@ -331,4 +343,4 @@ async function transcode(streamUrl, req, res, headers = null) {
   });
 }
 
-module.exports = { isAvailable, transcode, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams, probeCacheKey, probeFailureReason, _containerFromFormat };
+module.exports = { isAvailable, transcode, deliveryOf, probeCodecs, browserDirectPlayable, buildDownloadArgs, describeStreams, probeCacheKey, probeFailureReason, _containerFromFormat };

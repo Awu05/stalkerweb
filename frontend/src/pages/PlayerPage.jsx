@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { StreamStats, StatsButton } from '@/components/StreamStats'
 import { isLanguageDisabled } from '../lib/languages'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
@@ -32,7 +33,7 @@ function Controls({
   audioTracks, activeAudio, subtitleTracks, activeSub,
   showGuide, onToggleGuide, isFavorite, onToggleFavorite,
   onPlayPause, onMute, onVolume, onFullscreen, onToggleList, onTogglePiP,
-  onAudioTrack, onSubtitleTrack, cast,
+  onAudioTrack, onSubtitleTrack, cast, statsOpen, onToggleStats,
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
@@ -90,6 +91,7 @@ function Controls({
             ))}
           </select>
         )}
+        <StatsButton open={statsOpen} onToggle={onToggleStats} />
         {cast && <CastButtons cast={cast} />}
         {/* PiP button — only shown when browser supports it */}
         {document.pictureInPictureEnabled && (
@@ -730,6 +732,8 @@ export default function PlayerPage() {
   // phone it's otherwise out of sight. The last few warnings ride along with
   // the final "gave up", for a stream that stalls without a fatal error.
   const engineRef = useRef('hls.js')
+  const [statsOpen, setStatsOpen] = useState(false)
+  const statsSources = useCallback(() => ({ hls: hlsRef.current, mpegts: mpegtsRef.current, engine: engineRef.current }), [])
   // A channel whose video this browser's page player couldn't decode, played
   // by the device's own HLS player instead (Safari's, on an iPhone — it takes
   // formats the page player won't). Kept across reconnects, for that channel.
@@ -1298,6 +1302,8 @@ export default function PlayerPage() {
       >
         {/* Pinned to the edges, so the whole picture fits any screen shape. */}
         <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain" playsInline />
+        <StreamStats open={statsOpen} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
+          kind="live" id={activeChannel ? String(activeChannel.uniqueId) : null} className="top-14" />
         <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
@@ -1383,6 +1389,7 @@ export default function PlayerPage() {
             onToggleList={() => setShowList(v => !v)}
             onTogglePiP={togglePiP}
             cast={cast}
+            statsOpen={statsOpen} onToggleStats={() => setStatsOpen(o => !o)}
             onAudioTrack={setAudioTrack}
             onSubtitleTrack={setSubtitleTrack}
           />

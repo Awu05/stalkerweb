@@ -76,6 +76,14 @@ interface StalkerApi {
     @GET("api/activity")
     suspend fun getActivity(): ActivityResponse
 
+    /** How the server sends this stream to this device (the player's Stats). */
+    @GET("api/activity/delivery")
+    suspend fun getStreamDelivery(@Query("kind") kind: String, @Query("id") id: String): DeliveryResponse
+
+    /** The server answering at all — the player's Stats times it. */
+    @GET("api/health")
+    suspend fun health(): retrofit2.Response<Unit>
+
     // ── Portal connect / disconnect ───────────────────────────────────────────
     @POST("api/auth/connect")
     suspend fun connectPortal(@Body body: PortalConnectRequest): PortalActionResponse
