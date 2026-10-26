@@ -37,7 +37,8 @@ describe('cleanTitle', () => {
   it('takes provider tags, quality marks, the season and the year off a name', () => {
     expect(cleanTitle('EN - Breaking Bad (2008) S02 [4K]')).toEqual({ title: 'Breaking Bad', year: '2008', season: '2' })
     expect(cleanTitle('|UK| The Office Season 3')).toEqual({ title: 'The Office', year: '', season: '3' })
-    expect(cleanTitle('Dune 2021 4K')).toEqual({ title: 'Dune', year: '2021', season: '' })
+    expect(cleanTitle('Dune 2021 4K')).toEqual({ title: 'Dune', year: '2021', season: '', alias: 'Dune 2021' })
+    expect(cleanTitle('Specials S00').season).toBe('0')
     expect(cleanTitle('[MULTI-SUB] Shogun')).toEqual({ title: 'Shogun', year: '', season: '' })
   })
 
@@ -58,6 +59,28 @@ describe('pickImdb', () => {
     expect(pickImdb(BREAKING_BAD, { title: 'Something Else', year: '1990', isMovie: false })).toBe(null)
     expect(pickImdb([BREAKING_BAD[1]], { title: 'Breaking Bad', year: '', isMovie: false })).toBe(null)
     expect(pickImdb(undefined, { title: 'X', isMovie: false })).toBe(null)
+  })
+})
+
+describe('pickImdb, more', () => {
+  it("prefers the film named with its year, and doesn't take the year as the film's", () => {
+    const ww = [
+      { id: 'tt0451279', l: 'Wonder Woman', qid: 'movie', y: 2017 },
+      { id: 'tt7126948', l: 'Wonder Woman 1984', qid: 'movie', y: 2020 },
+    ]
+    expect(pickImdb(ww, { title: 'Wonder Woman', alias: 'Wonder Woman 1984', year: '1984', isMovie: true })?.id).toBe('tt7126948')
+  })
+
+  it('counts any year of a show still running', () => {
+    const shogun = [
+      { id: 'tt0080274', l: 'Shogun', qid: 'tvMiniSeries', y: 1980, yr: '1980-1980' },
+      { id: 'tt2788316', l: 'Shōgun', qid: 'tvSeries', y: 2024, yr: '2024-' },
+    ]
+    expect(pickImdb(shogun, { title: 'Shogun', year: '2026', isMovie: false })?.id).toBe('tt2788316')
+  })
+
+  it('takes nothing when the name differs and no year can agree', () => {
+    expect(pickImdb(BREAKING_BAD, { title: 'Totally Different', year: '', isMovie: false })).toBe(null)
   })
 })
 
@@ -124,6 +147,49 @@ describe('SkipSegments.lookup', () => {
 
       again.setMatch('p', '7', null)   // back to finding it by name
       expect((await again.lookup({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).imdbId).toBe('tt0903747')
+      again.flush()   // nothing left to write once the folder is gone
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('asks for the specials as season 0, and for nothing when the season is unknown', async () => {
+    const fetch = fakeFetch([[/suggestion/, { body: { d: BREAKING_BAD } }], [/season=0&episode=3$/, { body: INTRO }]])
+    const skip = new SkipSegments(null, { fetch })
+    expect((await skip.lookup({ videoId: '7', name: 'Breaking Bad', season: '0', episode: '3' })).intro).toEqual({ start: 314.5, end: 331 })
+    const unknown = await skip.lookup({ videoId: '7', name: 'Breaking Bad', season: '', episode: '5' })
+    expect(unknown).toMatchObject({ imdbId: 'tt0903747', intro: null, recap: null, outro: null })
+    expect(fetch.calls.filter((u) => u.includes('introdb'))).toHaveLength(1)
+  })
+
+  it('searches IMDb with the name as written, "The" and all', async () => {
+    const fetch = fakeFetch([])
+    await new SkipSegments(null, { fetch }).lookup({ videoId: '1', name: 'The Boys', season: '1', episode: '1' })
+    expect(fetch.calls[0]).toMatch(/suggestion\/t\/the%20boys\.json$/)
+  })
+
+  it('asks the next title again after a site was down', async () => {
+    let down = true
+    const fetch = fakeFetch([[/suggestion/, () => { if (down) throw new Error('ETIMEDOUT'); return { body: { d: BREAKING_BAD } } }], [/introdb/, { body: INTRO }]])
+    const skip = new SkipSegments(null, { fetch })
+    expect((await skip.lookup({ videoId: '7', name: 'Breaking Bad', season: '1', episode: '1' })).intro).toBe(null)
+    down = false
+    expect((await skip.lookup({ videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).intro).toEqual({ start: 314.5, end: 331 })
+  })
+
+  it("forgets names IMDb didn't know once they're due again", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-skip-prune-'))
+    const file = path.join(dir, 'skip-matches.json')
+    try {
+      const old = Date.now() - 4 * 24 * 60 * 60 * 1000
+      fs.writeFileSync(file, JSON.stringify({ shows: {
+        'p|1': { imdbId: null, set: false, at: old },
+        'p|2': { imdbId: 'tt0903747', set: false, at: old },
+        'p|3': { imdbId: null, set: true, off: true, at: old },
+      } }))
+      const skip = new SkipSegments(file)
+      skip.flush()
+      expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8')).shows)).toEqual(['p|2', 'p|3'])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

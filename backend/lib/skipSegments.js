@@ -11,10 +11,12 @@
 // finds the wrong one (PUT /api/vod/skip/match/:videoId).
 //
 // Neither site is needed to play: if either is slow or down, the player
-// simply shows no skip buttons.
+// simply shows no skip buttons for that title. A failure isn't remembered —
+// the next title asks again.
 
 const fs = require('fs');
 const log = require('../logger');
+const { writeJsonAtomic, DebouncedSave } = require('./jsonFile');
 const TAG = 'skip';
 
 const IMDB_SEARCH = 'https://v2.sg.media-imdb.com/suggestion';
@@ -25,7 +27,6 @@ const FOUND_TTL_MS = 12 * 60 * 60 * 1000;       // times known: asked again twic
 const MISSING_TTL_MS = 3 * 60 * 60 * 1000;      // nothing submitted yet: every few hours
 const NO_MATCH_RETRY_MS = 3 * 24 * 60 * 60 * 1000;   // a name IMDb didn't know
 const MAX_CACHED = 2000;
-const SAVE_DELAY_MS = 1000;
 
 const SERIES_KINDS = new Set(['tvSeries', 'tvMiniSeries']);
 const MOVIE_KINDS = new Set(['movie', 'tvMovie']);
@@ -34,12 +35,15 @@ const IMDB_ID = /^tt\d{5,10}$/;
 /**
  * What the portal calls a title, as IMDb would: provider tags, quality and
  * language marks, a season and the year taken off. "EN - Breaking Bad (2008)
- * S02 [4K]" → { title: 'Breaking Bad', year: '2008', season: '2' }.
+ * S02 [4K]" → { title: 'Breaking Bad', year: '2008', season: '2' }. A bare
+ * year at the end may be the name's own ("Wonder Woman 1984"): `alias` is the
+ * name with it, which is what's searched for, and preferred when IMDb has it.
  */
 function cleanTitle(name) {
   let s = String(name || '').replace(/[._]+/g, ' ').trim();
   let year = '';
   let season = '';
+  let alias = '';
   // "EN - ", "|EN| ", "[EN] ", "UK| " — a short provider or language tag in
   // front (not "CSI: Miami": a colon is part of a name).
   s = s.replace(/^\s*(?:[|[(]\s*[A-Z0-9+]{2,6}\s*[|\])]|[A-Z]{2,3}\s+-\s+|[A-Z]{2,4}\s*\|)\s*/, '');
@@ -49,48 +53,58 @@ function cleanTitle(name) {
   const seasonMark = /\b(?:S(\d{1,2})(?:\s*E\d{1,3})?|Season\s*(\d{1,2})|Saison\s*(\d{1,2})|Staffel\s*(\d{1,2})|Temporada\s*(\d{1,2}))\b/i;
   const m = seasonMark.exec(s);
   if (m) {
-    season = String(Number(m.slice(1).find(Boolean)));
+    season = String(Number(m.slice(1).find((g) => g !== undefined)));
     s = s.slice(0, m.index);
   }
   s = s.replace(/\b(?:4K|UHD|FHD|HD|SD|HEVC|H ?26[45]|1080p|720p|2160p|MULTI(?:[ -]?(?:SUB|AUDIO))?|VOSTFR|DUAL|SUB|DUB)\b/gi, ' ');
+  const tidy = (t) => t.replace(/\s*[-:|–]\s*$/, '').replace(/\s+/g, ' ').trim();
+  s = tidy(s);
   // A bare year at the end: "Dune 2021" — not one in the future ("Blade
   // Runner 2049") or the whole name ("1917").
-  s = s.replace(/(\S)\s+((?:19|20)\d{2})\s*$/, (m, before, y) => {
-    if (Number(y) > new Date().getFullYear() + 1) return m;
+  s = s.replace(/(\S)\s+((?:19|20)\d{2})$/, (whole, before, y) => {
+    if (Number(y) > new Date().getFullYear() + 1) return whole;
+    alias = s;
     year ||= y;
     return before;
   });
-  s = s.replace(/\s*[-:|–]\s*$/, '').replace(/\s+/g, ' ').trim();
-  return { title: s, year, season };
+  s = tidy(s);
+  return alias ? { title: s, year, season, alias } : { title: s, year, season };
 }
 
-// Titles compared without case, accents, punctuation or a leading "The".
-const plain = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^the /, '');
+// Without case, accents or punctuation: what IMDb's search is asked.
+const searchText = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim();
+// Names compared as that, "&" as "and", and without a leading "The".
+const plain = (t) => searchText(t).replace(/&/g, ' and ').replace(/\s+/g, ' ').trim().replace(/^the /, '');
 
 /**
  * The IMDb id that best fits a title, from IMDb's suggestions (`d` of its
  * answer): of the right kind (series or movie), the same name and year
- * winning, then IMDb's own order. Null when none of the right kind.
+ * winning, then IMDb's own order. Null unless the name or the year agrees:
+ * a wrong match would skip the wrong parts, and it's kept.
  */
-function pickImdb(suggestions, { title, year, isMovie }) {
+function pickImdb(suggestions, { title, alias = '', year, isMovie }) {
   const kinds = isMovie ? MOVIE_KINDS : SERIES_KINDS;
   const want = plain(title);
+  const wantFull = alias ? plain(alias) : '';
   const y = parseInt(year, 10) || 0;
   let best = null;
-  (Array.isArray(suggestions) ? suggestions : []).forEach((s, i) => {
+  (Array.isArray(suggestions) ? suggestions : []).forEach((s) => {
     if (!IMDB_ID.test(s?.id || '') || !kinds.has(s.qid)) return;
     let score = 0;
-    if (plain(s.l) === want) score += 2;
-    // A show's year on the portal can be any of its seasons'.
+    const name = plain(s.l);
+    if (wantFull && name === wantFull) score += 3;   // "Wonder Woman 1984": the film of that name
+    else if (name === want) score += 2;
+    // A show's year on the portal can be any of its seasons': "2008-2013",
+    // or "2024-" while it's still running.
     const from = Number(s.y) || 0;
-    const to = Number(String(s.yr || '').split('-')[1]) || from;
-    if (y && from && (isMovie ? Math.abs(from - y) <= 1 : y >= from - 1 && y <= (to || 9999) + 1)) score += 2;
-    if (!best || score > best.score || (score === best.score && i < best.i)) best = { id: s.id, title: s.l, year: s.y ? String(s.y) : '', score, i };
+    const [, end] = String(s.yr || '').split('-');
+    const to = end === undefined ? from : end === '' ? 9999 : Number(end) || from;
+    if (y && from && (isMovie ? Math.abs(from - y) <= 1 : y >= from - 1 && y <= to + 1)) score += 2;
+    if (!best || score > best.score) best = { id: s.id, title: s.l, year: s.y ? String(s.y) : '', score };
   });
-  // Neither the name nor the year agrees: more likely another title than this one.
-  if (best && best.score === 0 && y) return null;
-  return best && { id: best.id, title: best.title, year: best.year };
+  if (!best || best.score === 0) return null;
+  return { id: best.id, title: best.title, year: best.year };
 }
 
 // One of IntroDB's segments as the player uses it: seconds, start before end.
@@ -118,33 +132,28 @@ class SkipSegments {
     this._shows = {};            // `${portal}|${videoId}` → { imdbId, title, year, set, off, at }
     this._times = new Map();     // `${imdbId}|${season}|${episode}` → { value, at, ttl }
     this._pending = new Map();   // the same keys and show keys → a lookup under way
-    this._timer = null;
+    this._saver = new DebouncedSave(() => writeJsonAtomic(this._file, { shows: this._shows }), { tag: TAG });
     this._load();
   }
 
   _load() {
     if (!this._file) return;
     try { this._shows = JSON.parse(fs.readFileSync(this._file, 'utf8')).shows || {}; } catch { /* first run */ }
+    // A name IMDb didn't know is asked again after a while: its row needn't stay.
+    let dropped = 0;
+    for (const [key, m] of Object.entries(this._shows)) {
+      if (!m?.imdbId && !m?.set && Date.now() - (m?.at || 0) >= NO_MATCH_RETRY_MS) { delete this._shows[key]; dropped++; }
+    }
+    if (dropped) this._scheduleSave();
   }
 
   _scheduleSave() {
-    if (!this._file || this._timer) return;
-    this._timer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
-    this._timer.unref?.();
+    if (this._file) this._saver.schedule();
   }
 
   /** Writes unsaved matches now (on shutdown). */
   flush() {
-    if (!this._timer) return;
-    clearTimeout(this._timer);
-    this._timer = null;
-    try {
-      const tmp = this._file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify({ shows: this._shows }), 'utf8');
-      fs.renameSync(tmp, this._file);
-    } catch (e) {
-      log.error(TAG, `save failed: ${e.message}`);
-    }
+    if (this._file) this._saver.flush();
   }
 
   async _json(url) {
@@ -154,12 +163,17 @@ class SkipSegments {
     return r.json();
   }
 
-  async _search(title, year, isMovie) {
-    const q = plain(title);
-    if (!q) return null;
-    const first = /^[a-z0-9]/.test(q) ? q[0] : 'x';
-    const body = await this._json(`${IMDB_SEARCH}/${first}/${encodeURIComponent(q)}.json`);
-    return pickImdb(body?.d, { title, year, isMovie });
+  // The name with its trailing year first ("Wonder Woman 1984"), then without.
+  async _search({ title, alias, year }, isMovie) {
+    for (const name of alias ? [alias, title] : [title]) {
+      const q = searchText(name);
+      if (!q) continue;
+      const first = /^[a-z0-9]/.test(q) ? q[0] : 'x';
+      const body = await this._json(`${IMDB_SEARCH}/${first}/${encodeURIComponent(q)}.json`);
+      const found = pickImdb(body?.d, { title, alias, year, isMovie });
+      if (found) return found;
+    }
+    return null;
   }
 
   /** The match kept for a show, as the player shows it: { imdbId, title, year, set, off } or null. */
@@ -188,16 +202,16 @@ class SkipSegments {
   }
 
   // The show's IMDb match: kept, or looked up now (once at a time per show).
-  async _matchFor(portal, videoId, title, year, isMovie) {
+  async _matchFor(portal, videoId, clean, year, isMovie) {
     const key = `${portal}|${videoId}`;
     const kept = this._shows[key];
     if (kept && (kept.set || kept.imdbId || Date.now() - (kept.at || 0) < NO_MATCH_RETRY_MS)) return kept;
     if (!this._pending.has(key)) {
       this._pending.set(key, (async () => {
-        const found = await this._search(title, year, isMovie);
+        const found = await this._search({ ...clean, year }, isMovie);
         const m = { imdbId: found?.id ?? null, title: found?.title ?? '', year: found?.year ?? '', set: false, off: false, at: Date.now() };
         if (!this._shows[key]?.set) { this._shows[key] = m; this._scheduleSave(); }
-        log.info(TAG, `"${title}"${year ? ` (${year})` : ''} → ${m.imdbId ? `${m.title} (${m.year}) ${m.imdbId}` : 'not found on IMDb'}`);
+        log.info(TAG, `"${clean.alias || clean.title}"${year ? ` (${year})` : ''} → ${m.imdbId ? `${m.title} (${m.year}) ${m.imdbId}` : 'not found on IMDb'}`);
         return this._shows[key];
       })().finally(() => this._pending.delete(key)));
     }
@@ -228,14 +242,17 @@ class SkipSegments {
    * The parts of a movie or episode that can be skipped:
    * { imdbId, match: { title, year, set, off }, intro, recap, outro }, each
    * part { start, end } in seconds or null. `name` is the portal's title of
-   * the movie or show; `season` and `episode` numbers for an episode (the
-   * season taken from the name when not given). Never throws: a site that
-   * can't be reached means nothing to skip.
+   * the movie or show; `season` and `episode` numbers for an episode — the
+   * season taken from the name when not given, and with neither, no parts
+   * (another season's would be wrong). Never throws: a site that can't be
+   * reached means nothing to skip, and the next title asks again.
    */
   async lookup({ portal = '', videoId, name, year = '', season = '', episode = '', isMovie = false }) {
     const clean = cleanTitle(name);
     const y = String(year || '').match(/(?:19|20)\d{2}/)?.[0] || clean.year;
-    const s = parseInt(season, 10) || parseInt(clean.season, 10) || (isMovie ? 0 : 1);
+    // Season 0 is the specials, not "none".
+    const given = String(season ?? '').trim();
+    const s = /^\d+$/.test(given) ? Number(given) : clean.season ? Number(clean.season) : null;
     const e = parseInt(episode, 10) || 0;
     const answer = (m, parts = NONE) => ({
       imdbId: m?.imdbId ?? null,
@@ -245,8 +262,8 @@ class SkipSegments {
     if (!videoId || !clean.title || (!isMovie && !e)) return answer(null);
     let m = null;
     try {
-      m = await this._matchFor(portal, String(videoId), clean.title, y, isMovie);
-      if (!m?.imdbId || m.off) return answer(m);
+      m = await this._matchFor(portal, String(videoId), clean, y, isMovie);
+      if (!m?.imdbId || m.off || (!isMovie && s === null)) return answer(m);
       return answer(m, await this._timesFor(m.imdbId, s, e, isMovie));
     } catch (err) {
       log.warn(TAG, `"${clean.title}": ${err.message}`);

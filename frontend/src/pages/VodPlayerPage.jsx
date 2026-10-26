@@ -267,26 +267,32 @@ export default function VodPlayerPage() {
   const [skipAsk, setSkipAsk]     = useState(0)      // goes up when the show's match is changed
   const seasonNo = searchParams.get('season') || ''
   const year     = searchParams.get('year') || ''
+  // The portal's own name, not the "Untitled" shown for none (that would be searched for).
+  const portalName = searchParams.get('title') || ''
   useEffect(() => {
     if (!videoId) return
     let cancelled = false
-    getVodSkip({ videoId, name: title, year, season: seasonNo, episode: isEpisode ? seriesNo : '', movie: !isEpisode })
+    getVodSkip({ videoId, name: portalName, year, season: seasonNo, episode: isEpisode ? seriesNo : '', movie: !isEpisode })
       .then((r) => { if (!cancelled) setSkipFound({ ...r, for: progressKey }) })
       .catch(() => { if (!cancelled) setSkipFound(null) })
     return () => { cancelled = true }
-  }, [videoId, title, year, seasonNo, seriesNo, isEpisode, progressKey, skipAsk])
+  }, [videoId, portalName, year, seasonNo, seriesNo, isEpisode, progressKey, skipAsk])
   const skipParts = skipFound?.for === progressKey && mediaKey === progressKey && !onTv ? skipFound : null
   const skipNow = upNext ? null : skipAt(skipParts, currentTime)
   // Auto-skip: each intro or recap once, so going back to watch it stays put.
+  // From the video's own position: the state can be a step behind it — still
+  // 0 in the render where the resume above has just sought to 20:00, which
+  // read as "in the recap" would undo the resume.
   const autoSkippedRef = useRef({ key: null, done: new Set() })
   useEffect(() => {
     const v = videoRef.current
     if (!v || !skipParts?.autoSkip) return
     if (autoSkippedRef.current.key !== progressKey) autoSkippedRef.current = { key: progressKey, done: new Set() }
     const done = autoSkippedRef.current.done
-    const to = autoSkipTo(skipParts, currentTime, done)
+    const at = v.currentTime
+    const to = autoSkipTo(skipParts, at, done)
     if (to == null) return
-    done.add(skipAt(skipParts, currentTime).kind)
+    done.add(skipAt(skipParts, at).kind)
     try { v.currentTime = Math.min(to, v.duration) } catch { /* seek rejected */ }
   }, [skipParts, currentTime, progressKey])
   function doSkip(toNextEpisode) {

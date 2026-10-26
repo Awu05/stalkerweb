@@ -170,7 +170,17 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 
     Box(
         Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || !p.isEpisode) return@onPreviewKeyEvent false
+            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            // OK with nothing else on screen: the Skip button's skip (it never
+            // takes the focus — that would pull it out of the controls or the
+            // episodes, and leave it nowhere when the button goes).
+            val skipNow = state.skip
+            if (skipNow != null && !controlsVisible && !panelOpen && state.upNext == null && !casting &&
+                (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter)) {
+                viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
+                return@onPreviewKeyEvent true
+            }
+            if (!p.isEpisode) return@onPreviewKeyEvent false
             when (e.key) {
                 Key.MediaNext, Key.ChannelUp -> { viewModel.playNext(); true }
                 Key.MediaPrevious, Key.ChannelDown -> { viewModel.playPrevious(); true }
@@ -278,7 +288,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
             SkipButton(
                 label = if (next) "Next episode" else now.label,
                 next = next,
-                takeFocus = isTV,
+                // The remote's OK skips (above); the button says so.
+                hint = isTV && !controlsVisible && !panelOpen,
                 onClick = { viewModel.skip(next) },
                 // Above Media3's seek bar while its controls show.
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
@@ -357,21 +368,20 @@ private fun EpisodesPanel(
 }
 
 /**
- * Skip intro / recap / credits, over the video while one plays. On a TV it
- * takes the focus when it appears, so one press of OK skips.
+ * Skip intro / recap / credits, over the video while one plays. On a TV the
+ * remote's OK skips while the controls are hidden ([hint] says so).
  */
 @Composable
-private fun SkipButton(label: String, next: Boolean, takeFocus: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(label) { if (takeFocus) runCatching { focus.requestFocus() } }
+private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier) {
     OutlinedButton(
         onClick = onClick,
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
-        modifier = modifier.focusRequester(focus).tvFocus(RoundedCornerShape(50)),
+        modifier = modifier.tvFocus(RoundedCornerShape(50)),
     ) {
         Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
         Text(" $label")
+        if (hint) Text("  · OK", color = SwColors.Muted)
     }
 }
 
