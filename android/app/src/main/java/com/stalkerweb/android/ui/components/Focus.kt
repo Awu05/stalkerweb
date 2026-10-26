@@ -8,13 +8,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -35,21 +35,25 @@ fun Modifier.tvFocus(shape: Shape = RoundedCornerShape(10.dp)): Modifier = compo
         .onFocusChanged { focused = it.hasFocus }
         .zIndex(if (focused) 1f else 0f)
         .graphicsLayer { scaleX = scale; scaleY = scale }
-        .drawWithContent {
-            drawContent()
-            if (focused) {
-                val ring = 3.dp.toPx()
-                focusRing(shape, inset = 0f, width = ring, color = SwColors.PrimaryLight)
-                focusRing(shape, inset = ring, width = 2.dp.toPx(), color = SwColors.Bg)
+        .drawWithCache {
+            // The dark band is the full 5dp and the white 3dp is laid over its
+            // outer part, so the two always meet — separate rings of the same
+            // corner radius don't, and a sliver of the tile showed at each corner.
+            val white = ringOf(shape, 3.dp.toPx())
+            val dark = ringOf(shape, 5.dp.toPx())
+            onDrawWithContent {
+                drawContent()
+                if (focused) {
+                    dark?.let { (o, w) -> translate(w / 2, w / 2) { drawOutline(o, SwColors.Bg, style = Stroke(w)) } }
+                    white?.let { (o, w) -> translate(w / 2, w / 2) { drawOutline(o, SwColors.PrimaryLight, style = Stroke(w)) } }
+                }
             }
         }
 }
 
-/** A stroke of [width] along [shape], kept inside the bounds, [inset] from the edge. */
-private fun DrawScope.focusRing(shape: Shape, inset: Float, width: Float, color: Color) {
-    val edge = inset + width / 2
-    val inner = Size(size.width - 2 * edge, size.height - 2 * edge)
-    if (inner.minDimension <= 0f) return
-    val outline = shape.createOutline(inner, layoutDirection, this)
-    translate(edge, edge) { drawOutline(outline, color, style = Stroke(width)) }
+/** The outline a stroke of [width] follows to sit just inside [shape]'s edge, with that width. */
+private fun CacheDrawScope.ringOf(shape: Shape, width: Float): Pair<Outline, Float>? {
+    val inner = Size(size.width - width, size.height - width)
+    if (inner.minDimension <= 0f) return null
+    return shape.createOutline(inner, layoutDirection, this) to width
 }

@@ -140,21 +140,6 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     val isTV = rememberIsTV()
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     var controlsVisible by remember { mutableStateOf(true) }
-    var playerView by remember { mutableStateOf<PlayerView?>(null) }
-    // The top bar follows Media3's controls, but its listener only reports a
-    // change: when they never show (the episode already loading as the view
-    // got the player, or the next one starting), "visible" stuck from the start
-    // and the bar stayed over the video. Read their real state on every event.
-    DisposableEffect(player, playerView) {
-        val view = playerView
-        val listener = object : Player.Listener {
-            override fun onEvents(p: Player, events: Player.Events) {
-                if (view != null) controlsVisible = view.controllerShown()
-            }
-        }
-        player?.addListener(listener)
-        onDispose { player?.removeListener(listener) }
-    }
     var panelOpen by remember { mutableStateOf(false) }
     val p = state.params ?: params
     val watchState by viewModel.watchState.collectAsStateWithLifecycle()
@@ -196,12 +181,16 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                         useController = true
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
-                        highlightControllerFocus()
+                        if (isTV) highlightControllerFocus()
                     }
                 },
                 update = {
                     it.player = player
-                    playerView = it
+                    // The top bar follows Media3's controls, but their listener
+                    // only reports changes: when they never showed (the episode
+                    // already loading as the view got the player), a "visible"
+                    // kept from the start left the bar over the video. Start
+                    // from their real state; the listener carries it on.
                     controlsVisible = it.controllerShown()
                 },
                 modifier = Modifier.fillMaxSize(),

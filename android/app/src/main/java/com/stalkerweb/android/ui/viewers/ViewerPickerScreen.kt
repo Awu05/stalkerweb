@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.viewers
 
+import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -168,6 +169,7 @@ fun ViewerPickerScreen(
                         onValueChange = { name = it; nameError = null },
                         label = { Text("Name") },
                         singleLine = true,
+                        keyboardOptions = tvKeyboardOptions(),
                         isError = nameError != null,
                         supportingText = nameError?.let { { Text(it) } },
                     )
