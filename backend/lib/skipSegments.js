@@ -191,7 +191,9 @@ class SkipSegments {
     if (choice === null || choice === undefined || choice === '') {
       delete this._shows[key];
     } else if (choice === 'off') {
-      this._shows[key] = { imdbId: null, set: true, off: true, at: Date.now() };
+      // Its id stays, for the subtitles.
+      const was = this._shows[key];
+      this._shows[key] = { imdbId: was?.imdbId ?? null, title: was?.title ?? '', year: was?.year ?? '', set: true, off: true, at: Date.now() };
     } else {
       const id = /tt\d{5,10}/.exec(String(choice))?.[0];
       if (!id) throw Object.assign(new Error('That is not an IMDb id — it looks like tt0903747.'), { status: 400 });
@@ -205,12 +207,20 @@ class SkipSegments {
   async _matchFor(portal, videoId, clean, year, isMovie) {
     const key = `${portal}|${videoId}`;
     const kept = this._shows[key];
-    if (kept && (kept.set || kept.imdbId || Date.now() - (kept.at || 0) < NO_MATCH_RETRY_MS)) return kept;
+    // Kept: a match, one set by hand, or a name lately not found. A show turned
+    // off with no id (as "off" was kept before) is found by name — for its
+    // subtitles — and stays off.
+    const offWithoutId = kept?.off && !kept.imdbId;
+    // (lookedAt: when an off show was last looked up; never, before.)
+    const lastLook = offWithoutId ? kept.lookedAt || 0 : kept?.at || 0;
+    if (kept && (kept.imdbId || (kept.set && !kept.off) || Date.now() - lastLook < NO_MATCH_RETRY_MS)) return kept;
     if (!this._pending.has(key)) {
       this._pending.set(key, (async () => {
         const found = await this._search({ ...clean, year }, isMovie);
         const m = { imdbId: found?.id ?? null, title: found?.title ?? '', year: found?.year ?? '', set: false, off: false, at: Date.now() };
-        if (!this._shows[key]?.set) { this._shows[key] = m; this._scheduleSave(); }
+        const now = this._shows[key];
+        if (offWithoutId && now?.off && !now.imdbId) { this._shows[key] = { ...m, set: true, off: true, lookedAt: Date.now() }; this._scheduleSave(); }
+        else if (!now?.set) { this._shows[key] = m; this._scheduleSave(); }
         log.info(TAG, `"${clean.alias || clean.title}"${year ? ` (${year})` : ''} → ${m.imdbId ? `${m.title} (${m.year}) ${m.imdbId}` : 'not found on IMDb'}`);
         return this._shows[key];
       })().finally(() => this._pending.delete(key)));
@@ -247,28 +257,49 @@ class SkipSegments {
    * (another season's would be wrong). Never throws: a site that can't be
    * reached means nothing to skip, and the next title asks again.
    */
-  async lookup({ portal = '', videoId, name, year = '', season = '', episode = '', isMovie = false }) {
-    const clean = cleanTitle(name);
-    const y = String(year || '').match(/(?:19|20)\d{2}/)?.[0] || clean.year;
-    // Season 0 is the specials, not "none".
-    const given = String(season ?? '').trim();
-    const s = /^\d+$/.test(given) ? Number(given) : clean.season ? Number(clean.season) : null;
-    const e = parseInt(episode, 10) || 0;
+  async lookup(q) {
+    const { isMovie = false } = q;
+    const { clean, y, s, e } = this._parse(q);
     const answer = (m, parts = NONE) => ({
       imdbId: m?.imdbId ?? null,
       match: { title: m?.title ?? '', year: m?.year ?? '', set: !!m?.set, off: !!m?.off },
       ...parts,
     });
-    if (!videoId || !clean.title || (!isMovie && !e)) return answer(null);
+    if (!q.videoId || !clean.title || (!isMovie && !e)) return answer(null);
     let m = null;
     try {
-      m = await this._matchFor(portal, String(videoId), clean, y, isMovie);
+      m = await this._matchFor(q.portal ?? '', String(q.videoId), clean, y, isMovie);
       if (!m?.imdbId || m.off || (!isMovie && s === null)) return answer(m);
       return answer(m, await this._timesFor(m.imdbId, s, e, isMovie));
     } catch (err) {
       log.warn(TAG, `"${clean.title}": ${err.message}`);
       return answer(m);
     }
+  }
+
+  // The portal's name cleaned, its year, and the season (0: the specials;
+  // null: unknown) and episode numbers.
+  _parse({ name, year = '', season = '', episode = '' }) {
+    const clean = cleanTitle(name);
+    const y = String(year || '').match(/(?:19|20)\d{2}/)?.[0] || clean.year;
+    const given = String(season ?? '').trim();
+    const s = /^\d+$/.test(given) ? Number(given) : clean.season ? Number(clean.season) : null;
+    const e = parseInt(episode, 10) || 0;
+    return { clean, y, s, e };
+  }
+
+  /**
+   * The IMDb id of a movie or show, as skip intro matches it (kept, or found
+   * by name now), with the episode's season and episode numbers — for the
+   * subtitles. A show whose skipping is off keeps its id. Throws when IMDb
+   * can't be reached.
+   */
+  async titleFor(q) {
+    const { isMovie = false } = q;
+    const { clean, y, s, e } = this._parse(q);
+    if (!q.videoId || !clean.title) return { imdbId: null, season: s, episode: e };
+    const m = await this._matchFor(q.portal ?? '', String(q.videoId), clean, y, isMovie);
+    return { imdbId: m?.imdbId ?? null, season: s, episode: e };
   }
 }
 

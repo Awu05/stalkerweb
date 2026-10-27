@@ -7,8 +7,12 @@
 const express = require('express');
 const CacheManager = require('../cache/CacheManager');
 const { parseIdleMinutes, MAX_IDLE_MINUTES } = require('../lib/idleTimeout');
+const { wyzieSourcesOf, WYZIE_SOURCES } = require('../lib/subtitles');
 
 const MAX_LIVE_BUFFER_S = 120;
+
+// A saved key as Settings shows it: whether there is one, and its last characters.
+const keyHint = (key) => (key ? `…${String(key).slice(-4)}` : '');
 const STB_MODELS    = ['MAG200', 'MAG250', 'MAG254', 'MAG256', 'MAG270', 'MAG322', 'MAG352', 'CUSTOM'];
 const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic'];
 
@@ -44,6 +48,17 @@ module.exports = function settingsModule(config, appState = null, access = null)
       // Live delay buffer, seconds (0 = off): saved, else LIVE_BUFFER_SECONDS.
       live_buffer_seconds:     saved.live_buffer_seconds ?? config.liveBufferSeconds ?? 0,
       live_buffer_default:     config.liveBufferSeconds ?? 0,
+      // Online subtitles (lib/subtitles.js). Keys and the password are never
+      // sent back — only whether one is saved, and a key's last characters.
+      subtitle_provider:       saved.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie',
+      wyzie_key_hint:          keyHint(saved.wyzie_api_key),
+      // Wyzie's sources to search (charlie unless others are picked), and all it has.
+      wyzie_sources:           wyzieSourcesOf(saved.wyzie_sources),
+      wyzie_sources_available: WYZIE_SOURCES,
+      opensubtitles_key_hint:  keyHint(saved.opensubtitles_api_key),
+      opensubtitles_username:  saved.opensubtitles_username ?? '',
+      opensubtitles_password_set: !!saved.opensubtitles_password,
+      subtitle_languages:      saved.subtitle_languages     ?? 'en',
       // With ACCESS_KEY set: the token the Setup page puts in the links it
       // shows (playback only — see lib/access.js). Only full access reads this.
       access_enabled:          !!access?.enabled,
@@ -81,6 +96,23 @@ module.exports = function settingsModule(config, appState = null, access = null)
         return res.status(400).json({ error: `live_buffer_seconds must be a whole number from 0 (off) to ${MAX_LIVE_BUFFER_S}` });
       }
       existing.live_buffer_seconds = n;
+    }
+    // Online subtitles. A key or password left blank keeps the saved one (they're
+    // never sent back); null removes it.
+    const b = req.body;
+    if (b.subtitle_provider !== undefined) existing.subtitle_provider = b.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie';
+    for (const k of ['wyzie_api_key', 'opensubtitles_api_key', 'opensubtitles_password']) {
+      if (b[k] === null) delete existing[k];
+      else if (typeof b[k] === 'string' && b[k].trim() !== '') existing[k] = k.endsWith('password') ? b[k] : b[k].trim();
+    }
+    if (b.opensubtitles_username !== undefined) existing.opensubtitles_username = String(b.opensubtitles_username).trim();
+    if (b.wyzie_sources !== undefined) existing.wyzie_sources = wyzieSourcesOf(b.wyzie_sources);
+    if (b.subtitle_languages !== undefined) {
+      const langs = String(b.subtitle_languages).toLowerCase().split(/[\s,]+/).filter(Boolean);
+      if (langs.some((l) => !/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(l))) {
+        return res.status(400).json({ error: 'subtitle_languages: language codes such as "en, es, pt-br"' });
+      }
+      existing.subtitle_languages = langs.join(',');
     }
     cache.save(existing);
     if (idleMinutes !== null) appState?.setIdleTimeoutMinutes(idleMinutes);

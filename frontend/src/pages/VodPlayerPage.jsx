@@ -16,6 +16,8 @@ import { StreamStats, StatsButton } from '@/components/StreamStats'
 import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
 import { SkipButton, SkipMatch } from '@/components/SkipControls'
+import { SubtitleButton, SubtitleMenu } from '@/components/SubtitleMenu'
+import { useVodSubtitles } from '@/lib/useVodSubtitles'
 import { skipAt, autoSkipTo } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
@@ -295,6 +297,15 @@ export default function VodPlayerPage() {
     done.add(skipAt(skipParts, at).kind)
     try { v.currentTime = Math.min(to, v.duration) } catch { /* seek rejected */ }
   }, [skipParts, currentTime, progressKey])
+  // ── Subtitles: the video's own, or OpenSubtitles' (lib/useVodSubtitles.js) ──
+  const [subsOpen, setSubsOpen] = useState(false)
+  const subs = useVodSubtitles({
+    videoRef, hlsRef, events: Hls.Events, titleKey: progressKey,
+    query: { videoId, name: portalName, year, season: seasonNo, episode: isEpisode ? seriesNo : '', movie: !isEpisode },
+    ready: mediaKey === progressKey && !onTv,
+  })
+  useEffect(() => { setSubsOpen(false) }, [progressKey])
+
   function doSkip(toNextEpisode) {
     if (toNextEpisode && neighbours.next) { playEpisode(neighbours.next.season, neighbours.next.episode); return }
     const v = videoRef.current
@@ -374,7 +385,7 @@ export default function VodPlayerPage() {
     if (isNative) { playNative(url); return }
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false, subtitleDisplay: false })   // subtitles shown only when picked (lib/useVodSubtitles.js)
       hlsRef.current = hls
       trackHlsStats(hls, Hls.Events)
       let lastRecover = 0   // one recoverMediaError a minute (a film's hiccups are hours apart; a video that can't be decoded fails at once)
@@ -682,6 +693,12 @@ export default function VodPlayerPage() {
           </div>
         )}
 
+        {subsOpen && !onTv && (
+          <SubtitleMenu embedded={subs.embedded} online={subs.online} choice={subs.choice}
+            onPick={(kind, id, language) => subs.pick(kind, id, language)}
+            delay={subs.delay} onDelay={subs.setDelay} onClose={() => setSubsOpen(false)} />
+        )}
+
         <SkipButton skip={skipNow} onSkip={doSkip} nextEpisode={!!neighbours.next} raised={showControls || status !== 'playing'} />
 
         {upNext && (
@@ -773,6 +790,8 @@ export default function VodPlayerPage() {
               {/* The episode list, as the apps show it (a movie's panel is its details) */}
               {isEpisode ? <List size={18} /> : <Info size={18} />}
             </button>
+            <SubtitleButton on={subs.choice.kind !== 'off'} open={subsOpen}
+              onToggle={() => { if (!subsOpen) subs.loadOnline(); setSubsOpen(o => !o) }} />
             <StatsButton open={statsOpen} onToggle={() => setStatsOpen(o => !o)} />
             <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (

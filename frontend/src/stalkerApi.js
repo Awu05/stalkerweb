@@ -254,6 +254,15 @@ export const getVodSkip = ({ videoId, name, year = '', season = '', episode = ''
   if (movie)   p.set('movie', '1')
   return _get(`/vod/skip?${p}`)
 }
+/** OpenSubtitles' subtitles for a movie or episode (the same query as getVodSkip). */
+export const getVodSubtitles = ({ videoId, name, year = '', season = '', episode = '', movie = false }) => {
+  const p = new URLSearchParams({ videoId: String(videoId), name: name || '' })
+  if (year)    p.set('year', String(year))
+  if (season)  p.set('season', String(season))
+  if (episode) p.set('episode', String(episode))
+  if (movie)   p.set('movie', '1')
+  return _get(`/vod/subtitles?${p}`)
+}
 /** The show's IMDb match by hand: "tt…" (or its IMDb link), "off", or null to find it by name. */
 export const setVodSkipMatch = (videoId, imdbId) => _put(`/vod/skip/match/${encodeURIComponent(videoId)}`, { imdbId })
 

@@ -31,6 +31,7 @@ import ViewersCard from '@/components/ViewersCard'
 import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
 import { AutoSkipSetting } from '@/components/SkipControls'
+import SubtitleSettings from '@/components/SubtitleSettings'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
@@ -1348,6 +1349,10 @@ export default function SetupPage() {
               </p>
             )}
           </div>
+        </Card>
+
+        <Card title="Subtitles" description="Online subtitles, offered in the movie and episode player beside the ones inside the videos — shared by every viewer.">
+          <SubtitleSettings />
         </Card>
           </>
         )}

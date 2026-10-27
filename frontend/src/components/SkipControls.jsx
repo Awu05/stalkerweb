@@ -55,7 +55,7 @@ export function SkipMatch({ videoId, found, onChanged }) {
     }
   }
 
-  const status = m.off ? 'Off for this title.'
+  const status = m.off ? 'Skipping is off for this title.'
     : !found.imdbId ? 'Not found on IMDb.'
     : `${matchLabel(m) || found.imdbId}${m.set ? ' (set by hand)' : ''} · ${parts ? 'times found' : 'no times submitted yet'}`
   const link = 'text-[11px] font-medium text-[var(--color-primary-light)] hover:underline disabled:opacity-50'
@@ -68,7 +68,7 @@ export function SkipMatch({ videoId, found, onChanged }) {
         <div className="flex gap-3 mt-1">
           <button className={link} onClick={() => setEditing(true)}>Change</button>
           {(m.set || m.off) && <button className={link} disabled={busy} onClick={() => choose(null)}>Match by name</button>}
-          {!m.off && <button className={link} disabled={busy} onClick={() => choose('off')}>Turn off</button>}
+          {!m.off && <button className={link} disabled={busy} onClick={() => choose('off')}>Turn off skipping</button>}
         </div>
       ) : (
         <form className="flex flex-col gap-1.5 mt-1.5" onSubmit={(e) => { e.preventDefault(); if (text.trim()) choose(text.trim()) }}>

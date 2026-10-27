@@ -39,6 +39,10 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Add
+import com.stalkerweb.android.data.repo.SubtitleChoice
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -145,6 +149,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     var controlsVisible by remember { mutableStateOf(true) }
     var panelOpen by remember { mutableStateOf(false) }
     var statsOpen by remember { mutableStateOf(false) }
+    var subtitlesOpen by remember { mutableStateOf(false) }
     val p = state.params ?: params
     val watchState by viewModel.watchState.collectAsStateWithLifecycle()
     val watchedKeys = remember(watchState.watchedEpisodes) { watchState.watchedEpisodes.toSet() }
@@ -162,6 +167,9 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_SHORT).show() } }
     // Back closes the episodes panel first (the remote's Back would otherwise leave the player).
     BackHandler(enabled = panelOpen) { panelOpen = false }
+    BackHandler(enabled = subtitlesOpen) { subtitlesOpen = false }
+    // The panel open as another episode starts: its online list, asked for again.
+    LaunchedEffect(subtitlesOpen, state.params?.key) { if (subtitlesOpen) viewModel.loadOnlineSubtitles() }
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
@@ -175,7 +183,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
             // takes the focus — that would pull it out of the controls or the
             // episodes, and leave it nowhere when the button goes).
             val skipNow = state.skip
-            if (skipNow != null && !controlsVisible && !panelOpen && state.upNext == null && !casting &&
+            if (skipNow != null && !controlsVisible && !panelOpen && !subtitlesOpen && state.upNext == null && !casting &&
                 (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter)) {
                 viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
                 return@onPreviewKeyEvent true
@@ -242,7 +250,10 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 if (p.isEpisode) {
                     IconButton(onClick = viewModel::playPrevious, enabled = state.neighbours.prev != null) { Icon(Icons.Default.SkipPrevious, "Previous episode", tint = Color.White) }
                     IconButton(onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
-                    IconButton(onClick = { panelOpen = !panelOpen }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
+                    IconButton(onClick = { panelOpen = !panelOpen; if (panelOpen) subtitlesOpen = false }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
+                }
+                IconButton(onClick = { if (!subtitlesOpen) viewModel.loadOnlineSubtitles(); subtitlesOpen = !subtitlesOpen; if (subtitlesOpen) panelOpen = false }) {
+                    Icon(Icons.Default.ClosedCaption, "Subtitles", tint = if (state.subtitles.choice.kind != "off" || subtitlesOpen) MaterialTheme.colorScheme.primary else Color.White)
                 }
                 StatsButton(statsOpen) { statsOpen = !statsOpen }
                 if (!isTV && cast != null) CastButton(cast)
@@ -283,13 +294,24 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
             )
         }
 
+        if (subtitlesOpen && !casting) {
+            SubtitlesPanel(
+                subs = state.subtitles, wide = wide,
+                onPick = viewModel::pickSubtitles,
+                onDelay = viewModel::setSubtitleDelay,
+                onClose = { subtitlesOpen = false },
+                modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(340.dp).fillMaxHeight()
+                           else Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
+            )
+        }
+
         state.skip?.takeIf { !casting && state.error == null }?.let { now ->
             val next = now.kind == "outro" && state.neighbours.next != null
             SkipButton(
                 label = if (next) "Next episode" else now.label,
                 next = next,
                 // The remote's OK skips (above); the button says so.
-                hint = isTV && !controlsVisible && !panelOpen,
+                hint = isTV && !controlsVisible && !panelOpen && !subtitlesOpen,
                 onClick = { viewModel.skip(next) },
                 // Above Media3's seek bar while its controls show.
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
@@ -384,6 +406,89 @@ private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () 
         if (hint) Text("  · OK", color = SwColors.Muted)
     }
 }
+
+/**
+ * The subtitles: Off, the video's own, or the online ones by language — with
+ * the online ones' delay. A side panel on wide screens and TV, a bottom one on phones.
+ */
+@Composable
+private fun SubtitlesPanel(
+    subs: SubtitleState, wide: Boolean,
+    onPick: (SubtitleChoice) -> Unit, onDelay: (Double) -> Unit, onClose: () -> Unit, modifier: Modifier,
+) {
+    val firstFocus = remember { FocusRequester() }
+    val c = subs.choice
+    Surface(color = SwColors.Surface.copy(alpha = 0.96f), shape = RoundedCornerShape(if (wide) 0.dp else 12.dp), modifier = modifier) {
+        LazyColumn(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Subtitles", style = MaterialTheme.typography.titleSmall, color = SwColors.Text, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close subtitles") }
+                }
+            }
+            item { SubtitleRow("Off", null, c.kind == "off", Modifier.focusRequester(firstFocus)) { onPick(SubtitleChoice()) } }
+            item { SubtitleHeading("In the video") }
+            if (subs.embedded.isEmpty()) item { SubtitleNote("None in this video.") }
+            items(subs.embedded, key = { "e${it.group}-${it.track}" }) { t ->
+                val name = com.stalkerweb.android.data.repo.languageName(t.language)
+                SubtitleRow(t.label.ifBlank { name }, if (t.label.isNotBlank() && t.language.isNotBlank()) name else null,
+                    c.kind == "embedded" && c.group == t.group && c.track == t.track) {
+                    onPick(SubtitleChoice("embedded", t.group, t.track, language = t.language))
+                }
+            }
+            item { SubtitleHeading(subs.online?.provider?.takeIf { it.isNotBlank() }?.let { "Online · $it" } ?: "Online") }
+            val online = subs.online
+            when {
+                subs.onlineLoading || online == null -> item { SubtitleNote("Looking…") }
+                !online.configured -> item { SubtitleNote("Add a subtitles key in the website's Settings → Playback to look them up.") }
+                online.error != null -> item { SubtitleNote(online.error, SwColors.Live) }
+                online.results.isEmpty() -> item { SubtitleNote("None found in your languages.") }
+            }
+            if (online != null) com.stalkerweb.android.data.repo.byLanguage(online.results).forEach { (lang, list) ->
+                item(key = "l$lang") { Text(com.stalkerweb.android.data.repo.languageName(lang), color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp, start = 8.dp)) }
+                items(list, key = { "o${it.fileId}" }) { r ->
+                    val sub = listOfNotNull(if (r.hearingImpaired) "SDH" else null, if (r.machine) "machine-translated" else null, "${r.downloads} downloads").joinToString(" · ")
+                    SubtitleRow(r.label.ifBlank { "Subtitles" }, sub, c.kind == "online" && c.fileId == r.fileId) {
+                        onPick(SubtitleChoice("online", fileId = r.fileId, language = r.language))
+                    }
+                }
+            }
+            if (c.kind == "online") item {
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Delay", color = SwColors.Text, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { onDelay(subs.delay - com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Remove, "Show subtitles earlier") }
+                    Text(com.stalkerweb.android.data.repo.delayLabel(subs.delay), color = SwColors.Text, modifier = Modifier.width(56.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    IconButton(onClick = { onDelay(subs.delay + com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Add, "Show subtitles later") }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+}
+
+@Composable
+private fun SubtitleRow(label: String, sub: String?, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp))
+            .background(if (selected) SwColors.Surface3 else Color.Transparent, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(16.dp)) { if (selected) Icon(Icons.Default.Check, null, tint = SwColors.PrimaryLight, modifier = Modifier.size(16.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(label, color = if (selected) SwColors.PrimaryLight else SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (sub != null) Text(sub, color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun SubtitleHeading(text: String) =
+    Text(text.uppercase(), color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 8.dp))
+
+@Composable
+private fun SubtitleNote(text: String, color: Color = SwColors.Muted) =
+    Text(text, color = color, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
 
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */
 @Composable

@@ -164,6 +164,21 @@ interface StalkerApi {
         @Query("movie") movie: String = "",
     ): SkipResponse
 
+    // OpenSubtitles' subtitles for a movie or episode (the same query as api/vod/skip).
+    @GET("api/vod/subtitles")
+    suspend fun getVodSubtitles(
+        @Query("videoId") videoId: String,
+        @Query("name") name: String,
+        @Query("year") year: String = "",
+        @Query("season") season: String = "",
+        @Query("episode") episode: String = "",
+        @Query("movie") movie: String = "",
+    ): SubtitlesResponse
+
+    // An online subtitle file, as the player will fetch it (fetched first, to see it loads).
+    @GET("api/vod/subtitles/file/{file}")
+    suspend fun getSubtitleFile(@Path("file") file: String, @Query("offset") offset: String? = null): okhttp3.ResponseBody
+
     @PUT("api/viewers/me/filters")
     suspend fun saveAutoSkip(@Body body: AutoSkipRequest): ViewerDetails
 
