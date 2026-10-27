@@ -1,6 +1,7 @@
 package com.stalkerweb.android.ui.player
 
 import com.stalkerweb.android.ui.components.TipIconButton
+import com.stalkerweb.android.ui.components.rememberTvTyping
 import com.stalkerweb.android.ui.theme.SwColors
 
 import com.stalkerweb.android.data.repo.StatsRepository
@@ -891,15 +892,17 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     Spacer(Modifier.width(6.dp))
                     Box(Modifier.weight(1f)) {
                         if (s.query.isEmpty()) Text("Search channels", color = mutedCol, style = MaterialTheme.typography.bodySmall)
+                        val tvTyping = rememberTvTyping()
                         BasicTextField(
                             value = s.query,
                             onValueChange = a.onQuery,
+                            readOnly = tvTyping.readOnly,
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodySmall.copy(color = textCol),
                             cursorBrush = SolidColor(textCol),
                             // On TV, moving onto the field mustn't pop the keyboard up; OK opens it.
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, showKeyboardOnFocus = !c.isTV),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(tvTyping.modifier),
                         )
                     }
                     if (s.query.isNotEmpty()) {

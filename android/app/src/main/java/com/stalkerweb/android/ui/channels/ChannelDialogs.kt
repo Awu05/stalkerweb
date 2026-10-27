@@ -3,6 +3,7 @@ package com.stalkerweb.android.ui.channels
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
+import com.stalkerweb.android.ui.components.rememberTvTyping
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -181,7 +182,8 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
         title = { Text("Set logo — ${channel.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(search, { search = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                val tvSearch = rememberTvTyping()
+                OutlinedTextField(search, { search = it }, readOnly = tvSearch.readOnly, modifier = tvSearch.modifier, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 found?.let { logo ->
                     Row(
                         Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { url = logo }
@@ -288,7 +290,8 @@ fun GroupEditDialog(
                         }
                     }
                 }
-                OutlinedTextField(query, { query = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                val tvQuery = rememberTvTyping()
+                OutlinedTextField(query, { query = it }, readOnly = tvQuery.readOnly, modifier = tvQuery.modifier, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 LazyColumn(Modifier.heightIn(max = 180.dp)) {
                     items(suggestions, key = { "s" + it.uniqueId }) { c ->
                         Row(
