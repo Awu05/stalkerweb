@@ -1,6 +1,7 @@
 package com.stalkerweb.android.ui.player
 
 import com.stalkerweb.android.ui.components.TipIconButton
+import com.stalkerweb.android.ui.theme.SwColors
 
 import com.stalkerweb.android.data.repo.StatsRepository
 import com.stalkerweb.android.ui.components.StatsButton
@@ -574,7 +575,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
                         }
                     }
                     TipIconButton(label = "Play/Pause", onClick  = a.onTogglePlayPause,
-                        modifier = Modifier.align(Alignment.Center).size(52.dp),) {
+                        size = 52.dp, modifier = Modifier.align(Alignment.Center),) {
                         Icon(
                             if (c.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             "Play/Pause", tint = Color.White, modifier = Modifier.size(40.dp),
@@ -839,11 +840,11 @@ private fun PlaybackOverlay(isBuffering: Boolean, playerError: String?, onRetry:
 
 @Composable
 private fun LiveBadge() {
-    Surface(color = MaterialTheme.colorScheme.error, shape = MaterialTheme.shapes.extraSmall) {
+    Surface(color = SwColors.LiveFill, shape = MaterialTheme.shapes.extraSmall) {
         Text(
             "LIVE",
             style    = MaterialTheme.typography.labelSmall,
-            color    = Color.White,
+            color    = SwColors.OnLive,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
@@ -995,7 +996,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                             )
                             NowLine(s.nowNext[ch.uniqueId], c.nowSecs, mutedCol)
                         }
-                        TipIconButton(label = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites", onClick = { a.onToggleFavorite(ch) }, modifier = Modifier.size(32.dp)) {
+                        TipIconButton(label = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites", onClick = { a.onToggleFavorite(ch) }, size = 32.dp) {
                             Icon(
                                 imageVector        = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites",

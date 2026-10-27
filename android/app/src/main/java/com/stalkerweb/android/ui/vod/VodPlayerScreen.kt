@@ -120,7 +120,7 @@ private fun CastingControls(cast: CastManager, modifier: Modifier) {
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             TipIconButton(label = "Back 10 seconds", onClick = { cast.seekBy(-10_000) }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = Color.White) }
-            TipIconButton(label = if (r.playing) "Pause" else "Play", onClick = cast::togglePlay, modifier = Modifier.size(56.dp)) {
+            TipIconButton(label = if (r.playing) "Pause" else "Play", onClick = cast::togglePlay, size = 56.dp) {
                 Icon(if (r.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (r.playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(40.dp))
             }
             TipIconButton(label = "Forward 30 seconds", onClick = { cast.seekBy(30_000) }) { Icon(Icons.Default.Forward30, "Forward 30 seconds", tint = Color.White) }
@@ -262,8 +262,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     TipIconButton(label = "Next episode", onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
                     TipIconButton(label = "Episodes", onClick = { panelOpen = !panelOpen; if (panelOpen) subtitlesOpen = false }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
                 }
-                TipIconButton(label = "Subtitles", onClick = { if (!subtitlesOpen) viewModel.loadOnlineSubtitles(); subtitlesOpen = !subtitlesOpen; if (subtitlesOpen) panelOpen = false }) {
-                    Icon(Icons.Default.ClosedCaption, "Subtitles", tint = if (state.subtitles.choice.kind != "off" || subtitlesOpen) MaterialTheme.colorScheme.primary else Color.White)
+                TipIconButton(label = "Subtitles", lit = state.subtitles.choice.kind != "off" || subtitlesOpen, onClick = { if (!subtitlesOpen) viewModel.loadOnlineSubtitles(); subtitlesOpen = !subtitlesOpen; if (subtitlesOpen) panelOpen = false }) {
+                    Icon(Icons.Default.ClosedCaption, "Subtitles", tint = Color.White)
                 }
                 StatsButton(statsOpen) { statsOpen = !statsOpen }
                 if (!isTV && cast != null) CastButton(cast)
@@ -286,7 +286,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Resumed from ${clock(state.resumedFrom)}", color = Color.White, style = MaterialTheme.typography.labelMedium)
                     TextButton(onClick = viewModel::startOver) { Text("Start over") }
-                    TipIconButton(label = "Dismiss", onClick = viewModel::dismissResumed, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "Dismiss", tint = Color.White, modifier = Modifier.size(14.dp)) }
+                    TipIconButton(label = "Dismiss", onClick = viewModel::dismissResumed, size = 28.dp) { Icon(Icons.Default.Close, "Dismiss", tint = Color.White, modifier = Modifier.size(14.dp)) }
                 }
             }
         }

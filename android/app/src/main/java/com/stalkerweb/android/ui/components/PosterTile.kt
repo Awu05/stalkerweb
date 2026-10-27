@@ -105,12 +105,12 @@ fun PosterTile(
             }
             val showButtons = focused || !isTv
             if (onBookmark != null && (showButtons || bookmarked == true) && !watched) {
-                TipIconButton(label = if (bookmarked == true) "Remove from My List" else "Add to My List", onClick = onBookmark, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
+                TipIconButton(label = if (bookmarked == true) "Remove from My List" else "Add to My List", onClick = onBookmark, size = 36.dp, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
                     Icon(if (bookmarked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, if (bookmarked == true) "Remove from My List" else "Add to My List", Modifier.size(18.dp), tint = Color.White)
                 }
             }
             if (onDownload != null && showButtons) {
-                TipIconButton(label = "Download to server", onClick = onDownload, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
+                TipIconButton(label = "Download to server", onClick = onDownload, size = 36.dp, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
                     Icon(Icons.Default.Download, "Download to server", Modifier.size(18.dp), tint = Color.White)
                 }
             }

@@ -26,14 +26,18 @@ export function SubtitleButton({ on, open, onToggle }) {
  */
 export function SubtitleMenu({ embedded, online, choice, onPick, delay, onDelay, onClose }) {
   const ref = useRef(null)
+  // The latest onClose, read when needed: the player passes a new one each
+  // render (several a second), and the listeners stay put across them.
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose })
   useEffect(() => {
     // A press outside closes it — not on its own button, which toggles it.
-    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('[data-subtitles-button]')) onClose() }
-    const esc = (e) => { if (e.key === 'Escape') onClose() }
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('[data-subtitles-button]')) closeRef.current() }
+    const esc = (e) => { if (e.key === 'Escape') closeRef.current() }
     document.addEventListener('pointerdown', away)
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc) }
-  }, [onClose])
+  }, [])
 
   const row = (selected, label, sub, onClick, key) => (
     <button key={key} onClick={onClick}

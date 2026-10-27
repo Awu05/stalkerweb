@@ -4,25 +4,27 @@ import { useEffect } from 'react'
 // index.css): a button's name when the pointer rests on it or the keyboard
 // reaches it. Mounted once (App.jsx); every button with a name gets it — its
 // title, or its aria-label when it shows no text of its own (an icon). The
-// browser's own title tooltip is taken over, so only one shows. The apps'
-// TipIconButton does the same. buttons.test.js keeps every icon button named.
+// button's attributes stay React's: only while the pointer is on it is its
+// title set aside (so the browser's own tooltip doesn't show as well), and
+// it's put back as soon as the pointer leaves. The apps' TipIconButton does
+// the same. buttons.test.js keeps every icon button named.
 
 const DELAY_MS = 500
 const TARGET = 'button, [role="button"], a[href]'
 
-// A button's tooltip: its title (moved aside, so the browser's own stays
-// away), else one moved aside before, else its aria-label when it has no text.
+// A button's tooltip: its title, else its aria-label when it shows no text.
 function tipOf(el) {
   const title = el.getAttribute('title')
-  if (title) {
-    el.dataset.tip = title
-    el.removeAttribute('title')
-    if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', title)
-    return title
-  }
-  if (el.dataset.tip) return el.dataset.tip
+  if (title) return title
   const label = el.getAttribute('aria-label')
   return label && !el.textContent.trim() ? label : ''
+}
+
+// The title set aside while the pointer is on its button, and the button.
+let setAside = null
+function putBack() {
+  if (setAside && !setAside.el.hasAttribute('title')) setAside.el.setAttribute('title', setAside.title)
+  setAside = null
 }
 
 export default function TooltipLayer() {
@@ -48,9 +50,12 @@ export default function TooltipLayer() {
       tip.style.top = `${top}px`
       tip.style.left = `${left}px`
     }
-    const show = (el) => {
+    const show = (el, byPointer) => {
       const text = tipOf(el)
       if (!text) return
+      putBack()
+      // Under the pointer, the browser would show its own tooltip from the title too.
+      if (byPointer && el.hasAttribute('title')) { setAside = { el, title: el.getAttribute('title') }; el.removeAttribute('title') }
       clearTimeout(timer)
       current = el
       timer = setTimeout(() => {
@@ -63,12 +68,13 @@ export default function TooltipLayer() {
       clearTimeout(timer)
       current = null
       tip.hidden = true
+      putBack()
     }
 
     const onOver = (e) => {
       if (e.pointerType === 'touch') return   // a tap is a press, not a rest
       const el = e.target.closest?.(TARGET)
-      if (el && el !== current) show(el)
+      if (el && el !== current) show(el, true)
     }
     const onOut = (e) => {
       if (current && !current.contains(e.relatedTarget)) hide()
@@ -76,7 +82,7 @@ export default function TooltipLayer() {
     // The keyboard (and a TV remote) reaching a button — not a click's focus.
     const onFocus = (e) => {
       const el = e.target.closest?.(TARGET)
-      if (el && el.matches(':focus-visible')) show(el)
+      if (el && el.matches(':focus-visible')) show(el, false)
     }
     const onKey = (e) => { if (e.key === 'Escape') hide() }
 

@@ -249,3 +249,31 @@ describe('/api/vod/subtitles', () => {
     expect((await fetch(`${base}/file/abc.vtt`)).status).toBe(404)
   })
 })
+
+describe('a file the site no longer gives', () => {
+  it('is forgotten, so its search is asked again', async () => {
+    let searches = 0
+    const fetch = fakeFetch([
+      [/sub\.wyzie\.io\/search\?/, () => { searches++; return { body: WYZIE } }],
+      [/sub\.wyzie\.io\/c\//, { status: 410, body: { message: 'Link expired' } }],
+    ])
+    const subs = new Subtitles(null, { settings: () => ({ provider: 'wyzie', wyzieKey: 'K', languages: 'en' }), fetch })
+    const [first] = await subs.search({ imdbId: 'tt1', isMovie: true })
+    await expect(subs.webVtt(first.fileId)).rejects.toMatchObject({ status: 502 })
+    await subs.search({ imdbId: 'tt1', isMovie: true })
+    expect(searches).toBe(2)
+  })
+
+  it('keeps it when the daily limit was the reason', async () => {
+    let searches = 0
+    const fetch = fakeFetch([
+      [/sub\.wyzie\.io\/search\?/, () => { searches++; return { body: WYZIE } }],
+      [/sub\.wyzie\.io\/c\//, { status: 429, body: { message: 'Daily limit reached' } }],
+    ])
+    const subs = new Subtitles(null, { settings: () => ({ provider: 'wyzie', wyzieKey: 'K', languages: 'en' }), fetch })
+    const [first] = await subs.search({ imdbId: 'tt1', isMovie: true })
+    await expect(subs.webVtt(first.fileId)).rejects.toMatchObject({ status: 429 })
+    await subs.search({ imdbId: 'tt1', isMovie: true })
+    expect(searches).toBe(1)
+  })
+})

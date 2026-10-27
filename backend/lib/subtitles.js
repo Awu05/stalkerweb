@@ -409,10 +409,18 @@ class Subtitles {
       }
       if (!this._pending.has(id)) {
         this._pending.set(id, (async () => {
-          const got = id.startsWith('w') ? await this._downloadWyzie(id, known) : await this._downloadOpenSubtitles(id, known);
-          this._keep(id, got);
-          log.info(TAG, `downloaded ${id}`);
-          return got;
+          try {
+            const got = id.startsWith('w') ? await this._downloadWyzie(id, known) : await this._downloadOpenSubtitles(id, known);
+            this._keep(id, got);
+            log.info(TAG, `downloaded ${id}`);
+            return got;
+          } catch (e) {
+            // A file the site no longer gives (an expired link, a removed file) is
+            // forgotten, so the search it came from is asked again rather than kept.
+            // The daily limit isn't the file's fault: it stays.
+            if (e.status !== 429) this._known.delete(id);
+            throw e;
+          }
         })().finally(() => this._pending.delete(id)));
       }
       text = await this._pending.get(id);

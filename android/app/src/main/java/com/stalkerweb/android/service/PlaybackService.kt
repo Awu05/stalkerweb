@@ -44,7 +44,8 @@ class PlaybackService : MediaSessionService() {
         // Streams fetched as the app (Settings → Activity names it), not as "Dalvik".
         val http = DefaultHttpDataSource.Factory().setUserAgent(APP_USER_AGENT)
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+            // An online subtitle file that won't load never stops the movie (SubtitleSafeDataSource).
+            .setMediaSourceFactory(DefaultMediaSourceFactory(SubtitleSafeDataSource.Factory(DefaultDataSource.Factory(this, http))))
             .build()
         PlaybackStats.attach(player)
         mediaSession = MediaSession.Builder(this, player).build()

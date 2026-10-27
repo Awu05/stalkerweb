@@ -124,7 +124,7 @@ fun ChannelTile(
         }
         Row(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
             if (onToggleFavorite != null && (isFavorite || !isTv)) {
-                TipIconButton(label = if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites", onClick = onToggleFavorite, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
+                TipIconButton(label = if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites", onClick = onToggleFavorite, size = 36.dp, modifier = Modifier.focusProperties { canFocus = false }) {
                     Icon(
                         if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites",
@@ -134,7 +134,7 @@ fun ChannelTile(
                 }
             }
             if (onEdit != null && !isTv) {
-                TipIconButton(label = "Edit ${channel.name}", onClick = onEdit, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
+                TipIconButton(label = "Edit ${channel.name}", onClick = onEdit, size = 36.dp, modifier = Modifier.focusProperties { canFocus = false }) {
                     Icon(Icons.Default.Edit, "Edit ${channel.name}", Modifier.size(18.dp), tint = SwColors.Muted)
                 }
             }
