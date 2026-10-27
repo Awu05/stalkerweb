@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import express from 'express'
-import { Subtitles, toWebVtt, resultsOf, wyzieResultsOf, decodeSubtitle } from '../lib/subtitles.js'
+import { Subtitles, toWebVtt, resultsOf, wyzieResultsOf, decodeSubtitle, wyzieSourcesOf } from '../lib/subtitles.js'
 import { SkipSegments } from '../lib/skipSegments.js'
 import ViewersManager from '../viewers/ViewersManager.js'
 import { createViewerContext } from '../lib/viewerContext.js'
@@ -47,6 +47,11 @@ describe('toWebVtt', () => {
     expect(earlier).not.toContain('Hello')
     expect(earlier).toContain('00:00:52.000 --> 00:00:54.250')
   })
+
+  it('parts cues at blank lines that hold spaces or tabs', () => {
+    const vtt = toWebVtt('1\n00:00:01,000 --> 00:00:02,000\nHi\n \t\n2\n00:00:03,000 --> 00:00:04,000\nBye')
+    expect(vtt).toBe('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n\n00:00:03.000 --> 00:00:04.000\nBye\n')
+  })
 })
 
 describe('resultsOf', () => {
@@ -63,15 +68,35 @@ const WYZIE = [
 ]
 
 describe('wyzieResultsOf', () => {
-  it("reads Wyzie's answer: our own ids, the links kept apart", () => {
-    expect(wyzieResultsOf(WYZIE)).toEqual([
-      { fileId: 'wabc-1', url: 'https://sub.wyzie.io/c/abc?tok=T1', language: 'en', label: 'WEB-DL', downloads: 40, hearingImpaired: false, machine: false, source: 'charlie' },
-      { fileId: 'wabc2', url: 'https://sub.wyzie.io/c/def?tok=T2', language: 'en', label: 'x.srt', downloads: 400, hearingImpaired: true, machine: true, source: 'charlie' },
-    ])
+  it("reads Wyzie's answer, with ids of our own that never collide", () => {
+    const r = wyzieResultsOf([...WYZIE, { id: 'abc2', url: 'https://sub.wyzie.io/c/ghi?tok=T3', language: 'en', source: 'charlie' }])
+    expect(r).toHaveLength(3)
+    expect(new Set(r.map((x) => x.fileId)).size).toBe(3)
+    expect(r.every((x) => /^w[0-9a-f]{16}$/.test(x.fileId))).toBe(true)
+    expect(r[1]).toMatchObject({ url: 'https://sub.wyzie.io/c/def?tok=T2', label: 'x.srt', downloads: 400, hearingImpaired: true, machine: true, source: 'charlie' })
+    // The same result, the same id: a file kept on disk is found again.
+    expect(wyzieResultsOf(WYZIE)[0].fileId).toBe(r[0].fileId)
+  })
+})
+
+describe('wyzieSourcesOf', () => {
+  it('keeps the known sources picked, charlie when none', () => {
+    expect(wyzieSourcesOf(['lima', 'charlie', 'nope', 'lima'])).toEqual(['lima', 'charlie'])
+    expect(wyzieSourcesOf([])).toEqual(['charlie'])
+    expect(wyzieSourcesOf(undefined)).toEqual(['charlie'])
   })
 })
 
 describe('decodeSubtitle', () => {
+  it('reads UTF-16 by its mark, and older files in the encoding of their language', () => {
+    expect(decodeSubtitle(new Uint8Array([0xff, 0xfe, 0x48, 0x00, 0x69, 0x00]).buffer)).toBe('Hi')
+    // A Russian word in Windows-1251.
+    const cp1251 = new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]).buffer
+    const word = String.fromCharCode(0x41f, 0x440, 0x438, 0x432, 0x435, 0x442)
+    expect(decodeSubtitle(cp1251, { language: 'ru' })).toBe(word)
+    expect(decodeSubtitle(cp1251, { encoding: 'CP1251' })).toBe(word)
+  })
+
   it('reads UTF-8, and older files as Windows-1252', () => {
     expect(decodeSubtitle(new globalThis.TextEncoder().encode('Café').buffer)).toBe('Café')
     expect(decodeSubtitle(new Uint8Array([0x43, 0x61, 0x66, 0xe9]).buffer)).toBe('Café')
@@ -101,11 +126,16 @@ describe('Subtitles', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-subs-'))
     try {
       const fetch = fakeFetch([
+        [/\/subtitles\?/, { body: SEARCH }],
         [/\/login$/, { body: { token: 'TOK', base_url: 'vip-api.opensubtitles.com' } }],
         [/vip-api\.opensubtitles\.com\/api\/v1\/download$/, { body: { link: 'https://dl.example/f.srt', remaining: 19 } }],
         [/dl\.example/, { text: SRT }],
       ])
       const subs = new Subtitles(dir, { settings: settings({ username: 'me', password: 'pw' }), fetch })
+      // Not found by a search here: not fetched (the account's downloads are its owner's).
+      await expect(subs.webVtt('222')).rejects.toMatchObject({ status: 404 })
+      expect(fetch.calls).toEqual([])
+      await subs.search({ imdbId: 'tt0903747', season: 1, episode: 2 })
       expect(await subs.webVtt('222')).toContain('Hello')
       expect(fetch.calls.find((c) => c.url.endsWith('/download')).init.headers.Authorization).toBe('Bearer TOK')
       expect(await subs.webVtt('222', 1)).toContain('00:00:02.500')
@@ -118,8 +148,24 @@ describe('Subtitles', () => {
   })
 
   it("says why, when OpenSubtitles won't give the file", async () => {
-    const fetch = fakeFetch([[/\/download$/, { status: 406, body: { message: 'You have downloaded your allowed 5 subtitles for 24h' } }]])
-    await expect(new Subtitles(null, { settings: settings(), fetch }).webVtt('9')).rejects.toMatchObject({ status: 429, message: expect.stringMatching(/allowed 5/) })
+    const fetch = fakeFetch([[/\/subtitles\?/, { body: SEARCH }], [/\/download$/, { status: 406, body: { message: 'You have downloaded your allowed 5 subtitles for 24h' } }]])
+    const subs = new Subtitles(null, { settings: settings(), fetch })
+    await subs.search({ imdbId: 'tt1', isMovie: true })
+    await expect(subs.webVtt('111')).rejects.toMatchObject({ status: 429, message: expect.stringMatching(/allowed 5/) })
+  })
+
+  it('signs in again once when the login no longer counts', async () => {
+    let logins = 0
+    const fetch = fakeFetch([
+      [/\/subtitles\?/, { body: SEARCH }],
+      [/\/login$/, () => { logins++; return { body: { token: `T${logins}` } } }],
+      [/\/download$/, (_u, init) => (init.headers.Authorization === 'Bearer T1' ? { status: 401, body: { message: 'invalid token' } } : { body: { link: 'https://dl.example/f.srt' } })],
+      [/dl\.example/, { text: SRT }],
+    ])
+    const subs = new Subtitles(null, { settings: settings({ username: 'me', password: 'pw' }), fetch })
+    await subs.search({ imdbId: 'tt1', isMovie: true })
+    expect(await subs.webVtt('111')).toContain('Hello')
+    expect(logins).toBe(2)
   })
 
   it('searches Wyzie with its key on the server, and downloads from the link it gave', async () => {
@@ -132,17 +178,27 @@ describe('Subtitles', () => {
     expect(subs.providerName()).toBe('Wyzie Subs')
     const found = await subs.search({ imdbId: 'tt0903747', season: 1, episode: 2 })
     // People-made first; the links (which carry Wyzie's token) never leave the server.
-    expect(found.map((r) => r.fileId)).toEqual(['wabc-1', 'wabc2'])
-    expect(found.every((r) => !('url' in r))).toBe(true)
+    expect(found.map((r) => r.downloads)).toEqual([40, 400])
+    expect(found.every((r) => !('url' in r) && !('encoding' in r))).toBe(true)
     expect(fetch.calls[0].url).toBe('https://sub.wyzie.io/search?id=tt0903747&format=srt&source=charlie&season=1&episode=2&language=en%2Ces&key=WKEY')
-    expect(await subs.webVtt('wabc2')).toContain('Hello')
+    expect(await subs.webVtt(found[1].fileId)).toContain('Hello')
+  })
+
+  it('searches the Wyzie sources picked, and charlie alone when the key may not', async () => {
+    const fetch = fakeFetch([
+      [/source=charlie%2Cindia/, { status: 403, body: { message: 'Paid feature' } }],
+      [/source=charlie&/, { body: WYZIE }],
+    ])
+    const subs = new Subtitles(null, { settings: settings({ provider: 'wyzie', wyzieKey: 'K', wyzieSources: ['charlie', 'india'] }), fetch })
+    expect(await subs.search({ imdbId: 'tt1', isMovie: true })).toHaveLength(2)
+    expect(fetch.calls).toHaveLength(2)
   })
 
   it("finds nothing (not an error) when Wyzie has none, and says why it can't download", async () => {
     const fetch = fakeFetch([[/search/, { status: 404, body: { message: 'No subtitles found' } }], [/\/c\//, { status: 429, body: { message: 'Daily limit reached' } }]])
     const subs = new Subtitles(null, { settings: settings({ provider: 'wyzie', wyzieKey: 'K' }), fetch })
     expect(await subs.search({ imdbId: 'tt1', isMovie: true })).toEqual([])
-    await expect(subs.webVtt('wnope')).rejects.toMatchObject({ status: 404 })
+    await expect(subs.webVtt('w0123456789abcdef')).rejects.toMatchObject({ status: 404 })
   })
 
   it('refuses a file id that is not a number', async () => {

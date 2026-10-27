@@ -3,6 +3,7 @@ package com.stalkerweb.android.data.repo
 import com.stalkerweb.android.data.api.ListingResponse
 import com.stalkerweb.android.data.api.SkipResponse
 import com.stalkerweb.android.data.api.SubtitlesResponse
+import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItemsResponse
@@ -42,6 +43,14 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
             movie = if (p.isEpisode) "" else "1",
         )
     }.getOrElse { SubtitlesResponse(configured = true, error = it.message ?: "Couldn't look them up") }
+
+    /**
+     * Whether an online subtitle file can be had (the server keeps it once
+     * fetched, so the player's own request is quick): null, or why not.
+     */
+    suspend fun checkSubtitleFile(fileId: String, delay: Double): String? = runCatching {
+        apis.get().getSubtitleFile("$fileId.vtt", if (delay == 0.0) null else formatDelay(delay)).close()
+    }.exceptionOrNull()?.let { it.toApiError().message ?: "couldn't be fetched" }
 
     /** The link the player fetches an online subtitle file from (with the playback token, like the stream). */
     fun subtitleFileUrl(fileId: String, delay: Double): String {

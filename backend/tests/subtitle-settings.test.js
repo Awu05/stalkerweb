@@ -34,3 +34,24 @@ describe('subtitle settings', () => {
     expect((await get()).wyzie_key_hint).toBe('')
   })
 })
+
+describe('Wyzie sources', () => {
+  let server, base, dir
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-wyzie-sources-'))
+    const app = express()
+    app.use(express.json())
+    app.use('/api/settings', settingsModule({ dataDir: dir, downloadDir: dir }))
+    await new Promise((r) => { server = app.listen(0, r) })
+    base = `http://127.0.0.1:${server.address().port}/api/settings`
+  })
+  afterAll(() => { server.closeAllConnections(); server.close(); fs.rmSync(dir, { recursive: true, force: true }) })
+
+  it('searches charlie until others are picked, and keeps only the ones Wyzie has', async () => {
+    expect((await (await fetch(base)).json()).wyzie_sources).toEqual(['charlie'])
+    await fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wyzie_sources: ['charlie', 'juliet', 'made-up'] }) })
+    const s = await (await fetch(base)).json()
+    expect(s.wyzie_sources).toEqual(['charlie', 'juliet'])
+    expect(s.wyzie_sources_available.map((x) => x.id)).toContain('lima')
+  })
+})

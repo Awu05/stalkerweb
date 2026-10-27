@@ -168,6 +168,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     // Back closes the episodes panel first (the remote's Back would otherwise leave the player).
     BackHandler(enabled = panelOpen) { panelOpen = false }
     BackHandler(enabled = subtitlesOpen) { subtitlesOpen = false }
+    // The panel open as another episode starts: its online list, asked for again.
+    LaunchedEffect(subtitlesOpen, state.params?.key) { if (subtitlesOpen) viewModel.loadOnlineSubtitles() }
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }

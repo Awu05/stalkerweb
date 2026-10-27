@@ -207,12 +207,20 @@ class SkipSegments {
   async _matchFor(portal, videoId, clean, year, isMovie) {
     const key = `${portal}|${videoId}`;
     const kept = this._shows[key];
-    if (kept && (kept.set || kept.imdbId || Date.now() - (kept.at || 0) < NO_MATCH_RETRY_MS)) return kept;
+    // Kept: a match, one set by hand, or a name lately not found. A show turned
+    // off with no id (as "off" was kept before) is found by name — for its
+    // subtitles — and stays off.
+    const offWithoutId = kept?.off && !kept.imdbId;
+    // (lookedAt: when an off show was last looked up; never, before.)
+    const lastLook = offWithoutId ? kept.lookedAt || 0 : kept?.at || 0;
+    if (kept && (kept.imdbId || (kept.set && !kept.off) || Date.now() - lastLook < NO_MATCH_RETRY_MS)) return kept;
     if (!this._pending.has(key)) {
       this._pending.set(key, (async () => {
         const found = await this._search({ ...clean, year }, isMovie);
         const m = { imdbId: found?.id ?? null, title: found?.title ?? '', year: found?.year ?? '', set: false, off: false, at: Date.now() };
-        if (!this._shows[key]?.set) { this._shows[key] = m; this._scheduleSave(); }
+        const now = this._shows[key];
+        if (offWithoutId && now?.off && !now.imdbId) { this._shows[key] = { ...m, set: true, off: true, lookedAt: Date.now() }; this._scheduleSave(); }
+        else if (!now?.set) { this._shows[key] = m; this._scheduleSave(); }
         log.info(TAG, `"${clean.alias || clean.title}"${year ? ` (${year})` : ''} → ${m.imdbId ? `${m.title} (${m.year}) ${m.imdbId}` : 'not found on IMDb'}`);
         return this._shows[key];
       })().finally(() => this._pending.delete(key)));

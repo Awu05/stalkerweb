@@ -195,6 +195,14 @@ describe('SkipSegments.lookup', () => {
     }
   })
 
+  it('finds a show turned off before its id was kept — for its subtitles — and keeps it off', async () => {
+    const fetch = fakeFetch(routes())
+    const skip = new SkipSegments(null, { fetch })
+    skip._shows['p|7'] = { imdbId: null, set: true, off: true, at: Date.now() }   // as "off" was kept before
+    expect((await skip.titleFor({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).imdbId).toBe('tt0903747')
+    expect(await skip.lookup({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).toMatchObject({ match: { off: true }, intro: null })
+  })
+
   it('needs an episode number for an episode', async () => {
     const fetch = fakeFetch(routes())
     expect((await new SkipSegments(null, { fetch }).lookup({ videoId: '7', name: 'Breaking Bad' })).imdbId).toBe(null)

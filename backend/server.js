@@ -319,7 +319,7 @@ const subtitles = new (require('./lib/subtitles').Subtitles)(path.join(config.da
   userAgent: `StalkerWeb v${config.version || require('./package.json').version}`,
   settings: () => {
     const s = exportSettingsCache.load() || {};
-    return { provider: s.subtitle_provider || 'wyzie', wyzieKey: s.wyzie_api_key || '', apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
+    return { provider: s.subtitle_provider || 'wyzie', wyzieKey: s.wyzie_api_key || '', wyzieSources: s.wyzie_sources, apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
   },
 });
 const vodRoutes    = require('./routes/vod')(appState, config, { watchStore, skipSegments, subtitles });

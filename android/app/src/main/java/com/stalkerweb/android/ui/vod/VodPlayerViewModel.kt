@@ -197,6 +197,7 @@ class VodPlayerViewModel(
 
         // A stream that fails after it was handed to the player (404, decoder): say so, with Retry.
         override fun onPlayerError(error: PlaybackException) {
+            if (_player.value?.let(::withoutOnlineSubtitle) == true) return
             _state.value = _state.value.copy(loading = false, error = error.message ?: "Playback error")
         }
     }
@@ -432,7 +433,8 @@ class VodPlayerViewModel(
     fun loadOnlineSubtitles() {
         val params = _state.value.params ?: return
         val subs = _state.value.subtitles
-        if (subs.online != null || subs.onlineLoading) return
+        // Asked once — again after it failed.
+        if (subs.onlineLoading || (subs.online != null && subs.online.error == null)) return
         _state.value = _state.value.copy(subtitles = subs.copy(onlineLoading = true))
         viewModelScope.launch {
             val r = vod.onlineSubtitles(params)
@@ -454,8 +456,15 @@ class VodPlayerViewModel(
         prefs.subtitleDelay = next
         val subs = _state.value.subtitles
         _state.value = _state.value.copy(subtitles = subs.copy(delay = next))
-        if (subs.choice.kind == "online") apply(subs.choice)
+        // Once the presses stop: each change reloads the stream with the file moved.
+        delayJob?.cancel()
+        if (subs.choice.kind == "online") delayJob = viewModelScope.launch {
+            delay(1_200)
+            _state.value.subtitles.choice.takeIf { it.kind == "online" }?.let(::apply)
+        }
     }
+
+    private var delayJob: Job? = null
 
     // Shows a choice, the others off. An online file is added to the stream,
     // which then carries on from where it is.
@@ -472,24 +481,62 @@ class VodPlayerViewModel(
                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, choice.track)).build()
             }
             "online" -> {
-                val url = streamUrl ?: return
-                val current = p.currentMediaItem?.takeIf { it.mediaId == params.key } ?: return
-                val sub = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(vod.subtitleFileUrl(choice.fileId, _state.value.subtitles.delay)))
-                    .setMimeType(MimeTypes.TEXT_VTT)
-                    .setLanguage(choice.language.ifEmpty { null })
-                    .setLabel(ONLINE_LABEL)
-                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                    .build()
-                val item = current.buildUpon().setUri(url).setSubtitleConfigurations(listOf(sub)).build()
-                val at = p.currentPosition
-                val playing = p.playWhenReady
-                selectOnlineTrack = true
-                p.trackSelectionParameters = text.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
-                p.setMediaItem(item, at)
-                p.prepare()
-                p.playWhenReady = playing
+                // Fetched first: added to the stream, a file that won't load
+                // would stop the video itself (and come back with every Retry).
+                val delay = _state.value.subtitles.delay
+                onlineJob?.cancel()
+                onlineJob = viewModelScope.launch {
+                    val failed = vod.checkSubtitleFile(choice.fileId, delay)
+                    if (_state.value.params?.key != params.key || _state.value.subtitles.choice != choice) return@launch
+                    if (failed != null) { subtitleFailed(failed); return@launch }
+                    addOnlineSubtitle(p, params, choice, delay)
+                }
             }
         }
+    }
+
+    private var onlineJob: Job? = null
+
+    // The stream again with the online file beside it, from where it is.
+    private fun addOnlineSubtitle(p: Player, params: PlayerParams, choice: SubtitleChoice, delay: Double) {
+        val url = streamUrl ?: return
+        val current = p.currentMediaItem?.takeIf { it.mediaId == params.key } ?: return
+        val sub = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(vod.subtitleFileUrl(choice.fileId, delay)))
+            .setMimeType(MimeTypes.TEXT_VTT)
+            .setLanguage(choice.language.ifEmpty { null })
+            .setLabel(ONLINE_LABEL)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+        val item = current.buildUpon().setUri(url).setSubtitleConfigurations(listOf(sub)).build()
+        val at = p.currentPosition
+        val playing = p.playWhenReady
+        selectOnlineTrack = true
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
+        p.setMediaItem(item, at)
+        p.prepare()
+        p.playWhenReady = playing
+    }
+
+    // An online file that couldn't be had: subtitles off for this title (the
+    // pick kept for the next one), and the viewer told.
+    private fun subtitleFailed(why: String) {
+        _state.value = _state.value.copy(subtitles = _state.value.subtitles.copy(choice = SubtitleChoice()))
+        _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build() }
+        _messages.tryEmit("Subtitles couldn't be loaded: $why")
+    }
+
+    // The stream failed with an online file beside it: the same stream without
+    // the file, from where it was — not the error screen.
+    private fun withoutOnlineSubtitle(p: Player): Boolean {
+        val current = p.currentMediaItem ?: return false
+        if (current.mediaId != _state.value.params?.key || current.localConfiguration?.subtitleConfigurations.isNullOrEmpty()) return false
+        val at = p.currentPosition
+        p.setMediaItem(current.buildUpon().setSubtitleConfigurations(emptyList()).build(), at)
+        p.prepare()
+        p.playWhenReady = true
+        subtitleFailed("the file didn't load")
+        return true
     }
 
     fun startOver() {

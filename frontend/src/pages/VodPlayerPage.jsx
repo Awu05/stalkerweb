@@ -385,7 +385,7 @@ export default function VodPlayerPage() {
     if (isNative) { playNative(url); return }
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false, subtitleDisplay: false })   // subtitles shown only when picked (lib/useVodSubtitles.js)
       hlsRef.current = hls
       trackHlsStats(hls, Hls.Events)
       let lastRecover = 0   // one recoverMediaError a minute (a film's hiccups are hours apart; a video that can't be decoded fails at once)

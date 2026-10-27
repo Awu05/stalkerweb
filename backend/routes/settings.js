@@ -7,6 +7,7 @@
 const express = require('express');
 const CacheManager = require('../cache/CacheManager');
 const { parseIdleMinutes, MAX_IDLE_MINUTES } = require('../lib/idleTimeout');
+const { wyzieSourcesOf, WYZIE_SOURCES } = require('../lib/subtitles');
 
 const MAX_LIVE_BUFFER_S = 120;
 
@@ -51,6 +52,9 @@ module.exports = function settingsModule(config, appState = null, access = null)
       // sent back — only whether one is saved, and a key's last characters.
       subtitle_provider:       saved.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie',
       wyzie_key_hint:          keyHint(saved.wyzie_api_key),
+      // Wyzie's sources to search (charlie unless others are picked), and all it has.
+      wyzie_sources:           wyzieSourcesOf(saved.wyzie_sources),
+      wyzie_sources_available: WYZIE_SOURCES,
       opensubtitles_key_hint:  keyHint(saved.opensubtitles_api_key),
       opensubtitles_username:  saved.opensubtitles_username ?? '',
       opensubtitles_password_set: !!saved.opensubtitles_password,
@@ -102,6 +106,7 @@ module.exports = function settingsModule(config, appState = null, access = null)
       else if (typeof b[k] === 'string' && b[k].trim() !== '') existing[k] = k.endsWith('password') ? b[k] : b[k].trim();
     }
     if (b.opensubtitles_username !== undefined) existing.opensubtitles_username = String(b.opensubtitles_username).trim();
+    if (b.wyzie_sources !== undefined) existing.wyzie_sources = wyzieSourcesOf(b.wyzie_sources);
     if (b.subtitle_languages !== undefined) {
       const langs = String(b.subtitle_languages).toLowerCase().split(/[\s,]+/).filter(Boolean);
       if (langs.some((l) => !/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(l))) {

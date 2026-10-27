@@ -14,6 +14,7 @@
 // what both the browser and the apps' player take — with the viewer's delay
 // applied (`offset`, seconds: + later, − earlier).
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const log = require('../logger');
@@ -40,15 +41,19 @@ function stampOf(secs) {
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)}.${p(ms % 1000, 3)}`;
 }
 
+const BOM = String.fromCharCode(0xfeff);
+
 /**
  * An SRT (or WebVTT) file as WebVTT, every cue moved by `offset` seconds.
  * Cues moved before the start are dropped; styling tags SRT files carry from
  * ASS ("{\an8}") are taken out.
  */
 function toWebVtt(text, offset = 0) {
-  const src = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  let src = String(text || '').replace(/\r\n?/g, '\n');
+  if (src.startsWith(BOM)) src = src.slice(1);
   const out = ['WEBVTT', ''];
-  for (const block of src.split(/\n{2,}/)) {
+  // Cues are parted by a blank line — which may hold spaces or tabs.
+  for (const block of src.split(/\n(?:[ \t]*\n)+/)) {
     const lines = block.split('\n');
     const at = lines.findIndex((l) => l.includes('-->'));
     if (at < 0) continue;
@@ -66,37 +71,91 @@ function toWebVtt(text, offset = 0) {
   return out.join('\n');
 }
 
-// A downloaded file as text: UTF-8, or — older files — Windows-1252.
-function decodeSubtitle(buf) {
-  const bytes = new Uint8Array(buf);
-  try {
-    return new globalThis.TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    return new globalThis.TextDecoder('windows-1252').decode(bytes);
-  }
+// The older, one-byte encodings files in these languages come in.
+const LEGACY_ENCODING = {
+  ru: 'windows-1251', uk: 'windows-1251', bg: 'windows-1251', sr: 'windows-1251', mk: 'windows-1251', be: 'windows-1251',
+  ar: 'windows-1256', fa: 'windows-1256', el: 'windows-1253', he: 'windows-1255', tr: 'windows-1254',
+  pl: 'windows-1250', cs: 'windows-1250', sk: 'windows-1250', hu: 'windows-1250', ro: 'windows-1250', hr: 'windows-1250', sl: 'windows-1250', bs: 'windows-1250',
+  th: 'windows-874', vi: 'windows-1258', lt: 'windows-1257', lv: 'windows-1257', et: 'windows-1257',
+};
+
+// "CP1251", "Windows-1251", "UTF-8" → a TextDecoder label, or null.
+function encodingLabel(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return null;
+  const label = /^cp-?(\d{3,4})$/.test(n) ? `windows-${n.replace(/\D/g, '')}` : n;
+  try { new globalThis.TextDecoder(label); return label; } catch { return null; }
 }
 
-// The status a failed lookup is answered with: the daily limit as itself, the rest a bad gateway.
+/**
+ * A downloaded file as text: UTF-16 by its byte-order mark, else UTF-8, else
+ * the encoding the site says it's in, else the usual older one for its
+ * language (Windows-1251 for Russian…), else Windows-1252.
+ */
+function decodeSubtitle(buf, { language = '', encoding = '' } = {}) {
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new globalThis.TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new globalThis.TextDecoder('utf-16be').decode(bytes.subarray(2));
+  try {
+    return new globalThis.TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch { /* an older encoding */ }
+  const said = encodingLabel(encoding);
+  const lang = String(language || '').toLowerCase().split(/[-_]/)[0];
+  const label = said && said !== 'utf-8' ? said : LEGACY_ENCODING[lang] || 'windows-1252';
+  return new globalThis.TextDecoder(label).decode(bytes);
+}
+
+// The status a failed lookup is answered with: the daily limit as itself, the
+// rest a bad gateway. `upstream` is the site's own status.
 const failure = (site, why, status) =>
-  Object.assign(new Error(`${site}: ${why}`), { status: status === 406 || status === 429 ? 429 : 502 });
+  Object.assign(new Error(`${site}: ${why}`), { status: status === 406 || status === 429 ? 429 : 502, upstream: status });
+
+const shortHash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
 // ── Wyzie Subs ───────────────────────────────────────────────────────────────
-// sub.wyzie.io: several subtitle sites in one search, by IMDb id, with a free
-// key (1,000 requests a day — a search is one, each file one more). Its file
-// links carry a token, so they're kept from the search and looked up by our id.
+// sub.wyzie.io: subtitle sites behind codenames, searched by IMDb id, with a
+// free key (1,000 requests a day — a search is one, each file one more). Its
+// file links carry a token, so they're kept on the server with the search, and
+// the players get our own id for each.
 
 const WYZIE = 'https://sub.wyzie.io';
-const WYZIE_SOURCES = 'charlie';   // the source a free key may search
 
-/** Wyzie's search answer as the players list it ("w" ids, the link kept apart). */
+/** Wyzie's sources (docs.wyzie.io/subs/sources): which a free key may search, and what each is for. */
+const WYZIE_SOURCES = [
+  { id: 'charlie', free: true, note: '' },
+  { id: 'lima', free: true, note: '' },
+  { id: 'india', free: false, note: '' },
+  { id: 'foxtrot', free: false, note: 'anime' },
+  { id: 'juliet', free: false, note: 'anime' },
+  { id: 'mike', free: false, note: 'anime' },
+];
+const DEFAULT_WYZIE_SOURCES = ['charlie'];
+
+/** The sources chosen in Settings, as Wyzie takes them: known ones only, charlie when none. */
+function wyzieSourcesOf(list) {
+  const known = new Set(WYZIE_SOURCES.map((s) => s.id));
+  const picked = (Array.isArray(list) ? list : String(list || '').split(','))
+    .map((s) => String(s).trim().toLowerCase()).filter((s) => known.has(s));
+  return picked.length ? [...new Set(picked)] : DEFAULT_WYZIE_SOURCES;
+}
+
+/**
+ * Wyzie's search answer as the players list it: each with an id of our own
+ * ("w" and a hash of its source, id and link — two results never share one),
+ * the link and encoding kept apart.
+ */
 function wyzieResultsOf(body) {
+  const seen = new Set();
   const list = [];
   for (const r of Array.isArray(body) ? body : []) {
-    const id = String(r?.id ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60);
-    if (!id || !/^https:\/\//.test(r?.url || '')) continue;
+    if (!/^https:\/\//.test(r?.url || '')) continue;
+    const fileId = `w${shortHash(`${r.source ?? ''}|${r.id ?? ''}|${String(r.url).split('?')[0]}`)}`;
+    if (seen.has(fileId)) continue;
+    seen.add(fileId);
     list.push({
-      fileId: `w${id}`,
+      fileId,
       url: r.url,
+      encoding: String(r.encoding || ''),
       language: String(r.language || ''),
       label: String(r.release || r.fileName || '').trim(),
       downloads: Number(r.downloadCount) || 0,
@@ -115,11 +174,13 @@ const imdbNumber = (id) => String(id || '').replace(/^tt/, '').replace(/^0+/, ''
 
 /** OpenSubtitles' search answer as the players list it. */
 function resultsOf(body) {
+  const seen = new Set();
   const list = [];
   for (const d of Array.isArray(body?.data) ? body.data : []) {
     const a = d?.attributes ?? {};
     const file = Array.isArray(a.files) ? a.files[0] : null;
-    if (!file?.file_id) continue;
+    if (!file?.file_id || seen.has(String(file.file_id))) continue;
+    seen.add(String(file.file_id));
     list.push({
       fileId: String(file.file_id),
       language: String(a.language || ''),
@@ -137,13 +198,14 @@ function resultsOf(body) {
 const inOrder = (list) => list.slice().sort((x, y) =>
   x.language.localeCompare(y.language) || Number(x.machine) - Number(y.machine) || y.downloads - x.downloads);
 
-// A subtitle file's id: OpenSubtitles' number, or "w" and Wyzie's.
-const FILE_ID = /^(?:\d{1,12}|w[A-Za-z0-9_-]{1,60})$/;
+// A subtitle file's id: OpenSubtitles' number, or "w" and our hash for Wyzie's.
+const FILE_ID = /^(?:\d{1,12}|w[0-9a-f]{16})$/;
+const MAX_KNOWN = 20000;
 
 class Subtitles {
   /**
    * @param {string|null} dir  where downloaded files are kept; null: in memory.
-   * @param {{ settings: () => { provider, wyzieKey, apiKey, username, password, languages }, userAgent?: string, fetch?: Function }} opts
+   * @param {{ settings: () => { provider, wyzieKey, wyzieSources, apiKey, username, password, languages }, userAgent?: string, fetch?: Function }} opts
    *   provider 'wyzie' (the default) or 'opensubtitles'; apiKey, username and password are OpenSubtitles'.
    */
   constructor(dir, { settings, userAgent = 'StalkerWeb', fetch: fetchFn = globalThis.fetch }) {
@@ -152,7 +214,10 @@ class Subtitles {
     this._ua = userAgent;
     this._fetch = fetchFn;
     this._searches = new Map();   // key → { results, at }
-    this._links = new Map();      // a Wyzie file id → its link, from the search
+    // The files the server's own searches found — the only ones it fetches
+    // (a playback-token holder can't spend the account's downloads on others).
+    // A Wyzie file's entry is its link and encoding.
+    this._known = new Map();      // fileId → { url?, encoding?, language }
     this._memory = new Map();     // fileId → text (no dir)
     this._login = null;           // { key, token, base, at }
     this._pending = new Map();    // fileId → a download under way
@@ -176,6 +241,15 @@ class Subtitles {
 
   _languages() {
     return String(this._settings().languages || '').toLowerCase().split(/[\s,]+/).filter(Boolean).sort().join(',');
+  }
+
+  _remember(results) {
+    for (const r of results) {
+      // Newest last, so the oldest go first.
+      this._known.delete(r.fileId);
+      this._known.set(r.fileId, { url: r.url, encoding: r.encoding, language: r.language });
+    }
+    while (this._known.size > MAX_KNOWN) this._known.delete(this._known.keys().next().value);
   }
 
   async _get(url, init = {}) {
@@ -212,20 +286,26 @@ class Subtitles {
   }
 
   async _searchWyzie({ imdbId, season, episode, isMovie }) {
-    const p = new URLSearchParams({ id: imdbId, format: 'srt', source: WYZIE_SOURCES });
-    if (!isMovie) { p.set('season', String(season)); p.set('episode', String(episode)); }
-    const languages = this._languages();
-    if (languages) p.set('language', languages);
-    p.set('key', this._settings().wyzieKey);
-    const r = await this._get(`${WYZIE}/search?${p}`, { headers: { Accept: 'application/json', 'User-Agent': this._ua } });
-    const json = await r.json().catch(() => null);
+    const ask = async (sources) => {
+      const p = new URLSearchParams({ id: imdbId, format: 'srt', source: sources.join(',') });
+      if (!isMovie) { p.set('season', String(season)); p.set('episode', String(episode)); }
+      const languages = this._languages();
+      if (languages) p.set('language', languages);
+      p.set('key', this._settings().wyzieKey);
+      const r = await this._get(`${WYZIE}/search?${p}`, { headers: { Accept: 'application/json', 'User-Agent': this._ua } });
+      return { r, json: await r.json().catch(() => null) };
+    };
+    const sources = wyzieSourcesOf(this._settings().wyzieSources);
+    let { r, json } = await ask(sources);
+    // A free key asking a Pro source: charlie alone, rather than nothing.
+    if (r.status === 403 && sources.join() !== DEFAULT_WYZIE_SOURCES.join()) {
+      log.warn(TAG, `Wyzie: ${json?.message || 'refused'} for ${sources.join(', ')} — searching ${DEFAULT_WYZIE_SOURCES.join(', ')} only`);
+      ({ r, json } = await ask(DEFAULT_WYZIE_SOURCES));
+    }
     // No subtitles for it is a 404 with a message, not a failure.
     if (r.status === 404) return [];
     if (!r.ok) throw failure('Wyzie Subs', json?.message || `answered ${r.status}`, r.status);
-    const results = wyzieResultsOf(json);
-    for (const x of results) this._links.set(x.fileId, x.url);
-    while (this._links.size > 5000) this._links.delete(this._links.keys().next().value);
-    return results.map(({ url: _url, ...rest }) => rest);
+    return wyzieResultsOf(json);
   }
 
   async _searchOpenSubtitles({ imdbId, season, episode, isMovie }) {
@@ -245,12 +325,17 @@ class Subtitles {
   async search({ imdbId, season = null, episode = null, isMovie = false }) {
     if (!this.configured()) return [];
     const provider = this._provider();
-    const key = JSON.stringify([provider, imdbId, isMovie ? null : season, isMovie ? null : episode, this._languages()]);
+    const sources = provider === 'wyzie' ? wyzieSourcesOf(this._settings().wyzieSources).join(',') : '';
+    const key = JSON.stringify([provider, sources, imdbId, isMovie ? null : season, isMovie ? null : episode, this._languages()]);
     const hit = this._searches.get(key);
-    if (hit && Date.now() - hit.at < SEARCH_TTL_MS) return hit.results;
+    // Kept, unless a file of it has been forgotten since (it couldn't be fetched).
+    if (hit && Date.now() - hit.at < SEARCH_TTL_MS && hit.ids.every((id) => this._known.has(id) || this._kept(id) !== null)) return hit.results;
     const q = { imdbId, season, episode, isMovie };
-    const results = inOrder(provider === 'wyzie' ? await this._searchWyzie(q) : await this._searchOpenSubtitles(q));
-    this._searches.set(key, { results, at: Date.now() });
+    const found = inOrder(provider === 'wyzie' ? await this._searchWyzie(q) : await this._searchOpenSubtitles(q));
+    this._remember(found);
+    const results = found.map(({ url: _url, encoding: _enc, ...rest }) => rest);
+    this._searches.delete(key);
+    this._searches.set(key, { results, ids: results.map((r) => r.fileId), at: Date.now() });
     if (this._searches.size > 500) this._searches.delete(this._searches.keys().next().value);
     return results;
   }
@@ -277,36 +362,54 @@ class Subtitles {
     }
   }
 
-  async _downloadWyzie(id) {
-    const link = this._links.get(id);
-    if (!link) throw Object.assign(new Error('This subtitle has expired — open the subtitles menu again.'), { status: 404 });
-    const f = await this._get(link, { headers: { 'User-Agent': this._ua } });
+  async _downloadWyzie(id, known) {
+    const f = await this._get(known.url, { headers: { 'User-Agent': this._ua } });
     if (!f.ok) {
       const json = await f.json().catch(() => null);
       throw failure('Wyzie Subs', json?.message || `the file answered ${f.status}`, f.status);
     }
-    return decodeSubtitle(await f.arrayBuffer());
+    return decodeSubtitle(await f.arrayBuffer(), known);
   }
 
-  async _downloadOpenSubtitles(id) {
-    const login = await this._token().catch((e) => { log.warn(TAG, `login: ${e.message}`); return null; });
-    const r = await this._openSubtitles('POST', `${login?.base ?? OPENSUBTITLES}/download`, { body: { file_id: Number(id) }, token: login?.token });
-    if (!r?.link) throw failure('OpenSubtitles', r?.message || 'no download link', 502);
+  async _downloadOpenSubtitles(id, known) {
+    const once = async (login) => {
+      const r = await this._openSubtitles('POST', `${login?.base ?? OPENSUBTITLES}/download`, { body: { file_id: Number(id) }, token: login?.token });
+      if (!r?.link) throw failure('OpenSubtitles', r?.message || 'no download link', 502);
+      return r;
+    };
+    let login = await this._token().catch((e) => { log.warn(TAG, `login: ${e.message}`); return null; });
+    let r;
+    try {
+      r = await once(login);
+    } catch (e) {
+      // The login no longer counts (signed out elsewhere): sign in again, once.
+      if (!login || e.upstream !== 401) throw e;
+      this._login = null;
+      login = await this._token().catch(() => null);
+      r = await once(login);
+    }
     const f = await this._get(r.link);
     if (!f.ok) throw failure('OpenSubtitles', `the file answered ${f.status}`, f.status);
     if (r.remaining != null) log.info(TAG, `OpenSubtitles: ${r.remaining} downloads left today`);
-    return decodeSubtitle(await f.arrayBuffer());
+    return decodeSubtitle(await f.arrayBuffer(), known);
   }
 
-  /** A subtitle file as WebVTT, moved by `offset` seconds: kept, or downloaded now. */
+  /**
+   * A subtitle file as WebVTT, moved by `offset` seconds: kept, or — one a
+   * search here found — downloaded now.
+   */
   async webVtt(fileId, offset = 0) {
     const id = String(fileId);
     if (!FILE_ID.test(id)) throw Object.assign(new Error('No such subtitle file.'), { status: 404 });
     let text = this._kept(id);
     if (text === null) {
+      const known = this._known.get(id);
+      if (!known || (id.startsWith('w') && !known.url)) {
+        throw Object.assign(new Error('This subtitle is no longer listed — open the subtitles menu again.'), { status: 404 });
+      }
       if (!this._pending.has(id)) {
         this._pending.set(id, (async () => {
-          const got = id.startsWith('w') ? await this._downloadWyzie(id) : await this._downloadOpenSubtitles(id);
+          const got = id.startsWith('w') ? await this._downloadWyzie(id, known) : await this._downloadOpenSubtitles(id, known);
           this._keep(id, got);
           log.info(TAG, `downloaded ${id}`);
           return got;
@@ -318,4 +421,4 @@ class Subtitles {
   }
 }
 
-module.exports = { Subtitles, toWebVtt, resultsOf, wyzieResultsOf, decodeSubtitle };
+module.exports = { Subtitles, toWebVtt, resultsOf, wyzieResultsOf, decodeSubtitle, wyzieSourcesOf, WYZIE_SOURCES, DEFAULT_WYZIE_SOURCES };

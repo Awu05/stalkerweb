@@ -23,7 +23,7 @@ export default function SubtitleSettings() {
 
   const load = (s) => {
     setSaved(s)
-    setForm({ provider: s.subtitle_provider || 'wyzie', wyzieKey: '', osKey: '', username: s.opensubtitles_username || '', password: '', languages: s.subtitle_languages || 'en' })
+    setForm({ provider: s.subtitle_provider || 'wyzie', wyzieKey: '', wyzieSources: s.wyzie_sources || ['charlie'], osKey: '', username: s.opensubtitles_username || '', password: '', languages: s.subtitle_languages || 'en' })
   }
   useEffect(() => { getSettings().then(load).catch(() => load({})) }, [])
 
@@ -40,6 +40,7 @@ export default function SubtitleSettings() {
         subtitle_provider: form.provider,
         // Blank keeps the saved key or password.
         wyzie_api_key: form.wyzieKey || undefined,
+        wyzie_sources: form.wyzieSources,
         opensubtitles_api_key: form.osKey || undefined,
         opensubtitles_username: form.username,
         opensubtitles_password: form.username.trim() ? (form.password || undefined) : null,
@@ -94,6 +95,26 @@ export default function SubtitleSettings() {
           <PasswordInput id="wyzie-key" value={form.wyzieKey} onChange={set('wyzieKey')} placeholder={kept(saved.wyzie_key_hint)} autoComplete="off" />
           <p className="text-xs text-[var(--color-muted)]">Free from store.wyzie.io/redeem. It stays on this server: the website and the apps never see it.</p>
           {saved.wyzie_key_hint && forgetLink('wyzie_api_key')}
+          <Label className="mt-2">Search these sources</Label>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {(saved.wyzie_sources_available || [{ id: 'charlie', free: true, note: '' }]).map((src) => {
+              const on = form.wyzieSources.includes(src.id)
+              const toggle = () => setForm((f) => {
+                const next = on ? f.wyzieSources.filter((x) => x !== src.id) : [...f.wyzieSources, src.id]
+                return { ...f, wyzieSources: next.length ? next : ['charlie'] }
+              })
+              return (
+                <label key={src.id} className="flex items-center gap-1.5 text-sm text-[var(--color-text)] cursor-pointer">
+                  <input type="checkbox" checked={on} onChange={toggle} className="accent-[var(--color-primary)]" />
+                  {src.id}
+                  <span className="text-[11px] text-[var(--color-muted)]">{[src.free ? 'free' : 'Pro key', src.note].filter(Boolean).join(' · ')}</span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="text-xs text-[var(--color-muted)]">
+            Wyzie names its sources by code. charlie is the one a free key gets; a free key asking for a Pro one searches charlie alone.
+          </p>
         </div>
       ) : (
         <>

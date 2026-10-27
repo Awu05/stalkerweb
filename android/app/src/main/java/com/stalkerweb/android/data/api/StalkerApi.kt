@@ -175,6 +175,10 @@ interface StalkerApi {
         @Query("movie") movie: String = "",
     ): SubtitlesResponse
 
+    // An online subtitle file, as the player will fetch it (fetched first, to see it loads).
+    @GET("api/vod/subtitles/file/{file}")
+    suspend fun getSubtitleFile(@Path("file") file: String, @Query("offset") offset: String? = null): okhttp3.ResponseBody
+
     @PUT("api/viewers/me/filters")
     suspend fun saveAutoSkip(@Body body: AutoSkipRequest): ViewerDetails
 
