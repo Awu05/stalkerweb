@@ -8,7 +8,7 @@ import { NO_FILTERS, filtersActive } from '@/lib/vodFilters'
 const selectCls = 'rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-primary-light)] disabled:opacity-40'
 const toggleCls = (on) => cn(
   'px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium border transition-colors disabled:opacity-40',
-  on ? 'bg-[var(--color-primary)] text-[var(--color-bg)] border-transparent' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] border-[var(--color-border)] hover:text-[var(--color-text)]'
+  on ? 'fill-primary border-transparent' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] border-[var(--color-border)] hover:text-[var(--color-text)]'
 )
 
 export default function VodFilters({ filters, onChange, options, disabled, note }) {

@@ -42,7 +42,7 @@ export default function GuidePage() {
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1 rounded-[calc(var(--radius-sm)-2px)] text-xs font-medium transition-colors',
                 view === id
-                  ? 'bg-[var(--color-primary)] text-[var(--color-bg)]'
+                  ? 'fill-primary'
                   : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
               )}
             >

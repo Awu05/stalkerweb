@@ -1462,7 +1462,7 @@ export default function SetupPage() {
                       {matches.map(ch => (
                         <button key={ch.name} type="button"
                           onClick={() => { setNewLogoName(ch.name); setLogoSearchOpen(false) }}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--color-hover)] flex items-center gap-2"
+                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--color-surface-2)] flex items-center gap-2"
                         >
                           <span className="text-[var(--color-muted)] shrink-0 w-10 text-right">Ch {ch.number}</span>
                           <span className="truncate">{ch.name}</span>

@@ -424,12 +424,12 @@ export default function ChannelsPage() {
             <button
               onClick={() => selectGroup('')}
               className={cn('px-4 py-1.5 rounded-full text-sm font-semibold transition-all',
-                !activeGroup ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+                !activeGroup ? 'btn-gradient' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
             >All</button>
             {groups.map(g => (
               <button key={g.id} onClick={() => selectGroup(g.id)}
                 className={cn('px-4 py-1.5 rounded-full text-sm font-semibold transition-all whitespace-nowrap',
-                  activeGroup === String(g.id) ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+                  activeGroup === String(g.id) ? 'btn-gradient' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
               >{g.name}</button>
             ))}
           </div>

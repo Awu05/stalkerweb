@@ -31,7 +31,7 @@ export default function SettingsTabs({ tab, onChange }) {
             className={cn(
               'shrink-0 px-3.5 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors whitespace-nowrap',
               tab === t.id
-                ? 'bg-[var(--color-primary)] text-[var(--color-bg)]'
+                ? 'fill-primary'
                 : 'text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
             )}
           >

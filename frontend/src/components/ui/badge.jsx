@@ -7,7 +7,7 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        live:    'badge-live text-white',
+        live:    'badge-live',
         success: 'bg-[var(--color-success)]/20 text-[var(--color-success)]',
         muted:   'bg-[var(--color-surface-2)] text-[var(--color-muted)]',
         primary: 'bg-[var(--color-primary)]/20 text-[var(--color-primary-light)]',

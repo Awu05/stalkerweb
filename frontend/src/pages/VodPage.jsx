@@ -269,7 +269,7 @@ function TypeToggle({ vodType, onChange, className }) {
           className={cn(
             'flex-1 text-xs font-medium py-1.5 rounded-[var(--radius-sm)] transition-all',
             vodType === t
-              ? 'btn-gradient text-white'
+              ? 'btn-gradient'
               : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
           )}
         >
@@ -463,7 +463,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
           <div className="px-4 py-2.5 border-b border-[var(--color-border)]">
             <button
               onClick={() => onPlayEpisode(item, next.season, next.episode)}
-              className="w-full flex items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] px-3 py-2 text-sm font-medium hover:bg-[var(--color-primary-hover)] transition-colors"
+              className="w-full flex items-center justify-center gap-2 rounded-[var(--radius-sm)] fill-primary px-3 py-2 text-sm font-medium hover:bg-[var(--color-primary-hover)] transition-colors"
             >
               <Play size={14} fill="currentColor" />
               <span className="truncate">{next.action === 'resume' ? 'Resume' : 'Play'} {continueLabel}</span>
@@ -1032,7 +1032,7 @@ export default function VodPage() {
                 onClick={() => changeSort(id)}
                 className={cn(
                   'px-2.5 py-1 rounded-[calc(var(--radius-sm)-2px)] text-xs font-medium transition-colors',
-                  sort === id ? 'bg-[var(--color-primary)] text-[var(--color-bg)]' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+                  sort === id ? 'fill-primary' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
                 )}
               >
                 {label}

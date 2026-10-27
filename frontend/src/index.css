@@ -1,30 +1,9 @@
 @import "tailwindcss";
+@import "./theme.generated.css";
 
 @theme {
-  /* ── Base / surfaces (Midnight Cinema — near-black, cool-neutral) ── */
-  --color-bg:        #141417;
-  --color-surface:   #1c1c20;
-  --color-surface-2: #232328;
-  --color-surface-3: #28282e;
-  --color-border:    #28282e;
-
-  --color-text:      #e8e8ec;
-  --color-muted:     #9696a0;
-
-  /* ── Accent (monochrome white — content, not chrome, is the star) ── */
-  --color-primary:        #e8e8ec;
-  --color-primary-hover:  #c8c8ce;
-  --color-primary-light:  #ffffff;
-  --color-primary-glow:   rgba(232, 232, 236, 0.35);
-  --color-accent:         #e8e8ec;
-  --color-accent-light:   #ffffff;
-
-  --color-live:    #ef4444;
-  --color-success: #5bc39d;
-
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
+  /* Colours and radii: theme/tokens.json, in theme.generated.css (imported
+     above). Effects built from them stay here. */
 
   /* ── Glass ── */
   --glass-bg:        rgba(232, 232, 236, 0.04);
@@ -123,14 +102,22 @@ body::before {
   transform: translateY(-3px);
 }
 
+/* ── Fills, each with the text colour that reads on it (theme/tokens.json
+   pairs). Use these — never a fill with a text colour picked by hand. ── */
+@utility fill-primary { background-color: var(--color-primary); color: var(--color-on-primary); }
+@utility fill-live    { background-color: var(--color-live-fill); color: var(--color-on-live); }
+@utility fill-success { background-color: var(--color-success); color: var(--color-on-success); }
+@utility fill-warning { background-color: var(--color-warning); color: var(--color-on-warning); }
+
 /* ── Solid accent surfaces (monochrome — no gradient) ── */
 .btn-gradient {
   background: var(--color-primary);
-  color: var(--color-bg);
+  color: var(--color-on-primary);
   box-shadow: 0 6px 20px -6px var(--color-primary-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 .badge-live {
-  background: var(--color-live);
+  background: var(--color-live-fill);
+  color: var(--color-on-live);
   box-shadow: 0 0 16px -2px rgba(239, 68, 68, 0.55);
 }
 

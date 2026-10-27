@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { viewerInitialsColor } from '@/lib/theme.generated'
 
 // "Who's watching?" — full-screen, on a device that hasn't picked a viewer
 // yet (or whose viewer was deleted), and from the sidebar to switch. Tiles
@@ -7,8 +8,12 @@ import { Plus, X } from 'lucide-react'
 export function ViewerAvatar({ viewer, size = 32 }) {
   return (
     <span
-      className="inline-flex items-center justify-center rounded-full font-semibold text-white shrink-0"
-      style={{ background: viewer?.color || 'var(--color-surface-3)', width: size, height: size, fontSize: size * 0.42 }}
+      className="inline-flex items-center justify-center rounded-full font-semibold shrink-0"
+      style={{
+        background: viewer?.color || 'var(--color-surface-3)',
+        color: viewer?.color ? viewerInitialsColor(viewer.color) : 'var(--color-text)',   // readable on each colour (theme/tokens.json)
+        width: size, height: size, fontSize: size * 0.42,
+      }}
       aria-hidden="true"
     >
       {(viewer?.name || '?').slice(0, 1).toUpperCase()}
@@ -108,7 +113,7 @@ export default function ViewerPicker({ viewers, onPick, onCreate, onClose }) {
           />
           {error && <p className="text-xs text-[var(--color-live)]">{error}</p>}
           <div className="flex gap-2">
-            <button type="submit" disabled={!name.trim() || saving} className="px-4 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] text-sm font-medium disabled:opacity-50">Add</button>
+            <button type="submit" disabled={!name.trim() || saving} className="px-4 py-1.5 rounded-[var(--radius-sm)] fill-primary text-sm font-medium disabled:opacity-50">Add</button>
             <button type="button" onClick={() => { setAdding(false); setError(null) }} className="px-4 py-1.5 rounded-[var(--radius-sm)] text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">Cancel</button>
           </div>
         </form>

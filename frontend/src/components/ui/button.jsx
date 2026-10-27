@@ -8,10 +8,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:  'btn-gradient text-white hover:brightness-110',
+        default:  'btn-gradient hover:brightness-110',
         ghost:    'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]',
         outline:  'border border-[var(--color-border)] bg-transparent text-[var(--color-text)] hover:bg-[var(--color-surface-2)]',
-        danger:   'bg-[var(--color-live)] text-white hover:bg-red-600',
+        danger:   'fill-live hover:brightness-110',
         icon:     'text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]',
       },
       size: {

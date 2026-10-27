@@ -89,13 +89,12 @@ import com.stalkerweb.android.ui.components.PasswordEye
 import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.passwordTransformation
 import com.stalkerweb.android.ui.components.ViewerAvatar
-import com.stalkerweb.android.ui.components.parseHexColor
+import com.stalkerweb.android.ui.theme.VIEWER_COLORS
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.update.UpdateViewModel
 import com.stalkerweb.android.ui.utils.rememberIsTV
 
-private val VIEWER_COLORS = listOf("#5b8def", "#e5484d", "#30a46c", "#f5a524", "#8e4ec6", "#12a594", "#e93d82", "#978365")
 
 /** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos — and App (version, updates). */
 @Composable
@@ -166,7 +165,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                         Text(v.name + if (v.id == me?.id) "  · you" else "", color = SwColors.Text, modifier = Modifier.weight(1f))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.widthIn(max = 240.dp)) {
                             items(VIEWER_COLORS) { c ->
-                                Box(Modifier.size(22.dp).tvFocus(CircleShape).background(Color(parseHexColor(c)!!), CircleShape).clickable { viewModel.recolor(v, c) })
+                                Box(Modifier.size(22.dp).tvFocus(CircleShape).background(c.color, CircleShape).clickable { viewModel.recolor(v, c.hex) })
                             }
                         }
                         IconButton(onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
@@ -285,7 +284,7 @@ private fun ActivityTab(viewModel: SettingsViewModel, state: SettingsState) {
                 return@Card
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(8.dp).background(if (a.portal.connected) Color(0xFF30A46C) else SwColors.Muted, CircleShape))
+                Box(Modifier.size(8.dp).background(if (a.portal.connected) SwColors.Success else SwColors.Muted, CircleShape))
                 Text(portalSummary(a.portal), color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
             }
             if (a.streams.isEmpty()) {

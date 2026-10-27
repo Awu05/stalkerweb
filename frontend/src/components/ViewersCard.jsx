@@ -5,8 +5,7 @@ import { useApp } from '@/lib/appContext'
 import { createViewer, updateViewer, deleteViewer } from '../stalkerApi'
 import { ViewerAvatar } from './ViewerPicker'
 
-// Same list as backend viewers/ViewersManager.js COLORS.
-const COLORS = ['#5b8def', '#e5484d', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e93d82', '#978365']
+import { VIEWER_COLORS as COLORS } from '@/lib/theme.generated'
 
 // Settings → Viewers: the people who watch here, each with their own
 // favorites and channel filters. Everything else on this page is shared.
@@ -66,7 +65,7 @@ export default function ViewersCard() {
         ))}
       </div>
       <div className="flex gap-2">
-        <button onClick={save} disabled={!editing.name.trim()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] text-xs font-medium disabled:opacity-50"><Check size={13} /> Save</button>
+        <button onClick={save} disabled={!editing.name.trim()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] fill-primary text-xs font-medium disabled:opacity-50"><Check size={13} /> Save</button>
         <button onClick={() => { setEditing(null); setError(null) }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={13} /> Cancel</button>
       </div>
     </div>

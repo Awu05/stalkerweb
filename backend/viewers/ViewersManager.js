@@ -14,7 +14,8 @@ const FavoritesManager = require('../favorites/FavoritesManager');
 const log  = require('../logger');
 const TAG  = 'ViewersManager';
 
-const COLORS   = ['#5b8def', '#e5484d', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e93d82', '#978365'];
+// The avatar colours (theme/tokens.json, written out by theme/build.mjs).
+const COLORS   = require('./viewerColors.json').colors;
 const MAX_NAME = 30;
 const MAX_FORMER_NAMES = 5;   // old names kept for Xtream usernames (findByName)
 
