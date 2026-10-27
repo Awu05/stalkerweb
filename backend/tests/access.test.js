@@ -245,6 +245,14 @@ describe('log monitor', () => {
   })
 })
 
+describe('subtitle files', () => {
+  it('play with the playback token, like the stream; the list of them needs the key', () => {
+    expect(levelFor({ path: '/api/vod/subtitles/file/222.vtt', method: 'GET' })).toBe('share')
+    expect(levelFor({ path: '/api/vod/subtitles/file/222.vtt', method: 'DELETE' })).toBe('full')
+    expect(levelFor({ path: '/api/vod/subtitles', method: 'GET' })).toBe('full')
+  })
+})
+
 describe('no access key', () => {
   it('changes nothing', async () => {
     const access = createAccess({ key: '', logger: quiet })

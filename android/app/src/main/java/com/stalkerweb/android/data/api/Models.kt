@@ -370,3 +370,22 @@ data class SkipResponse(
     /** The viewer's choice: intros and recaps skipped without asking. */
     val autoSkip: Boolean = false,
 )
+
+// OpenSubtitles' subtitles for a movie or episode (GET api/vod/subtitles).
+@JsonClass(generateAdapter = false)
+data class OnlineSubtitle(
+    val fileId: String,
+    val language: String = "",
+    val label: String = "",
+    val downloads: Int = 0,
+    val hearingImpaired: Boolean = false,
+    val machine: Boolean = false,
+)
+
+@JsonClass(generateAdapter = false)
+data class SubtitlesResponse(
+    val configured: Boolean = false,
+    val imdbId: String? = null,
+    val results: List<OnlineSubtitle> = emptyList(),
+    val error: String? = null,
+)

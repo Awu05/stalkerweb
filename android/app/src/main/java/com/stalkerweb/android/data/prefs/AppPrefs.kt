@@ -82,6 +82,15 @@ class AppPrefs(context: Context) {
     /** The playback-only token for links — kept only while an access key is in use. */
     fun keepShareToken(token: String?) { if (!accessKey.isNullOrBlank()) shareToken = token }
 
+    // The VOD player's subtitles on this device: what was picked last ("off",
+    // "embedded" or "online", and its language) and the online ones' delay.
+    var subtitleChoice: String
+        get() = prefs.getString(KEY_SUBTITLE_CHOICE, null) ?: "off|"
+        set(value) = prefs.edit().putString(KEY_SUBTITLE_CHOICE, value).apply()
+    var subtitleDelay: Double
+        get() = prefs.getFloat(KEY_SUBTITLE_DELAY, 0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_SUBTITLE_DELAY, value.toFloat()).apply()
+
     // The Settings tab last open.
     var settingsTab: String
         get() = prefs.getString(KEY_SETTINGS_TAB, null) ?: "viewers"
@@ -269,6 +278,8 @@ class AppPrefs(context: Context) {
         private const val KEY_FAVORITES_OPEN  = "favorites_open"
         private const val KEY_REMINDERS = "guide_reminders"
         private const val KEY_SETTINGS_TAB = "settings_tab"
+        private const val KEY_SUBTITLE_CHOICE = "subtitle_choice"
+        private const val KEY_SUBTITLE_DELAY = "subtitle_delay"
         private const val KEY_ACTIVE_PORTAL = "active_portal"
         private const val KEY_WATCH_HISTORY   = "watch_history"
         private const val KEY_OVERRIDE_PREFIX = "stream_override_"

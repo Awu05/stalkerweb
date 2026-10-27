@@ -143,7 +143,7 @@ describe('SkipSegments.lookup', () => {
       expect(fetch.calls.some((u) => u.includes('suggestion'))).toBe(false)
 
       again.setMatch('p', '7', 'off')
-      expect(await again.lookup({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).toMatchObject({ imdbId: null, match: { off: true }, intro: null })
+      expect(await again.lookup({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).toMatchObject({ imdbId: 'tt1234567', match: { off: true }, intro: null })   // the id stays, for subtitles
 
       again.setMatch('p', '7', null)   // back to finding it by name
       expect((await again.lookup({ portal: 'p', videoId: '7', name: 'Breaking Bad', season: '1', episode: '2' })).imdbId).toBe('tt0903747')

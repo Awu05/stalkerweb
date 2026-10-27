@@ -102,6 +102,8 @@ function levelFor(req, { logToken = false } = {}) {
   if (root === 'proxy' || root === 'stremio') return 'share';
   if (/^\/api\/(?:m3u|xspf|xmltv)(?:\/|$)/.test(p)) return 'share';
   if (p.startsWith('/api/logos/') && read) return 'share';
+  // A subtitle file for the player, beside the stream (routes/vod.js).
+  if (/^\/api\/vod\/subtitles\/file\/\d+\.vtt$/.test(p) && read) return 'share';
   if (PROTECTED_ROOTS.has(root)) return 'full';
   if (read && (APP_FILES.has(p) || p.startsWith('/assets/'))) return 'open';
   // A page of the web app (its routes have no file extension) — the server

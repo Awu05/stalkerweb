@@ -46,6 +46,11 @@ module.exports = function settingsModule(config, appState = null, access = null)
       live_buffer_default:     config.liveBufferSeconds ?? 0,
       // With ACCESS_KEY set: the token the Setup page puts in the links it
       // shows (playback only — see lib/access.js). Only full access reads this.
+      // Online subtitles (lib/subtitles.js). The password is never sent back.
+      opensubtitles_api_key:   saved.opensubtitles_api_key  ?? '',
+      opensubtitles_username:  saved.opensubtitles_username ?? '',
+      opensubtitles_password_set: !!saved.opensubtitles_password,
+      subtitle_languages:      saved.subtitle_languages     ?? 'en',
       access_enabled:          !!access?.enabled,
       access_share_token:      access?.shareToken ?? null,
     });
@@ -81,6 +86,19 @@ module.exports = function settingsModule(config, appState = null, access = null)
         return res.status(400).json({ error: `live_buffer_seconds must be a whole number from 0 (off) to ${MAX_LIVE_BUFFER_S}` });
       }
       existing.live_buffer_seconds = n;
+    }
+    // Online subtitles: a blank password leaves the saved one (it's never sent back).
+    const b = req.body;
+    if (b.opensubtitles_api_key !== undefined)  existing.opensubtitles_api_key  = String(b.opensubtitles_api_key).trim();
+    if (b.opensubtitles_username !== undefined) existing.opensubtitles_username = String(b.opensubtitles_username).trim();
+    if (typeof b.opensubtitles_password === 'string' && b.opensubtitles_password !== '') existing.opensubtitles_password = b.opensubtitles_password;
+    if (b.opensubtitles_password === null)      delete existing.opensubtitles_password;
+    if (b.subtitle_languages !== undefined) {
+      const langs = String(b.subtitle_languages).toLowerCase().split(/[\s,]+/).filter(Boolean);
+      if (langs.some((l) => !/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(l))) {
+        return res.status(400).json({ error: 'subtitle_languages: language codes such as "en, es, pt-br"' });
+      }
+      existing.subtitle_languages = langs.join(',');
     }
     cache.save(existing);
     if (idleMinutes !== null) appState?.setIdleTimeoutMinutes(idleMinutes);

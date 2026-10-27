@@ -2,6 +2,7 @@ package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.ListingResponse
 import com.stalkerweb.android.data.api.SkipResponse
+import com.stalkerweb.android.data.api.SubtitlesResponse
 import com.stalkerweb.android.data.api.VodCategory
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodItemsResponse
@@ -32,6 +33,21 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
             movie = if (p.isEpisode) "" else "1",
         )
     }.getOrNull()
+
+    /** OpenSubtitles' subtitles for a movie or episode; the error in words when they couldn't be had. */
+    suspend fun onlineSubtitles(p: PlayerParams): SubtitlesResponse = runCatching {
+        apis.get().getVodSubtitles(
+            videoId = p.videoId, name = p.title, year = p.year, season = p.season,
+            episode = if (p.isEpisode) p.series.takeIf { it != "0" }.orEmpty() else "",
+            movie = if (p.isEpisode) "" else "1",
+        )
+    }.getOrElse { SubtitlesResponse(configured = true, error = it.message ?: "Couldn't look them up") }
+
+    /** The link the player fetches an online subtitle file from (with the playback token, like the stream). */
+    fun subtitleFileUrl(fileId: String, delay: Double): String {
+        val offset = if (delay == 0.0) "" else "?offset=${formatDelay(delay)}"
+        return "${links.base()}/api/vod/subtitles/file/$fileId.vtt$offset"
+    }
 
     suspend fun getVodSeasons(showId: String): List<VodSeason> =
         runCatching {
