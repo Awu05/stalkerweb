@@ -161,7 +161,7 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
               {channel?.name} · {formatTimeRange(prog.startTime, prog.endTime)}
             </p>
           </div>
-          <button
+          <button aria-label="Close"
             onClick={onClose}
             className="shrink-0 p-1 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
           >

@@ -755,7 +755,7 @@ export default function VodPlayerPage() {
                 <SkipBack size={18} fill="currentColor" />
               </button>
             )}
-            <button onClick={togglePlayPause} className="text-white/90 hover:text-white p-1 transition-colors">
+            <button aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlayPause} className="text-white/90 hover:text-white p-1 transition-colors">
               {playing
                 ? <Pause size={20} fill="currentColor" />
                 : <Play  size={20} fill="currentColor" />}
@@ -767,7 +767,7 @@ export default function VodPlayerPage() {
               </button>
             )}
             <div className="flex items-center gap-2 group/vol">
-              <button onClick={() => setMuted(m => !m)} className="text-white/90 hover:text-white p-1 transition-colors">
+              <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => !m)} className="text-white/90 hover:text-white p-1 transition-colors">
                 {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
               <div className="w-0 overflow-hidden group-hover/vol:w-20 transition-all duration-200">
@@ -804,7 +804,7 @@ export default function VodPlayerPage() {
                 <PictureInPicture2 size={18} />
               </button>
             )}
-            <button onClick={toggleFullscreen} className="text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
+            <button aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen} className="text-white/80 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
               {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             </button>
           </div>

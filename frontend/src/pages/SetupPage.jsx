@@ -258,7 +258,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
           <h3 className="font-semibold text-[var(--color-text)]">
             {initial?.id ? 'Edit Connection' : initial?.portal ? 'Duplicate Connection' : 'New Connection'}
           </h3>
-          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
             <X size={16} />
           </button>
         </div>
@@ -404,7 +404,7 @@ function StbImportPicker({ candidates, onImport, onClose }) {
       <div className="modal-panel relative z-10 w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">
           <h3 className="font-semibold text-[var(--color-text)]">Select Connections to Import</h3>
-          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors p-1 rounded">
             <X size={16} />
           </button>
         </div>
@@ -1431,7 +1431,7 @@ export default function SetupPage() {
                     {url && <img src={getProxiedLogoUrl(url)} alt="" className="w-6 h-6 object-contain shrink-0 rounded" onError={e => { e.currentTarget.style.display='none' }} />}
                     <span className="text-xs font-medium text-[var(--color-text)] flex-1 truncate">{name}</span>
                     <span className="text-xs text-[var(--color-muted)] flex-1 truncate hidden sm:block">{url}</span>
-                    <button type="button" onClick={() => handleDeleteOverride(name)} className="text-[var(--color-muted)] hover:text-[var(--color-live)] transition-colors shrink-0">
+                    <button aria-label={`Remove the logo override for ${name}`} type="button" onClick={() => handleDeleteOverride(name)} className="text-[var(--color-muted)] hover:text-[var(--color-live)] transition-colors shrink-0">
                       <Trash2 size={13} />
                     </button>
                   </div>

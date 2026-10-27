@@ -54,6 +54,24 @@ body::before {
     radial-gradient(700px 700px at 50% 120%, rgba(232, 232, 236, 0.03), transparent 60%);
 }
 
+/* ── Tooltip (components/TooltipLayer.jsx): a button's name, in the theme ── */
+.app-tooltip {
+  position: fixed;
+  z-index: 2147483647;
+  max-width: 260px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  white-space: normal;
+}
+.app-tooltip[hidden] { display: none; }
+
 /* ── Display type ── */
 .font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
 

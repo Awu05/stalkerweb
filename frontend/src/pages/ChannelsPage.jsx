@@ -596,7 +596,7 @@ export default function ChannelsPage() {
           <div className="modal-panel rounded-xl w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Set Logo — {logoChannel.name}</h3>
-              <button onClick={() => setLogoChannel(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">
+              <button aria-label="Close" onClick={() => setLogoChannel(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">
                 <X size={16} />
               </button>
             </div>
