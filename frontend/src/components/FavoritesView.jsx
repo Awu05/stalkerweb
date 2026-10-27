@@ -138,7 +138,7 @@ function GroupEditor({ group, logoMap, allChannels, onSave, onCancel }) {
               <div key={ch.uniqueId} className="flex items-center gap-1.5 rounded-full bg-[var(--color-surface-2)] border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text)]">
                 <ChannelLogo src={logoMap[String(ch.uniqueId)]} name={ch.name} size="sm" />
                 <span className="max-w-28 truncate">{ch.name}</span>
-                <button onClick={() => handleRemoveChannel(ch)} className="text-[var(--color-muted)] hover:text-[var(--color-live)] ml-0.5">
+                <button aria-label={`Remove ${ch.name}`} onClick={() => handleRemoveChannel(ch)} className="text-[var(--color-muted)] hover:text-[var(--color-live)] ml-0.5">
                   <X size={11} />
                 </button>
               </div>

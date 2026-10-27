@@ -41,7 +41,7 @@ function Controls({
           {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
         </button>
         <div className="flex items-center gap-2 group/vol">
-          <button onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
+          <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
             {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <div className="w-0 overflow-hidden group-hover/vol:w-20 group-focus-within/vol:w-20 transition-all duration-200">
@@ -428,7 +428,7 @@ function ChannelList({ channels, activeId, logoMap, favoriteIds, groups, nowNext
                         <EpgProgress epg={epg} />
                       </div>
                     </button>
-                    <button
+                    <button aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
                       onClick={() => onToggleFavorite(ch)}
                       className={cn('shrink-0 p-0.5 rounded transition-colors', isFav ? 'text-rose-500' : 'text-[var(--color-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100 hover:text-rose-400')}
                     >
@@ -1343,7 +1343,7 @@ export default function PlayerPage() {
                   reconnectAttempts.current = 0
                   loadStream(activeChannel.uniqueId, false, ++loadTokenRef.current)
                 }}
-                className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-[var(--color-bg)] text-sm hover:bg-[var(--color-primary-hover)] transition-colors"
+                className="px-4 py-2 rounded-[var(--radius-sm)] fill-primary text-sm hover:bg-[var(--color-primary-hover)] transition-colors"
               >
                 Retry
               </button>

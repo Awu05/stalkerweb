@@ -15,6 +15,7 @@ import { invalidateFavoritesCache } from '@/lib/useFavorites'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import SettingsModal from '@/components/SettingsModal'
 import { ToastHost } from '@/components/ToastHost'
+import TooltipLayer from '@/components/TooltipLayer'
 import { ReminderBell } from '@/components/ReminderBell'
 import { useReminders } from '@/lib/useReminders'
 
@@ -564,6 +565,7 @@ export default function App() {
       <ErrorBoundary>
         <AppInner />
         <ToastHost />
+        <TooltipLayer />
       </ErrorBoundary>
     </BrowserRouter>
   )

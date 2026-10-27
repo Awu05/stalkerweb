@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.components
 
+import com.stalkerweb.android.ui.theme.SwColors
+import androidx.compose.ui.graphics.toArgb
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
@@ -24,8 +26,8 @@ fun PlayerView.highlightControllerFocus() {
         if (!v.isFocusable || v is TimeBar) return
         val ring = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(0x40FFFFFF)
-            setStroke((3 * density).toInt(), 0xFFFFFFFF.toInt())
+            setColor(SwColors.PrimaryLight.copy(alpha = 0.25f).toArgb())
+            setStroke((3 * density).toInt(), SwColors.PrimaryLight.toArgb())
         }
         v.foreground = StateListDrawable().apply { addState(intArrayOf(android.R.attr.state_focused), ring) }
         v.setOnFocusChangeListener { button, focused ->

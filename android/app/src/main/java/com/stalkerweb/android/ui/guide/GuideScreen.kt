@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.guide
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import android.Manifest
 import android.os.Build
 import android.widget.Toast
@@ -40,7 +42,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -128,9 +129,9 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!wide && phoneChannel != null) IconButton(onClick = { phoneChannelId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Channels") }
+            if (!wide && phoneChannel != null) TipIconButton(label = "Channels", onClick = { phoneChannelId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Channels") }
             Text(phoneChannel?.name ?: "Guide", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.weight(1f))
-            IconButton(onClick = { viewModel.load(force = true) }) { Icon(Icons.Default.Refresh, "Refresh guide") }
+            TipIconButton(label = "Refresh guide", onClick = { viewModel.load(force = true) }) { Icon(Icons.Default.Refresh, "Refresh guide") }
         }
         if (phoneChannel == null) {
             LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -161,7 +161,7 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
               {channel?.name} · {formatTimeRange(prog.startTime, prog.endTime)}
             </p>
           </div>
-          <button
+          <button aria-label="Close"
             onClick={onClose}
             className="shrink-0 p-1 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
           >
@@ -186,7 +186,7 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
                 onClose()
                 navigate(`/player?channel=${channel.uniqueId}&name=${encodeURIComponent(channel.name)}`)
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-success)] text-[#0b1a14] text-sm font-semibold hover:brightness-110 transition-[filter]"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] fill-success text-sm font-semibold hover:brightness-110 transition-[filter]"
             >
               <Play size={13} /> Watch
             </button>

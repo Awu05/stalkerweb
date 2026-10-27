@@ -424,12 +424,12 @@ export default function ChannelsPage() {
             <button
               onClick={() => selectGroup('')}
               className={cn('px-4 py-1.5 rounded-full text-sm font-semibold transition-all',
-                !activeGroup ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+                !activeGroup ? 'btn-gradient' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
             >All</button>
             {groups.map(g => (
               <button key={g.id} onClick={() => selectGroup(g.id)}
                 className={cn('px-4 py-1.5 rounded-full text-sm font-semibold transition-all whitespace-nowrap',
-                  activeGroup === String(g.id) ? 'btn-gradient text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
+                  activeGroup === String(g.id) ? 'btn-gradient' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]')}
               >{g.name}</button>
             ))}
           </div>
@@ -596,7 +596,7 @@ export default function ChannelsPage() {
           <div className="modal-panel rounded-xl w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Set Logo — {logoChannel.name}</h3>
-              <button onClick={() => setLogoChannel(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">
+              <button aria-label="Close" onClick={() => setLogoChannel(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">
                 <X size={16} />
               </button>
             </div>

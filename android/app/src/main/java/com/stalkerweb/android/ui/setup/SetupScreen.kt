@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.setup
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
@@ -116,10 +118,8 @@ fun SetupScreen(
         // Shown only when reachable from inside the app (editing settings), not on
         // first-run setup where there's nowhere to go back to.
         if (onBack != null) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-            ) {
+            TipIconButton(label = "Back", onClick = onBack,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         }

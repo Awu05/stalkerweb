@@ -1,0 +1,13 @@
+{
+  "$comment": "Generated from theme/tokens.json by theme/build.mjs — do not edit; change tokens.json and run `node theme/build.mjs`.",
+  "colors": [
+    "#5b8def",
+    "#e5484d",
+    "#30a46c",
+    "#f5a524",
+    "#8e4ec6",
+    "#12a594",
+    "#e93d82",
+    "#978365"
+  ]
+}

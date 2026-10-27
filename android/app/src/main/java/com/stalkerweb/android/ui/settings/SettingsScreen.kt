@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.settings
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import com.stalkerweb.android.data.repo.macDeviceId
 import com.stalkerweb.android.data.repo.normalizeMac
@@ -44,7 +46,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -89,13 +90,12 @@ import com.stalkerweb.android.ui.components.PasswordEye
 import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.passwordTransformation
 import com.stalkerweb.android.ui.components.ViewerAvatar
-import com.stalkerweb.android.ui.components.parseHexColor
+import com.stalkerweb.android.ui.theme.VIEWER_COLORS
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.update.UpdateViewModel
 import com.stalkerweb.android.ui.utils.rememberIsTV
 
-private val VIEWER_COLORS = listOf("#5b8def", "#e5484d", "#30a46c", "#f5a524", "#8e4ec6", "#12a594", "#e93d82", "#978365")
 
 /** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos — and App (version, updates). */
 @Composable
@@ -166,11 +166,11 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                         Text(v.name + if (v.id == me?.id) "  · you" else "", color = SwColors.Text, modifier = Modifier.weight(1f))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.widthIn(max = 240.dp)) {
                             items(VIEWER_COLORS) { c ->
-                                Box(Modifier.size(22.dp).tvFocus(CircleShape).background(Color(parseHexColor(c)!!), CircleShape).clickable { viewModel.recolor(v, c) })
+                                Box(Modifier.size(22.dp).tvFocus(CircleShape).background(c.color, CircleShape).clickable { viewModel.recolor(v, c.hex) })
                             }
                         }
-                        IconButton(onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
-                        IconButton(onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
+                        TipIconButton(label = "Rename ${v.name}", onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
+                        TipIconButton(label = "Delete ${v.name}", onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
                     }
                 }
                 OutlinedButton(onClick = { adding = true }) { Icon(Icons.Default.Add, null); Text(" Add viewer") }
@@ -285,7 +285,7 @@ private fun ActivityTab(viewModel: SettingsViewModel, state: SettingsState) {
                 return@Card
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(8.dp).background(if (a.portal.connected) Color(0xFF30A46C) else SwColors.Muted, CircleShape))
+                Box(Modifier.size(8.dp).background(if (a.portal.connected) SwColors.Success else SwColors.Muted, CircleShape))
                 Text(portalSummary(a.portal), color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
             }
             if (a.streams.isEmpty()) {
@@ -361,8 +361,8 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
                         Text("${p.portal} · ${p.mac}", color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Button(onClick = { viewModel.connect(p) }, enabled = !state.busy) { Text(if (active) "Reconnect" else "Connect") }
-                    IconButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, "Edit ${p.name}") }
-                    IconButton(onClick = { deleting = p }) { Icon(Icons.Default.Delete, "Delete ${p.name}", tint = SwColors.Live) }
+                    TipIconButton(label = "Edit ${p.name}", onClick = { editing = p }) { Icon(Icons.Default.Edit, "Edit ${p.name}") }
+                    TipIconButton(label = "Delete ${p.name}", onClick = { deleting = p }) { Icon(Icons.Default.Delete, "Delete ${p.name}", tint = SwColors.Live) }
                 }
             }
         }
@@ -538,7 +538,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
                     Text(n, color = SwColors.Text)
                     Text(u, color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = { viewModel.removeOverride(n) }) { Icon(Icons.Default.Close, "Remove override for $n") }
+                TipIconButton(label = "Remove override for $n", onClick = { viewModel.removeOverride(n) }) { Icon(Icons.Default.Close, "Remove override for $n") }
             }
         }
         item {
@@ -553,7 +553,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
         items(state.stripWords, key = { "w-$it" }) { w ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(w, color = SwColors.Text, modifier = Modifier.weight(1f))
-                IconButton(onClick = { viewModel.removeStripWord(w) }) { Icon(Icons.Default.Close, "Remove $w") }
+                TipIconButton(label = "Remove $w", onClick = { viewModel.removeStripWord(w) }) { Icon(Icons.Default.Close, "Remove $w") }
             }
         }
     }

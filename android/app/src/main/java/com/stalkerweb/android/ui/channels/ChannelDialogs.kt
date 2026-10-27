@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.channels
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +38,6 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -180,7 +181,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
         title = { Text("Set logo — ${channel.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(search, { search = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                OutlinedTextField(search, { search = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 found?.let { logo ->
                     Row(
                         Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { url = logo }
@@ -220,11 +221,11 @@ fun GroupRow(
                     Text(group.name, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${group.channels.size} channel${if (group.channels.size == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = SwColors.Muted)
                 }
-                IconButton(onClick = { expanded = !expanded }) { Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Collapse" else "Expand") }
-                if (canUp) IconButton(onClick = { onMove(-1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move group up") }
-                if (canDown) IconButton(onClick = { onMove(1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move group down") }
-                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit group") }
-                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete group", tint = SwColors.Live) }
+                TipIconButton(label = if (expanded) "Collapse" else "Expand", onClick = { expanded = !expanded }) { Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Collapse" else "Expand") }
+                if (canUp) TipIconButton(label = "Move group up", onClick = { onMove(-1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move group up") }
+                if (canDown) TipIconButton(label = "Move group down", onClick = { onMove(1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move group down") }
+                TipIconButton(label = "Edit group", onClick = onEdit) { Icon(Icons.Default.Edit, "Edit group") }
+                TipIconButton(label = "Delete group", onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete group", tint = SwColors.Live) }
             }
             if (expanded) {
                 if (group.channels.isEmpty()) Text("No channels — edit the group to add some.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
@@ -283,11 +284,11 @@ fun GroupEditDialog(
                     items(members, key = { "m" + it.uniqueId }) { c ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(c.name, color = SwColors.Text, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            IconButton(onClick = { onRemove(c); members = members.filter { it.uniqueId != c.uniqueId } }) { Icon(Icons.Default.Close, "Remove ${c.name}") }
+                            TipIconButton(label = "Remove ${c.name}", onClick = { onRemove(c); members = members.filter { it.uniqueId != c.uniqueId } }) { Icon(Icons.Default.Close, "Remove ${c.name}") }
                         }
                     }
                 }
-                OutlinedTextField(query, { query = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                OutlinedTextField(query, { query = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 LazyColumn(Modifier.heightIn(max = 180.dp)) {
                     items(suggestions, key = { "s" + it.uniqueId }) { c ->
                         Row(

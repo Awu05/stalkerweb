@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,7 +42,7 @@ import kotlin.math.roundToInt
 /** The player's Stats button. */
 @Composable
 fun StatsButton(open: Boolean, onToggle: () -> Unit) {
-    IconButton(onClick = onToggle) {
+    TipIconButton(label = if (open) "Hide stats" else "Show stats", onClick = onToggle) {
         Icon(Icons.Default.BarChart, if (open) "Hide stats" else "Show stats", tint = if (open) MaterialTheme.colorScheme.primary else Color.White)
     }
 }

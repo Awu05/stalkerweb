@@ -1,0 +1,50 @@
+/* Generated from theme/tokens.json by theme/build.mjs — do not edit; change tokens.json and run `node theme/build.mjs`. */
+@theme {
+  --color-bg: #141417;
+  --color-surface: #1c1c20;
+  --color-surface-2: #232328;
+  --color-surface-3: #28282e;
+  --color-surface-4: #303036;
+  --color-border: #28282e;
+  --color-border-strong: #3c3c44;
+  --color-outline-soft: #1f1f24;
+  --color-text: #e8e8ec;
+  --color-muted: #9696a0;
+  --color-primary: #e8e8ec;
+  --color-on-primary: #141417;
+  --color-primary-hover: #c8c8ce;
+  --color-primary-light: #ffffff;
+  --color-primary-glow: rgba(232, 232, 236, 0.35);
+  --color-accent: #e8e8ec;
+  --color-accent-light: #ffffff;
+  --color-live: #ef4444;
+  --color-live-fill: #dc2626;
+  --color-on-live: #ffffff;
+  --color-success: #5bc39d;
+  --color-on-success: #0b1a14;
+  --color-heart: #f43f5e;
+  --color-warning: #fbbf24;
+  --color-on-warning: #141417;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+}
+
+:root {
+  --viewer-0: #5b8def;
+  --on-viewer-0: #ffffff;
+  --viewer-1: #e5484d;
+  --on-viewer-1: #ffffff;
+  --viewer-2: #30a46c;
+  --on-viewer-2: #ffffff;
+  --viewer-3: #f5a524;
+  --on-viewer-3: #141417;
+  --viewer-4: #8e4ec6;
+  --on-viewer-4: #ffffff;
+  --viewer-5: #12a594;
+  --on-viewer-5: #ffffff;
+  --viewer-6: #e93d82;
+  --on-viewer-6: #ffffff;
+  --viewer-7: #978365;
+  --on-viewer-7: #ffffff;
+}
