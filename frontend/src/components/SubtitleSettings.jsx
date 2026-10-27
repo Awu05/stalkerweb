@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -150,10 +151,7 @@ export default function SubtitleSettings() {
         </p>
       </div>
       <div className="flex items-center gap-3">
-        <button type="submit" disabled={busy}
-          className="px-4 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white text-sm font-medium disabled:opacity-50">
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+        <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
         {notice && <p className={`text-xs ${notice.type === 'error' ? 'text-[var(--color-live)]' : 'text-[var(--color-success)]'}`}>{notice.msg}</p>}
       </div>
     </form>
