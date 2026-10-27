@@ -317,10 +317,19 @@ const skipSegments = new (require('./lib/skipSegments').SkipSegments)(path.join(
 // Online subtitles: Wyzie Subs or OpenSubtitles, with the keys from Settings → Playback.
 const subtitles = new (require('./lib/subtitles').Subtitles)(path.join(config.dataDir, 'subtitles'), {
   userAgent: `StalkerWeb v${config.version || require('./package.json').version}`,
-  settings: () => {
-    const s = exportSettingsCache.load() || {};
-    return { provider: s.subtitle_provider || 'wyzie', wyzieKey: s.wyzie_api_key || '', wyzieSources: s.wyzie_sources, apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
-  },
+  // Read from config.json at most once a second — a lookup asks many times —
+  // so a change in Settings counts within a second.
+  settings: (() => {
+    let kept = null;
+    let at = 0;
+    return () => {
+      if (kept && Date.now() - at < 1000) return kept;
+      const s = exportSettingsCache.load() || {};
+      kept = { provider: s.subtitle_provider || 'wyzie', wyzieKey: s.wyzie_api_key || '', wyzieSources: s.wyzie_sources, apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
+      at = Date.now();
+      return kept;
+    };
+  })(),
 });
 const vodRoutes    = require('./routes/vod')(appState, config, { watchStore, skipSegments, subtitles });
 

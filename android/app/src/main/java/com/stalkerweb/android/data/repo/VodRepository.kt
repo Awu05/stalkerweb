@@ -28,29 +28,28 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
 
     /** What can be skipped in a movie or episode; null when the server couldn't say. */
     suspend fun skipParts(p: PlayerParams): SkipResponse? = runCatching {
-        apis.get().getVodSkip(
-            videoId = p.videoId, name = p.title, year = p.year, season = p.season,
-            episode = if (p.isEpisode) p.series.takeIf { it != "0" }.orEmpty() else "",
-            movie = if (p.isEpisode) "" else "1",
-        )
+        val q = TitleQuery(p)
+        apis.get().getVodSkip(q.videoId, q.name, q.year, q.season, q.episode, q.movie)
     }.getOrNull()
 
     /** The online subtitles for a movie or episode; the error in words when they couldn't be had. */
     suspend fun onlineSubtitles(p: PlayerParams): SubtitlesResponse = runCatching {
-        apis.get().getVodSubtitles(
-            videoId = p.videoId, name = p.title, year = p.year, season = p.season,
-            episode = if (p.isEpisode) p.series.takeIf { it != "0" }.orEmpty() else "",
-            movie = if (p.isEpisode) "" else "1",
-        )
+        val q = TitleQuery(p)
+        apis.get().getVodSubtitles(q.videoId, q.name, q.year, q.season, q.episode, q.movie)
     }.getOrElse { SubtitlesResponse(configured = true, error = it.message ?: "Couldn't look them up") }
 
     /**
      * Whether an online subtitle file can be had (the server keeps it once
      * fetched, so the player's own request is quick): null, or why not.
      */
-    suspend fun checkSubtitleFile(fileId: String, delay: Double): String? = runCatching {
+    suspend fun checkSubtitleFile(fileId: String, delay: Double): String? = try {
         apis.get().getSubtitleFile("$fileId.vtt", if (delay == 0.0) null else formatDelay(delay)).close()
-    }.exceptionOrNull()?.let { it.toApiError().message ?: "couldn't be fetched" }
+        null
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e   // a newer pick or delay took over: not a failure
+    } catch (e: Exception) {
+        e.toApiError().message ?: "couldn't be fetched"
+    }
 
     /** The link the player fetches an online subtitle file from (with the playback token, like the stream). */
     fun subtitleFileUrl(fileId: String, delay: Double): String {
@@ -92,4 +91,17 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
     /** The link a cast device opens for this movie or episode. */
     suspend fun castLink(videoId: String, cmd: String = "", series: String = "", seasonId: String = "", episodeId: String = "") =
         apis.get().getVodCastLink(videoId, cmd, series, seasonId, episodeId)
+}
+
+/**
+ * A movie or episode as the server's skip-intro and subtitle lookups both ask
+ * for it — the same query, since both go through the same IMDb match.
+ */
+private class TitleQuery(p: PlayerParams) {
+    val videoId = p.videoId
+    val name = p.title
+    val year = p.year
+    val season = p.season
+    val episode = if (p.isEpisode) p.series.takeIf { it != "0" }.orEmpty() else ""
+    val movie = if (p.isEpisode) "" else "1"
 }

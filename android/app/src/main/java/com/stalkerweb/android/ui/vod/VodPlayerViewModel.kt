@@ -197,7 +197,6 @@ class VodPlayerViewModel(
 
         // A stream that fails after it was handed to the player (404, decoder): say so, with Retry.
         override fun onPlayerError(error: PlaybackException) {
-            if (_player.value?.let(::withoutOnlineSubtitle) == true) return
             _state.value = _state.value.copy(loading = false, error = error.message ?: "Playback error")
         }
     }
@@ -415,18 +414,17 @@ class VodPlayerViewModel(
         val key = _state.value.params?.key ?: return
         if (subtitlesStartedFor == key || mediaKey != key) return
         val saved = prefs.subtitleChoice
-        if (saved.startsWith("off")) {
-            subtitlesStartedFor = key
-            // Off, as picked — not whatever the video marks as its default.
-            _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build() }
-            return
-        }
+        // Off — as picked, or nothing in that language — is off: not whatever the video marks as its default.
+        val textOff = { _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build() } }
+        if (saved.startsWith("off")) { subtitlesStartedFor = key; textOff(); return }
         val subs = _state.value.subtitles
         startingChoice(saved, subs.embedded, emptyList())?.let { subtitlesStartedFor = key; apply(it); return }
+        // No language to look for online (a track picked without one): nothing online could match.
+        if (saved.substringAfter('|').isBlank()) { subtitlesStartedFor = key; textOff(); return }
         val online = subs.online
         if (online == null) { loadOnlineSubtitles(); return }
         subtitlesStartedFor = key
-        startingChoice(saved, emptyList(), online.results)?.let(::apply)
+        startingChoice(saved, emptyList(), online.results)?.let(::apply) ?: textOff()
     }
 
     /** The online list for this title, asked once (when the menu opens, or to start with). */
@@ -524,19 +522,6 @@ class VodPlayerViewModel(
         _state.value = _state.value.copy(subtitles = _state.value.subtitles.copy(choice = SubtitleChoice()))
         _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build() }
         _messages.tryEmit("Subtitles couldn't be loaded: $why")
-    }
-
-    // The stream failed with an online file beside it: the same stream without
-    // the file, from where it was — not the error screen.
-    private fun withoutOnlineSubtitle(p: Player): Boolean {
-        val current = p.currentMediaItem ?: return false
-        if (current.mediaId != _state.value.params?.key || current.localConfiguration?.subtitleConfigurations.isNullOrEmpty()) return false
-        val at = p.currentPosition
-        p.setMediaItem(current.buildUpon().setSubtitleConfigurations(emptyList()).build(), at)
-        p.prepare()
-        p.playWhenReady = true
-        subtitleFailed("the file didn't load")
-        return true
     }
 
     fun startOver() {

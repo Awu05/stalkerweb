@@ -42,8 +42,8 @@ import kotlin.math.roundToInt
 /** The player's Stats button. */
 @Composable
 fun StatsButton(open: Boolean, onToggle: () -> Unit) {
-    TipIconButton(label = if (open) "Hide stats" else "Show stats", onClick = onToggle) {
-        Icon(Icons.Default.BarChart, if (open) "Hide stats" else "Show stats", tint = if (open) MaterialTheme.colorScheme.primary else Color.White)
+    TipIconButton(label = if (open) "Hide stats" else "Show stats", onClick = onToggle, lit = open) {
+        Icon(Icons.Default.BarChart, if (open) "Hide stats" else "Show stats", tint = Color.White)
     }
 }
 

@@ -23,11 +23,14 @@ class ThemeUsageTest {
             when {
                 Regex("""Color\(0x""").containsMatchIn(line) -> "$at: a colour of its own — use SwColors"
                 Regex(""""#[0-9a-fA-F]{6}"""").containsMatchIn(line) -> "$at: a hex colour of its own — put it in theme/tokens.json"
+                // The bright red is for text and marks; a red fill holding content is LiveFill (OnLive on it).
+                Regex("""(?:Surface\(\s*color|containerColor)\s*=\s*(?:SwColors\.Live\b|MaterialTheme\.colorScheme\.error\b)""").containsMatchIn(line) ->
+                    "$at: a fill of the bright red — use SwColors.LiveFill, with SwColors.OnLive on it"
                 // A theme fill with a text or icon colour picked by hand, not its On… one.
-                Regex("""containerColor\s*=\s*SwColors\.(Primary|Live|LiveFill|Success|Warning)\b""").find(line)?.let { m ->
-                    val fill = m.groupValues[1].removeSuffix("Fill")
+                Regex("""containerColor\s*=\s*SwColors\.(Primary|LiveFill|Success|Warning)\b""").find(line)?.let { m ->
+                    val on = "SwColors.On" + m.groupValues[1].removeSuffix("Fill")
                     val content = Regex("""contentColor\s*=\s*([\w.]+)""").find(line)?.groupValues?.get(1)
-                    content != null && content != "SwColors.On$fill"
+                    content != null && content != on
                 } == true -> "$at: a fill whose content colour isn't its On… colour"
                 else -> null
             }
@@ -45,7 +48,8 @@ class ThemeUsageTest {
     @Test fun `gives every icon button a tooltip (TipIconButton, not Material's IconButton)`() {
         val raw = sources.filter { !it.name.equals("TipIconButton.kt") }.flatMap { file ->
             file.readLines().mapIndexedNotNull { i, line ->
-                if (Regex("""(?<![\w.])IconButton\(""").containsMatchIn(line.substringBefore("//"))) "${file.name}:${i + 1}" else null
+                // Bare, or spelt out (androidx.compose.material3.IconButton).
+                if (Regex("""(?<![\w])(?:[\w.]*\.)?IconButton\(""").findAll(line.substringBefore("//")).any { !it.value.startsWith("Tip") && !it.value.contains("TipIconButton") }) "${file.name}:${i + 1}" else null
             }
         }
         assertEquals(emptyList<String>(), raw)

@@ -8,6 +8,7 @@ import {
 const ONLINE_LABEL = 'Online subtitles'
 const NO_ONLINE = { for: null, loading: false, configured: null, provider: '', results: [], error: '' }
 const OFF = { kind: 'off', id: null, language: '' }
+const DELAY_SETTLE_MS = 800   // after the last delay press
 
 /**
  * The VOD player's subtitles (lib/subtitles.js): the video's own — hls.js's
@@ -122,13 +123,19 @@ export function useVodSubtitles({ videoRef, hlsRef, events, titleKey, query, rea
     saveChoice(kind, kind === 'off' ? '' : language)
   }, [apply, delay, titleKey, setChoice])
 
+  // The delay shows at once; the file moved by it is fetched once the presses stop.
+  const delayTimer = useRef(null)
   const setDelay = useCallback((d) => {
     const next = clampDelay(d)
     setDelayState(next)
     saveDelay(next)
-    const c = choiceRef.current
-    if (c.kind === 'online') apply('online', c.id, c.language, next)
+    clearTimeout(delayTimer.current)
+    delayTimer.current = setTimeout(() => {
+      const c = choiceRef.current
+      if (c.kind === 'online') apply('online', c.id, c.language, next)
+    }, DELAY_SETTLE_MS)
   }, [apply])
+  useEffect(() => () => clearTimeout(delayTimer.current), [])
 
   // Each title starts with the language picked last — the video's own, once
   // they've been read, else online (asked for only then); off made sure of.
@@ -138,11 +145,13 @@ export function useVodSubtitles({ videoRef, hlsRef, events, titleKey, query, rea
     if (saved.kind === 'off') { startedRef.current = titleKey; apply('off'); return }
     const now = startingChoice(saved, embedded, [])
     if (now) { startedRef.current = titleKey; apply(now.kind, now.id, saved.language, delay); setChoice({ ...now, language: saved.language }); return }
+    // No language to look for online (a track picked without one): nothing online could match.
+    if (!saved.language) { startedRef.current = titleKey; apply('off'); return }
     if (online.for !== titleKey) { loadOnline(); return }
     if (online.loading) return
     startedRef.current = titleKey
     const fetched = startingChoice(saved, [], online.results)
-    if (fetched) { apply(fetched.kind, fetched.id, saved.language, delay); setChoice({ ...fetched, language: saved.language }) }
+    if (fetched) { apply(fetched.kind, fetched.id, saved.language, delay); setChoice({ ...fetched, language: saved.language }) } else apply('off')
   }, [ready, titleKey, embedded, embeddedFor, online, loadOnline, apply, delay, setChoice])
 
   // Leaving the player: the <track> goes with it.
