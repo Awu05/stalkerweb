@@ -177,15 +177,24 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     }
     LaunchedEffect(state.resumedFrom) { if (state.resumedFrom > 0) { delay(8_000); viewModel.dismissResumed() } }
 
+    // The OK that skipped: its repeats and its release are kept from Media3,
+    // whose PlayerView shows the controls on any remote key, the release too.
+    var okSkipped by remember { mutableStateOf(false) }
+
     Box(
         Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
+            val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+            if (ok && okSkipped) {
+                if (e.type == KeyEventType.KeyUp) okSkipped = false
+                return@onPreviewKeyEvent true
+            }
             if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             // OK with nothing else on screen: the Skip button's skip (it never
             // takes the focus — that would pull it out of the controls or the
             // episodes, and leave it nowhere when the button goes).
             val skipNow = state.skip
-            if (skipNow != null && !controlsVisible && !panelOpen && !subtitlesOpen && state.upNext == null && !casting &&
-                (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter)) {
+            if (skipNow != null && ok && !controlsVisible && !panelOpen && !subtitlesOpen && state.upNext == null && !casting) {
+                okSkipped = true
                 viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
                 return@onPreviewKeyEvent true
             }
