@@ -107,13 +107,17 @@ export default function SubtitleSettings() {
                 <label key={src.id} className="flex items-center gap-1.5 text-sm text-[var(--color-text)] cursor-pointer">
                   <input type="checkbox" checked={on} onChange={toggle} className="accent-[var(--color-primary)]" />
                   {src.id}
-                  <span className="text-[11px] text-[var(--color-muted)]">{[src.free ? 'free' : 'Pro key', src.note].filter(Boolean).join(' · ')}</span>
+                  {/* Anime sources (Wyzie tags them so), marked for anyone watching anime */}
+                  {src.note === 'anime' && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--color-primary)]/20 text-[var(--color-primary-light)]">Anime</span>
+                  )}
+                  <span className="text-[11px] text-[var(--color-muted)]">{src.free ? 'free' : 'Pro key'}</span>
                 </label>
               )
             })}
           </div>
           <p className="text-xs text-[var(--color-muted)]">
-            Wyzie names its sources by code. charlie is the one a free key gets; a free key asking for a Pro one searches charlie alone.
+            Wyzie names its sources by code. charlie is the one a free key gets, and the ones marked Anime are anime sources; a free key asking for a Pro one searches charlie alone.
           </p>
         </div>
       ) : (
