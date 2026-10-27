@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.portal
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -36,7 +38,7 @@ fun PortalScreen(
             TopAppBar(
                 title = { Text("Portal connection") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TipIconButton(label = "Back", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },

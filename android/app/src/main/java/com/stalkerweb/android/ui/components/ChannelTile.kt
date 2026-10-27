@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -125,7 +124,7 @@ fun ChannelTile(
         }
         Row(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
             if (onToggleFavorite != null && (isFavorite || !isTv)) {
-                IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
+                TipIconButton(label = if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites", onClick = onToggleFavorite, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
                     Icon(
                         if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (isFavorite) "Remove ${channel.name} from favorites" else "Add ${channel.name} to favorites",
@@ -135,7 +134,7 @@ fun ChannelTile(
                 }
             }
             if (onEdit != null && !isTv) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
+                TipIconButton(label = "Edit ${channel.name}", onClick = onEdit, modifier = Modifier.size(36.dp).focusProperties { canFocus = false }) {
                     Icon(Icons.Default.Edit, "Edit ${channel.name}", Modifier.size(18.dp), tint = SwColors.Muted)
                 }
             }

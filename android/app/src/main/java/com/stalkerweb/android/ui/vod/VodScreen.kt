@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.vod
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.SearchField
 import androidx.compose.material3.Button
 import androidx.compose.ui.graphics.Color
@@ -47,7 +49,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -506,12 +507,12 @@ private fun SeriesDialog(
         Surface(color = SwColors.Surface, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(0.92f).fillMaxHeight(0.85f)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (selectedSeason != null) IconButton(onClick = onBackSeasons) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Seasons") }
+                    if (selectedSeason != null) TipIconButton(label = "Seasons", onClick = onBackSeasons) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Seasons") }
                     Text(selectedSeason?.let { "${show.name} · ${it.name.ifBlank { "Season ${it.seasonNumber}" }}" } ?: show.name,
                         style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (selectedSeason != null && !episodes.isNullOrEmpty()) Pill("Download season", false, { onDownloadSeason(selectedSeason, episodes) }, leading = Icons.Default.Download)
                     Pill(if (inMyList) "On My List" else "My List", inMyList, onToggleMyList, leading = if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder)
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
+                    TipIconButton(label = "Close", onClick = onClose) { Icon(Icons.Default.Close, "Close") }
                 }
                 // Continue: resume the episode stopped partway, or play the next one not watched.
                 if (next != null) {
@@ -572,14 +573,14 @@ private fun SeriesDialog(
                                     )
                                 }
                                 // Tick by hand: watched elsewhere, or not really watched.
-                                IconButton(onClick = { onToggleWatched(selectedSeason, ep, !seen) }) {
+                                TipIconButton(label = if (seen) "Mark as not watched" else "Mark as watched", onClick = { onToggleWatched(selectedSeason, ep, !seen) }) {
                                     Icon(
                                         if (seen) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                         if (seen) "Mark as not watched" else "Mark as watched",
                                         tint = if (seen) SwColors.Success else SwColors.Muted,
                                     )
                                 }
-                                IconButton(onClick = { onDownloadEpisode(selectedSeason, ep) }) { Icon(Icons.Default.Download, "Download") }
+                                TipIconButton(label = "Download", onClick = { onDownloadEpisode(selectedSeason, ep) }) { Icon(Icons.Default.Download, "Download") }
                             }
                         }
                     }

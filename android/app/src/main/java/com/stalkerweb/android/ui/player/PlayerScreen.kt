@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.data.repo.StatsRepository
 import com.stalkerweb.android.ui.components.StatsButton
 import com.stalkerweb.android.ui.components.StreamStatsOverlay
@@ -421,7 +423,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = a.onBack) {
+                TipIconButton(label = "Back", onClick = a.onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                 }
                 Text(
@@ -436,13 +438,13 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                 LiveBadge()
                 Spacer(Modifier.width(4.dp))
                 StatsButton(c.statsOpen, a.onToggleStats)
-                IconButton(onClick = a.onSleepTimer) {
+                TipIconButton(label = "Sleep timer", onClick = a.onSleepTimer) {
                     Icon(Icons.Default.Bedtime, "Sleep timer", tint = if (s.sleepTimerEndsAt != null) MaterialTheme.colorScheme.primary else Color.White)
                 }
                 if (!c.isTV && castManager != null) {
                     CastButton(castManager)
                 }
-                IconButton(onClick = a.onToggleChannelList) {
+                TipIconButton(label = "Channel list", onClick = a.onToggleChannelList) {
                     Icon(Icons.AutoMirrored.Filled.List, "Channel list", tint = Color.White)
                 }
             }
@@ -465,7 +467,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = a.onTogglePlayPause) {
+                    TipIconButton(label = "Play/Pause", onClick = a.onTogglePlayPause) {
                         Icon(
                             if (c.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             "Play/Pause", tint = Color.White,
@@ -473,19 +475,19 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     }
                     Spacer(Modifier.weight(1f))
                     TrackButtons(c.audio, c.subtitles, a)
-                    IconButton(onClick = a.onToggleActiveFavorite) {
+                    TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                         Icon(
                             if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             if (isFav) "Remove from favorites" else "Add to favorites",
                             tint = if (isFav) MaterialTheme.colorScheme.error else Color.White,
                         )
                     }
-                    IconButton(onClick = a.onToggleGuide) {
+                    TipIconButton(label = if (s.showGuide) "Hide programme guide" else "Show programme guide", onClick = a.onToggleGuide) {
                         Icon(Icons.Default.Info, if (s.showGuide) "Hide programme guide" else "Show programme guide",
                             tint = if (s.showGuide) MaterialTheme.colorScheme.primary else Color.White)
                     }
                     if (!c.isTV) {
-                        IconButton(onClick = a.onExitFullscreen) {
+                        TipIconButton(label = "Exit fullscreen", onClick = a.onExitFullscreen) {
                             Icon(Icons.Default.FullscreenExit, "Exit fullscreen", tint = Color.White)
                         }
                     }
@@ -550,10 +552,8 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
 
             if (c.showControls) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
-                    IconButton(
-                        onClick  = a.onBack,
-                        modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
-                    ) {
+                    TipIconButton(label = "Back", onClick  = a.onBack,
+                        modifier = Modifier.align(Alignment.TopStart).padding(4.dp),) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                     }
                     Row(
@@ -562,21 +562,19 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
                     ) {
                         TrackButtons(c.audio, c.subtitles, a)
                         StatsButton(c.statsOpen, a.onToggleStats)
-                        IconButton(onClick = a.onSleepTimer) {
+                        TipIconButton(label = "Sleep timer", onClick = a.onSleepTimer) {
                             Icon(
                                 Icons.Default.Bedtime, "Sleep timer",
                                 tint = if (s.sleepTimerEndsAt != null) MaterialTheme.colorScheme.primary else Color.White,
                             )
                         }
                         if (castManager != null) CastButton(castManager)
-                        IconButton(onClick = a.onGoFullscreen) {
+                        TipIconButton(label = "Fullscreen", onClick = a.onGoFullscreen) {
                             Icon(Icons.Default.Fullscreen, "Fullscreen", tint = Color.White)
                         }
                     }
-                    IconButton(
-                        onClick  = a.onTogglePlayPause,
-                        modifier = Modifier.align(Alignment.Center).size(52.dp),
-                    ) {
+                    TipIconButton(label = "Play/Pause", onClick  = a.onTogglePlayPause,
+                        modifier = Modifier.align(Alignment.Center).size(52.dp),) {
                         Icon(
                             if (c.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             "Play/Pause", tint = Color.White, modifier = Modifier.size(40.dp),
@@ -606,14 +604,14 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
             SleepTimerChip(s.sleepTimerEndsAt)
             Spacer(Modifier.width(4.dp))
             LiveBadge()
-            IconButton(onClick = a.onToggleActiveFavorite) {
+            TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                 Icon(
                     if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     if (isFav) "Remove from favorites" else "Add to favorites",
                     tint = if (isFav) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                 )
             }
-            IconButton(onClick = a.onToggleGuide) {
+            TipIconButton(label = if (s.showGuide) "Hide programme guide" else "Show programme guide", onClick = a.onToggleGuide) {
                 Icon(Icons.Default.Info, if (s.showGuide) "Hide programme guide" else "Show programme guide",
                     tint = if (s.showGuide) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
             }
@@ -717,7 +715,7 @@ private fun TrackButtons(audio: List<TrackOption>, subtitles: List<TrackOption>,
     if (audio.size > 1) {
         var open by remember { mutableStateOf(false) }
         Box {
-            IconButton(onClick = { open = true }) { Icon(Icons.Default.Audiotrack, "Audio track", tint = Color.White) }
+            TipIconButton(label = "Audio track", onClick = { open = true }) { Icon(Icons.Default.Audiotrack, "Audio track", tint = Color.White) }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 audio.forEach { t ->
                     DropdownMenuItem(
@@ -733,7 +731,7 @@ private fun TrackButtons(audio: List<TrackOption>, subtitles: List<TrackOption>,
         var open by remember { mutableStateOf(false) }
         val anyOn = subtitles.any { it.selected }
         Box {
-            IconButton(onClick = { open = true }) {
+            TipIconButton(label = "Subtitles", onClick = { open = true }) {
                 Icon(Icons.Default.Subtitles, "Subtitles", tint = if (anyOn) MaterialTheme.colorScheme.primary else Color.White)
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -907,7 +905,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                         Icon(Icons.Default.Close, "Clear search", tint = mutedCol, modifier = Modifier.size(16.dp).clickable { a.onQuery("") })
                     }
                 }
-                IconButton(onClick = a.onToggleFavoritesOnly) {
+                TipIconButton(label = if (s.favoritesOnly) "Show all channels" else "Show favorites only", onClick = a.onToggleFavoritesOnly) {
                     Icon(
                         if (s.favoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (s.favoritesOnly) "Show all channels" else "Show favorites only",
@@ -915,7 +913,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     )
                 }
                 if (onClose != null) {
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close channel list", tint = textCol) }
+                    TipIconButton(label = "Close channel list", onClick = onClose) { Icon(Icons.Default.Close, "Close channel list", tint = textCol) }
                 }
             }
             // Beside the picture, the genre is a picker (on a phone's portrait list it's the chips above).
@@ -997,7 +995,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                             )
                             NowLine(s.nowNext[ch.uniqueId], c.nowSecs, mutedCol)
                         }
-                        IconButton(onClick = { a.onToggleFavorite(ch) }, modifier = Modifier.size(32.dp)) {
+                        TipIconButton(label = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites", onClick = { a.onToggleFavorite(ch) }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 imageVector        = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites",

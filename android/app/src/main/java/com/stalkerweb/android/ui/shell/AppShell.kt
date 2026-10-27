@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.shell
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +30,6 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -190,7 +191,7 @@ fun AppShell(
                 RemindersBell(reminders, onCancelReminder)
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    IconButton(onClick = { menu = true }) { ViewerAvatar(viewer?.name ?: "?", viewer?.color, 28.dp) }
+                    TipIconButton(label = "Switch viewer (${viewer?.name ?: "none"})", onClick = { menu = true }) { ViewerAvatar(viewer?.name ?: "?", viewer?.color, 28.dp) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("Switch viewer") }, onClick = { menu = false; onSwitchViewer() })
                         DropdownMenuItem(
@@ -223,7 +224,7 @@ private fun RemindersBell(reminders: List<Reminder>, onCancel: (String) -> Unit)
     var open by remember { mutableStateOf(false) }
     val time = remember { java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()) }
     Box {
-        IconButton(onClick = { open = true }) {
+        TipIconButton(label = "Reminders", onClick = { open = true }) {
             BadgedBox(badge = { Badge { Text("${reminders.size}") } }) { Icon(Icons.Default.Notifications, "Reminders") }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

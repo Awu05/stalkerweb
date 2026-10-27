@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.vod
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.StatsButton
 import com.stalkerweb.android.ui.components.StreamStatsOverlay
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,7 +55,6 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -118,11 +119,11 @@ private fun CastingControls(cast: CastManager, modifier: Modifier) {
             Text("${clock(r.positionMs / 1000.0)} / ${clock(r.durationMs / 1000.0)}", color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            IconButton(onClick = { cast.seekBy(-10_000) }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = Color.White) }
-            IconButton(onClick = cast::togglePlay, modifier = Modifier.size(56.dp)) {
+            TipIconButton(label = "Back 10 seconds", onClick = { cast.seekBy(-10_000) }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = Color.White) }
+            TipIconButton(label = if (r.playing) "Pause" else "Play", onClick = cast::togglePlay, modifier = Modifier.size(56.dp)) {
                 Icon(if (r.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (r.playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(40.dp))
             }
-            IconButton(onClick = { cast.seekBy(30_000) }) { Icon(Icons.Default.Forward30, "Forward 30 seconds", tint = Color.White) }
+            TipIconButton(label = "Forward 30 seconds", onClick = { cast.seekBy(30_000) }) { Icon(Icons.Default.Forward30, "Forward 30 seconds", tint = Color.White) }
         }
     }
 }
@@ -240,7 +241,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+                TipIconButton(label = "Back", onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
                 Column(Modifier.weight(1f)) {
                     Text(p.title, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // "S1 · E3 · The Light of Day"
@@ -248,17 +249,17 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     if (episodeName.isNotEmpty()) Text(episodeName, color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (p.isEpisode) {
-                    IconButton(onClick = viewModel::playPrevious, enabled = state.neighbours.prev != null) { Icon(Icons.Default.SkipPrevious, "Previous episode", tint = Color.White) }
-                    IconButton(onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
-                    IconButton(onClick = { panelOpen = !panelOpen; if (panelOpen) subtitlesOpen = false }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
+                    TipIconButton(label = "Previous episode", onClick = viewModel::playPrevious, enabled = state.neighbours.prev != null) { Icon(Icons.Default.SkipPrevious, "Previous episode", tint = Color.White) }
+                    TipIconButton(label = "Next episode", onClick = viewModel::playNext, enabled = state.neighbours.next != null) { Icon(Icons.Default.SkipNext, "Next episode", tint = Color.White) }
+                    TipIconButton(label = "Episodes", onClick = { panelOpen = !panelOpen; if (panelOpen) subtitlesOpen = false }) { Icon(Icons.AutoMirrored.Filled.List, "Episodes", tint = Color.White) }
                 }
-                IconButton(onClick = { if (!subtitlesOpen) viewModel.loadOnlineSubtitles(); subtitlesOpen = !subtitlesOpen; if (subtitlesOpen) panelOpen = false }) {
+                TipIconButton(label = "Subtitles", onClick = { if (!subtitlesOpen) viewModel.loadOnlineSubtitles(); subtitlesOpen = !subtitlesOpen; if (subtitlesOpen) panelOpen = false }) {
                     Icon(Icons.Default.ClosedCaption, "Subtitles", tint = if (state.subtitles.choice.kind != "off" || subtitlesOpen) MaterialTheme.colorScheme.primary else Color.White)
                 }
                 StatsButton(statsOpen) { statsOpen = !statsOpen }
                 if (!isTV && cast != null) CastButton(cast)
-                IconButton(onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
-                IconButton(onClick = viewModel::toggleMyList) {
+                TipIconButton(label = "Download to server", onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
+                TipIconButton(label = if (inMyList) "Remove from My List" else "Add to My List", onClick = viewModel::toggleMyList) {
                     Icon(if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         if (inMyList) "Remove from My List" else "Add to My List", tint = Color.White)
                 }
@@ -276,7 +277,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Resumed from ${clock(state.resumedFrom)}", color = Color.White, style = MaterialTheme.typography.labelMedium)
                     TextButton(onClick = viewModel::startOver) { Text("Start over") }
-                    IconButton(onClick = viewModel::dismissResumed, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "Dismiss", tint = Color.White, modifier = Modifier.size(14.dp)) }
+                    TipIconButton(label = "Dismiss", onClick = viewModel::dismissResumed, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "Dismiss", tint = Color.White, modifier = Modifier.size(14.dp)) }
                 }
             }
         }
@@ -343,7 +344,7 @@ private fun EpisodesPanel(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Episodes", style = MaterialTheme.typography.titleSmall, color = SwColors.Text, modifier = Modifier.weight(1f))
-                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close episodes") }
+                TipIconButton(label = "Close episodes", onClick = onClose) { Icon(Icons.Default.Close, "Close episodes") }
             }
             val seasons = state.seasons.orEmpty()
             if (seasons.size > 1) {
@@ -423,7 +424,7 @@ private fun SubtitlesPanel(
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Subtitles", style = MaterialTheme.typography.titleSmall, color = SwColors.Text, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close subtitles") }
+                    TipIconButton(label = "Close subtitles", onClick = onClose) { Icon(Icons.Default.Close, "Close subtitles") }
                 }
             }
             item { SubtitleRow("Off", null, c.kind == "off", Modifier.focusRequester(firstFocus)) { onPick(SubtitleChoice()) } }
@@ -456,9 +457,9 @@ private fun SubtitlesPanel(
             if (c.kind == "online") item {
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Delay", color = SwColors.Text, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onDelay(subs.delay - com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Remove, "Show subtitles earlier") }
+                    TipIconButton(label = "Show subtitles earlier", onClick = { onDelay(subs.delay - com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Remove, "Show subtitles earlier") }
                     Text(com.stalkerweb.android.data.repo.delayLabel(subs.delay), color = SwColors.Text, modifier = Modifier.width(56.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    IconButton(onClick = { onDelay(subs.delay + com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Add, "Show subtitles later") }
+                    TipIconButton(label = "Show subtitles later", onClick = { onDelay(subs.delay + com.stalkerweb.android.data.repo.SUBTITLE_DELAY_STEP) }, modifier = Modifier.tvFocus(RoundedCornerShape(50))) { Icon(Icons.Default.Add, "Show subtitles later") }
                 }
             }
         }

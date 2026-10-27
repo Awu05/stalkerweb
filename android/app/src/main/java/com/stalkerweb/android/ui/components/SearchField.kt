@@ -8,7 +8,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,7 +42,7 @@ fun SearchField(
         onValueChange = onValueChange,
         placeholder = { Text(placeholder) },
         leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-        trailingIcon = if (value.isNotEmpty()) ({ IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
+        trailingIcon = if (value.isNotEmpty()) ({ TipIconButton(label = "Clear", onClick = { onValueChange("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
         singleLine = true,
         keyboardOptions = tvKeyboardOptions(KeyboardOptions(imeAction = ImeAction.Search)),
         keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),

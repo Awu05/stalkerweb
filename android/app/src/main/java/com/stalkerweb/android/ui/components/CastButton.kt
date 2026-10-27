@@ -18,7 +18,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,7 +40,7 @@ fun CastButton(cast: CastManager, tint: Color = Color.White) {
     if (!cast.available) return
     val casting by cast.isCasting.collectAsStateWithLifecycle()
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }) {
+    TipIconButton(label = if (casting) "Casting — choose" else "Cast", onClick = { open = true }) {
         Icon(if (casting) Icons.Default.CastConnected else Icons.Default.Cast, if (casting) "Casting — choose" else "Cast", tint = tint)
     }
     if (open) CastDialog(cast, casting) { open = false }

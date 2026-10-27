@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.channels
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.SearchField
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -47,7 +49,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -158,7 +159,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
                     { viewModel.setHideFlaky(!state.hideFlaky) }, leading = Icons.Default.Warning)
             }
             Text("${displayed.size} ${if (displayed.size == 1) "channel" else "channels"}", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
-            IconButton(onClick = { viewModel.load() }) { Icon(Icons.Default.Refresh, "Refresh") }
+            TipIconButton(label = "Refresh", onClick = { viewModel.load() }) { Icon(Icons.Default.Refresh, "Refresh") }
         }
         // Genre pills: collapsed to one line when there are many.
         if (state.groups.isNotEmpty()) {

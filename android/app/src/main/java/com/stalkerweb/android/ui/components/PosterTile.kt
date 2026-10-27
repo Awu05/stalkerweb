@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -106,12 +105,12 @@ fun PosterTile(
             }
             val showButtons = focused || !isTv
             if (onBookmark != null && (showButtons || bookmarked == true) && !watched) {
-                IconButton(onClick = onBookmark, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
+                TipIconButton(label = if (bookmarked == true) "Remove from My List" else "Add to My List", onClick = onBookmark, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
                     Icon(if (bookmarked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, if (bookmarked == true) "Remove from My List" else "Add to My List", Modifier.size(18.dp), tint = Color.White)
                 }
             }
             if (onDownload != null && showButtons) {
-                IconButton(onClick = onDownload, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
+                TipIconButton(label = "Download to server", onClick = onDownload, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(36.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
                     Icon(Icons.Default.Download, "Download to server", Modifier.size(18.dp), tint = Color.White)
                 }
             }

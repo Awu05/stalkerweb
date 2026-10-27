@@ -42,6 +42,15 @@ class ThemeUsageTest {
         assertEquals(emptyList<String>(), problems())
     }
 
+    @Test fun `gives every icon button a tooltip (TipIconButton, not Material's IconButton)`() {
+        val raw = sources.filter { !it.name.equals("TipIconButton.kt") }.flatMap { file ->
+            file.readLines().mapIndexedNotNull { i, line ->
+                if (Regex("""(?<![\w.])IconButton\(""").containsMatchIn(line.substringBefore("//"))) "${file.name}:${i + 1}" else null
+            }
+        }
+        assertEquals(emptyList<String>(), raw)
+    }
+
     @Test fun `gives every viewer colour readable initials`() {
         for (v in VIEWER_COLORS) assertTrue("${v.hex} has initials", v.on == SwColors.PrimaryLight || v.on == SwColors.Bg)
     }

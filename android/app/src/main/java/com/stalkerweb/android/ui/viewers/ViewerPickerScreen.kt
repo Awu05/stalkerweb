@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.viewers
 
+import com.stalkerweb.android.ui.components.TipIconButton
+
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -26,7 +28,6 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -108,7 +109,7 @@ fun ViewerPickerScreen(
 
     Box(Modifier.fillMaxSize().background(SwColors.Bg)) {
         if (!required) {
-            IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            TipIconButton(label = "Close", onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 Icon(Icons.Default.Close, "Close", tint = SwColors.Muted)
             }
         }
