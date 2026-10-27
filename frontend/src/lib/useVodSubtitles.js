@@ -5,12 +5,12 @@ import {
 } from './subtitles'
 
 // The <track> added for an online subtitle file — told apart from the video's own by its label.
-const ONLINE_LABEL = 'OpenSubtitles'
-const NO_ONLINE = { for: null, loading: false, configured: null, results: [], error: '' }
+const ONLINE_LABEL = 'Online subtitles'
+const NO_ONLINE = { for: null, loading: false, configured: null, provider: '', results: [], error: '' }
 
 /**
  * The VOD player's subtitles (lib/subtitles.js): the video's own — hls.js's
- * subtitle tracks, or the <video>'s text tracks — and OpenSubtitles' through
+ * subtitle tracks, or the <video>'s text tracks — and the online ones through
  * the server, added as a <track>. Each title starts with what was picked
  * last (the same language), once its media is `ready`. `query` is the
  * title's getVodSubtitles query; `events` is Hls.Events.
@@ -62,13 +62,13 @@ export function useVodSubtitles({ videoRef, hlsRef, events, titleKey, query, rea
     }
   }, [ready, titleKey, videoRef, hlsRef, events])
 
-  /** OpenSubtitles' list for this title, asked once. */
+  /** The online list for this title, asked once. */
   const loadOnline = useCallback(() => {
     if (online.for === titleKey) return
     const key = titleKey
     setOnline({ ...NO_ONLINE, for: key, loading: true })
     getVodSubtitles(queryRef.current)
-      .then((r) => setOnline((o) => (o.for === key ? { for: key, loading: false, configured: !!r.configured, results: r.results || [], error: r.error || '' } : o)))
+      .then((r) => setOnline((o) => (o.for === key ? { for: key, loading: false, configured: !!r.configured, provider: r.provider || '', results: r.results || [], error: r.error || '' } : o)))
       .catch((e) => setOnline((o) => (o.for === key ? { for: key, loading: false, configured: true, results: [], error: e.message } : o)))
   }, [online.for, titleKey])
 
@@ -107,7 +107,7 @@ export function useVodSubtitles({ videoRef, hlsRef, events, titleKey, query, rea
     if (choice.kind === 'online') apply('online', choice.id, choice.language, next)
   }, [apply, choice])
 
-  // Each title starts with the language picked last: asks OpenSubtitles when
+  // Each title starts with the language picked last: asks online when
   // the video has none in it.
   useEffect(() => {
     if (!ready || startedRef.current === titleKey) return

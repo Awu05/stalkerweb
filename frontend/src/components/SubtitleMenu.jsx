@@ -3,7 +3,7 @@ import { Captions, Check, Loader2, Minus, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { byLanguage, delayLabel, languageName, DELAY_STEP } from '@/lib/subtitles'
 
-// The VOD player's subtitles: off, the video's own, or OpenSubtitles' (lib/subtitles.js).
+// The VOD player's subtitles: off, the video's own, or online (lib/subtitles.js).
 
 /** The controls bar's subtitles button, lit while subtitles are on. */
 export function SubtitleButton({ on, open, onToggle }) {
@@ -58,10 +58,10 @@ export function SubtitleMenu({ embedded, online, choice, onPick, delay, onDelay,
         : embedded.map((t) => row(choice.kind === 'embedded' && choice.id === t.id, t.label || languageName(t.language), t.label && t.language ? languageName(t.language) : null,
             () => onPick('embedded', t.id, t.language), `e${t.id}`))}
 
-      {heading('Online · OpenSubtitles')}
+      {heading(`Online${online.provider ? ` · ${online.provider}` : ''}`)}
       {online.loading && <p className="flex items-center gap-1.5 px-3 pb-1 text-xs text-white/60"><Loader2 size={12} className="animate-spin" /> Looking…</p>}
       {!online.loading && online.configured === false && (
-        <p className="px-3 pb-1 text-xs text-white/50">Add an OpenSubtitles API key in Settings → Playback to look them up.</p>
+        <p className="px-3 pb-1 text-xs text-white/50">Add a subtitles key in Settings → Playback to look them up.</p>
       )}
       {!online.loading && online.error && <p className="px-3 pb-1 text-xs text-[var(--color-live)]">{online.error}</p>}
       {!online.loading && online.configured && !online.error && online.results.length === 0 && (

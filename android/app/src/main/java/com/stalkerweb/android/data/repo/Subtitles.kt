@@ -17,7 +17,7 @@ const val SUBTITLE_DELAY_STEP = 0.5
 const val SUBTITLE_MAX_DELAY = 60.0
 
 // Videos name their tracks' languages in three letters ("eng", "spa"),
-// OpenSubtitles in two ("en", "es"): the common ones, matched up.
+// the online sites in two ("en", "es"): the common ones, matched up.
 private val TWO_LETTER = mapOf(
     "eng" to "en", "spa" to "es", "fre" to "fr", "fra" to "fr", "ger" to "de", "deu" to "de", "ita" to "it", "por" to "pt",
     "dut" to "nl", "nld" to "nl", "rus" to "ru", "ara" to "ar", "chi" to "zh", "zho" to "zh", "jpn" to "ja", "kor" to "ko",
@@ -45,7 +45,7 @@ fun byLanguage(results: List<OnlineSubtitle>): List<Pair<String, List<OnlineSubt
 
 /**
  * The subtitles to start a title with, from what was picked last
- * ("kind|language"): the video's own in that language, else OpenSubtitles'
+ * ("kind|language"): the video's own in that language, else the online ones
  * in it, people-made first. Null: none.
  */
 fun startingChoice(saved: String, embedded: List<EmbeddedSubtitle>, online: List<OnlineSubtitle>): SubtitleChoice? {

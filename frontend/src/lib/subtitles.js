@@ -1,6 +1,6 @@
 /**
  * The VOD player's subtitles (components/SubtitleMenu.jsx): the ones in the
- * video, and OpenSubtitles' through the server (backend lib/subtitles.js).
+ * video, and online ones through the server (backend lib/subtitles.js).
  * The apps' Subtitles.kt says the same.
  */
 
@@ -10,7 +10,7 @@ export const DELAY_STEP = 0.5
 export const MAX_DELAY = 60
 
 // Videos name their tracks' languages in three letters ("eng", "spa"),
-// OpenSubtitles in two ("en", "es"): the common ones, matched up.
+// the online sites in two ("en", "es"): the common ones, matched up.
 const TWO_LETTER = {
   eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', dut: 'nl', nld: 'nl',
   rus: 'ru', ara: 'ar', chi: 'zh', zho: 'zh', jpn: 'ja', kor: 'ko', tur: 'tr', pol: 'pl', swe: 'sv', nor: 'no',
@@ -61,7 +61,7 @@ export function saveChoice(kind, language = '') {
 
 /**
  * The subtitles to start a title with, from what was picked last: the video's
- * own in that language (or its first), else OpenSubtitles' most downloaded
+ * own in that language (or its first), else the online ones' most downloaded
  * in it. `embedded` [{ id, language }], `online` the server's results.
  */
 export function startingChoice(saved, embedded, online) {

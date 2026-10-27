@@ -9,6 +9,9 @@ const CacheManager = require('../cache/CacheManager');
 const { parseIdleMinutes, MAX_IDLE_MINUTES } = require('../lib/idleTimeout');
 
 const MAX_LIVE_BUFFER_S = 120;
+
+// A saved key as Settings shows it: whether there is one, and its last characters.
+const keyHint = (key) => (key ? `…${String(key).slice(-4)}` : '');
 const STB_MODELS    = ['MAG200', 'MAG250', 'MAG254', 'MAG256', 'MAG270', 'MAG322', 'MAG352', 'CUSTOM'];
 const STB_FIRMWARES = ['0.2.18-r14-pub-250', '0.2.18-r19-pub-250', 'Generic'];
 
@@ -44,13 +47,16 @@ module.exports = function settingsModule(config, appState = null, access = null)
       // Live delay buffer, seconds (0 = off): saved, else LIVE_BUFFER_SECONDS.
       live_buffer_seconds:     saved.live_buffer_seconds ?? config.liveBufferSeconds ?? 0,
       live_buffer_default:     config.liveBufferSeconds ?? 0,
-      // With ACCESS_KEY set: the token the Setup page puts in the links it
-      // shows (playback only — see lib/access.js). Only full access reads this.
-      // Online subtitles (lib/subtitles.js). The password is never sent back.
-      opensubtitles_api_key:   saved.opensubtitles_api_key  ?? '',
+      // Online subtitles (lib/subtitles.js). Keys and the password are never
+      // sent back — only whether one is saved, and a key's last characters.
+      subtitle_provider:       saved.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie',
+      wyzie_key_hint:          keyHint(saved.wyzie_api_key),
+      opensubtitles_key_hint:  keyHint(saved.opensubtitles_api_key),
       opensubtitles_username:  saved.opensubtitles_username ?? '',
       opensubtitles_password_set: !!saved.opensubtitles_password,
       subtitle_languages:      saved.subtitle_languages     ?? 'en',
+      // With ACCESS_KEY set: the token the Setup page puts in the links it
+      // shows (playback only — see lib/access.js). Only full access reads this.
       access_enabled:          !!access?.enabled,
       access_share_token:      access?.shareToken ?? null,
     });
@@ -87,12 +93,15 @@ module.exports = function settingsModule(config, appState = null, access = null)
       }
       existing.live_buffer_seconds = n;
     }
-    // Online subtitles: a blank password leaves the saved one (it's never sent back).
+    // Online subtitles. A key or password left blank keeps the saved one (they're
+    // never sent back); null removes it.
     const b = req.body;
-    if (b.opensubtitles_api_key !== undefined)  existing.opensubtitles_api_key  = String(b.opensubtitles_api_key).trim();
+    if (b.subtitle_provider !== undefined) existing.subtitle_provider = b.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie';
+    for (const k of ['wyzie_api_key', 'opensubtitles_api_key', 'opensubtitles_password']) {
+      if (b[k] === null) delete existing[k];
+      else if (typeof b[k] === 'string' && b[k].trim() !== '') existing[k] = k.endsWith('password') ? b[k] : b[k].trim();
+    }
     if (b.opensubtitles_username !== undefined) existing.opensubtitles_username = String(b.opensubtitles_username).trim();
-    if (typeof b.opensubtitles_password === 'string' && b.opensubtitles_password !== '') existing.opensubtitles_password = b.opensubtitles_password;
-    if (b.opensubtitles_password === null)      delete existing.opensubtitles_password;
     if (b.subtitle_languages !== undefined) {
       const langs = String(b.subtitle_languages).toLowerCase().split(/[\s,]+/).filter(Boolean);
       if (langs.some((l) => !/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(l))) {

@@ -34,7 +34,7 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
         )
     }.getOrNull()
 
-    /** OpenSubtitles' subtitles for a movie or episode; the error in words when they couldn't be had. */
+    /** The online subtitles for a movie or episode; the error in words when they couldn't be had. */
     suspend fun onlineSubtitles(p: PlayerParams): SubtitlesResponse = runCatching {
         apis.get().getVodSubtitles(
             videoId = p.videoId, name = p.title, year = p.year, season = p.season,

@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import express from 'express'
-import { Subtitles, toWebVtt, resultsOf } from '../lib/subtitles.js'
+import { Subtitles, toWebVtt, resultsOf, wyzieResultsOf, decodeSubtitle } from '../lib/subtitles.js'
 import { SkipSegments } from '../lib/skipSegments.js'
 import ViewersManager from '../viewers/ViewersManager.js'
 import { createViewerContext } from '../lib/viewerContext.js'
@@ -27,7 +27,8 @@ function fakeFetch(routes) {
     for (const [re, answer] of routes) {
       if (!re.test(url)) continue
       const { status = 200, body, text } = typeof answer === 'function' ? answer(url, init) : answer
-      return { status, ok: status < 300, json: async () => body, text: async () => text ?? JSON.stringify(body) }
+      const raw = text ?? JSON.stringify(body)
+      return { status, ok: status < 300, json: async () => body, text: async () => raw, arrayBuffer: async () => new globalThis.TextEncoder().encode(raw).buffer }
     }
     return { status: 404, ok: false, json: async () => ({}), text: async () => '' }
   }
@@ -49,14 +50,36 @@ describe('toWebVtt', () => {
 })
 
 describe('resultsOf', () => {
-  it('lists each file once, by language, people-made and most downloaded first', () => {
-    expect(resultsOf(SEARCH).map((r) => r.fileId)).toEqual(['222', '111', '333'])
-    expect(resultsOf(SEARCH)[0]).toEqual({ fileId: '222', language: 'en', label: 'Breaking.Bad.S01E02.BluRay', downloads: 900, hearingImpaired: true, machine: false })
+  it("reads OpenSubtitles' answer, a file each", () => {
+    expect(resultsOf(SEARCH).map((r) => r.fileId)).toEqual(['111', '222', '333'])
+    expect(resultsOf(SEARCH)[1]).toEqual({ fileId: '222', language: 'en', label: 'Breaking.Bad.S01E02.BluRay', downloads: 900, hearingImpaired: true, machine: false, source: 'OpenSubtitles' })
+  })
+})
+
+const WYZIE = [
+  { id: 'abc-1', url: 'https://sub.wyzie.io/c/abc?tok=T1', language: 'en', release: 'WEB-DL', downloadCount: 40, isHearingImpaired: false, source: 'charlie' },
+  { id: 'abc 2', url: 'https://sub.wyzie.io/c/def?tok=T2', language: 'en', fileName: 'x.srt', downloadCount: 400, isHearingImpaired: true, source: 'charlie', ai: true },
+  { id: 'bad', url: 'javascript:alert(1)', language: 'en' },
+]
+
+describe('wyzieResultsOf', () => {
+  it("reads Wyzie's answer: our own ids, the links kept apart", () => {
+    expect(wyzieResultsOf(WYZIE)).toEqual([
+      { fileId: 'wabc-1', url: 'https://sub.wyzie.io/c/abc?tok=T1', language: 'en', label: 'WEB-DL', downloads: 40, hearingImpaired: false, machine: false, source: 'charlie' },
+      { fileId: 'wabc2', url: 'https://sub.wyzie.io/c/def?tok=T2', language: 'en', label: 'x.srt', downloads: 400, hearingImpaired: true, machine: true, source: 'charlie' },
+    ])
+  })
+})
+
+describe('decodeSubtitle', () => {
+  it('reads UTF-8, and older files as Windows-1252', () => {
+    expect(decodeSubtitle(new globalThis.TextEncoder().encode('Café').buffer)).toBe('Café')
+    expect(decodeSubtitle(new Uint8Array([0x43, 0x61, 0x66, 0xe9]).buffer)).toBe('Café')
   })
 })
 
 describe('Subtitles', () => {
-  const settings = (s = {}) => () => ({ apiKey: 'KEY', username: '', password: '', languages: 'es, en', ...s })
+  const settings = (s = {}) => () => ({ provider: 'opensubtitles', apiKey: 'KEY', username: '', password: '', languages: 'es, en', ...s })
 
   it("searches an episode by its show's IMDb id, in the languages set", async () => {
     const fetch = fakeFetch([[/\/subtitles\?/, { body: SEARCH }]])
@@ -99,6 +122,29 @@ describe('Subtitles', () => {
     await expect(new Subtitles(null, { settings: settings(), fetch }).webVtt('9')).rejects.toMatchObject({ status: 429, message: expect.stringMatching(/allowed 5/) })
   })
 
+  it('searches Wyzie with its key on the server, and downloads from the link it gave', async () => {
+    const fetch = fakeFetch([
+      [/sub\.wyzie\.io\/search\?/, { body: WYZIE }],
+      [/sub\.wyzie\.io\/c\/def/, { text: SRT }],
+    ])
+    const subs = new Subtitles(null, { settings: settings({ provider: 'wyzie', wyzieKey: 'WKEY', apiKey: '' }), fetch })
+    expect(subs.configured()).toBe(true)
+    expect(subs.providerName()).toBe('Wyzie Subs')
+    const found = await subs.search({ imdbId: 'tt0903747', season: 1, episode: 2 })
+    // People-made first; the links (which carry Wyzie's token) never leave the server.
+    expect(found.map((r) => r.fileId)).toEqual(['wabc-1', 'wabc2'])
+    expect(found.every((r) => !('url' in r))).toBe(true)
+    expect(fetch.calls[0].url).toBe('https://sub.wyzie.io/search?id=tt0903747&format=srt&source=charlie&season=1&episode=2&language=en%2Ces&key=WKEY')
+    expect(await subs.webVtt('wabc2')).toContain('Hello')
+  })
+
+  it("finds nothing (not an error) when Wyzie has none, and says why it can't download", async () => {
+    const fetch = fakeFetch([[/search/, { status: 404, body: { message: 'No subtitles found' } }], [/\/c\//, { status: 429, body: { message: 'Daily limit reached' } }]])
+    const subs = new Subtitles(null, { settings: settings({ provider: 'wyzie', wyzieKey: 'K' }), fetch })
+    expect(await subs.search({ imdbId: 'tt1', isMovie: true })).toEqual([])
+    await expect(subs.webVtt('wnope')).rejects.toMatchObject({ status: 404 })
+  })
+
   it('refuses a file id that is not a number', async () => {
     await expect(new Subtitles(null, { settings: settings(), fetch: fakeFetch([]) }).webVtt('../x')).rejects.toMatchObject({ status: 404 })
   })
@@ -122,7 +168,7 @@ describe('/api/vod/subtitles', () => {
     app.use(createViewerContext(viewers).middleware)
     app.use('/api/vod', vodModule(appState, { downloadDir: dir }, {
       skipSegments: new SkipSegments(null, { fetch }),
-      subtitles: new Subtitles(null, { settings: () => ({ apiKey: 'KEY', languages: 'en' }), fetch }),
+      subtitles: new Subtitles(null, { settings: () => ({ provider: 'opensubtitles', apiKey: 'KEY', languages: 'en' }), fetch }),
     }))
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}/api/vod/subtitles`
@@ -131,7 +177,7 @@ describe('/api/vod/subtitles', () => {
 
   it("lists an episode's subtitles, found through its show's IMDb match", async () => {
     const r = await (await fetch(`${base}?videoId=7&name=Breaking%20Bad&season=1&episode=2`)).json()
-    expect(r).toMatchObject({ configured: true, imdbId: 'tt0903747' })
+    expect(r).toMatchObject({ configured: true, provider: 'OpenSubtitles', imdbId: 'tt0903747' })
     expect(r.results.map((x) => x.fileId)).toEqual(['222', '111', '333'])
   })
 

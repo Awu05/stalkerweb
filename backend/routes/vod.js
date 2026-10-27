@@ -7,7 +7,7 @@
 // GET/PUT/DELETE /api/vod/watch…  — what the viewer watched (see below)
 // GET    /api/vod/skip?videoId&name&year&season&episode&movie — intro, recap, credits
 // PUT    /api/vod/skip/match/:videoId { imdbId }  — the show's IMDb match set by hand
-// GET    /api/vod/subtitles?videoId&name&year&season&episode&movie — OpenSubtitles' list
+// GET    /api/vod/subtitles?videoId&name&year&season&episode&movie — online subtitles
 // GET    /api/vod/subtitles/file/:fileId.vtt?offset — one of them, as WebVTT
 
 'use strict';
@@ -356,22 +356,23 @@ module.exports = function vodRoutes(appState, config, { watchStore = null, skipS
 
   // ── Online subtitles (lib/subtitles.js) ─────────────────────────────────────
   // GET /api/vod/subtitles?videoId=&name=&year=&season=&episode=&movie=1
-  //   → { configured, imdbId, results: [{ fileId, language, label, downloads,
-  //   hearingImpaired, machine }], error? } — found by the IMDb id skip intro
+  //   → { configured, provider, imdbId, results: [{ fileId, language, label,
+  //   downloads, hearingImpaired, machine, source }], error? } — found by the IMDb id skip intro
   //   matched. Not configured (no API key): an empty list, and says so.
   router.get('/subtitles', refuseIfGone, async (req, res) => {
     const q = req.query;
-    if (!subtitles?.configured() || !skipSegments) return res.json({ configured: false, imdbId: null, results: [] });
+    const provider = subtitles?.providerName?.() ?? '';
+    if (!subtitles?.configured() || !skipSegments) return res.json({ configured: false, provider, imdbId: null, results: [] });
     const isMovie = q.movie === '1';
     try {
       const t = await skipSegments.titleFor({ portal: portalOf(), videoId: q.videoId, name: q.name, year: q.year, season: q.season, episode: q.episode, isMovie });
-      if (!t.imdbId) return res.json({ configured: true, imdbId: null, results: [], error: "This title wasn't found on IMDb." });
-      if (!isMovie && (t.season === null || !t.episode)) return res.json({ configured: true, imdbId: t.imdbId, results: [], error: "This episode's season or number isn't known." });
+      if (!t.imdbId) return res.json({ configured: true, provider, imdbId: null, results: [], error: "This title wasn't found on IMDb." });
+      if (!isMovie && (t.season === null || !t.episode)) return res.json({ configured: true, provider, imdbId: t.imdbId, results: [], error: "This episode's season or number isn't known." });
       const results = await subtitles.search({ imdbId: t.imdbId, season: t.season, episode: t.episode, isMovie });
-      res.json({ configured: true, imdbId: t.imdbId, results });
+      res.json({ configured: true, provider, imdbId: t.imdbId, results });
     } catch (e) {
       log.warn(TAG, `subtitles: ${e.message}`);
-      res.json({ configured: true, imdbId: null, results: [], error: e.message });
+      res.json({ configured: true, provider, imdbId: null, results: [], error: e.message });
     }
   });
 
@@ -379,7 +380,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null, skipS
   // playback token too (lib/access.js): the apps' player fetches it as it
   // does the stream.
   router.get('/subtitles/file/:file', async (req, res) => {
-    const m = /^(\d{1,12})\.vtt$/.exec(req.params.file);
+    const m = /^(\d{1,12}|w[A-Za-z0-9_-]{1,60})\.vtt$/.exec(req.params.file);
     if (!m || !subtitles) return res.status(404).json({ error: 'No such subtitle file.' });
     const offset = Math.max(-600, Math.min(600, Number(req.query.offset) || 0));
     try {

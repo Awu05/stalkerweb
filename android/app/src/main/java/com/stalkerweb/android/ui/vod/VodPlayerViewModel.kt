@@ -60,7 +60,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** The subtitles menu: the video's own, OpenSubtitles' (null: not asked yet), what's showing, and the online ones' delay. */
+/** The subtitles menu: the video's own, the online ones (null: not asked yet), what's showing, and the online ones' delay. */
 data class SubtitleState(
     val embedded: List<EmbeddedSubtitle> = emptyList(),
     val online: SubtitlesResponse? = null,
@@ -70,7 +70,7 @@ data class SubtitleState(
 )
 
 // The online file's track, told apart from the video's own by its label.
-private const val ONLINE_LABEL = "OpenSubtitles"
+private const val ONLINE_LABEL = "Online subtitles"
 
 data class VodPlayerState(
     val params: PlayerParams? = null,
@@ -409,7 +409,7 @@ class VodPlayerViewModel(
     }
 
     // Each title starts with the language picked last: the video's own, else
-    // OpenSubtitles' (asked for then).
+    // the online ones (asked for then).
     private fun startSubtitles() {
         val key = _state.value.params?.key ?: return
         if (subtitlesStartedFor == key || mediaKey != key) return
@@ -428,7 +428,7 @@ class VodPlayerViewModel(
         startingChoice(saved, emptyList(), online.results)?.let(::apply)
     }
 
-    /** OpenSubtitles' list for this title, asked once (when the menu opens, or to start with). */
+    /** The online list for this title, asked once (when the menu opens, or to start with). */
     fun loadOnlineSubtitles() {
         val params = _state.value.params ?: return
         val subs = _state.value.subtitles

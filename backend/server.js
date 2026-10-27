@@ -314,12 +314,12 @@ if (_summaryTimer.unref) _summaryTimer.unref();
 
 // Skip intro / credits: each show's IMDb match, kept on disk (lib/skipSegments.js).
 const skipSegments = new (require('./lib/skipSegments').SkipSegments)(path.join(config.dataDir, 'skip-matches.json'));
-// Online subtitles: OpenSubtitles, with the key and account from Settings → Playback.
+// Online subtitles: Wyzie Subs or OpenSubtitles, with the keys from Settings → Playback.
 const subtitles = new (require('./lib/subtitles').Subtitles)(path.join(config.dataDir, 'subtitles'), {
   userAgent: `StalkerWeb v${config.version || require('./package.json').version}`,
   settings: () => {
     const s = exportSettingsCache.load() || {};
-    return { apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
+    return { provider: s.subtitle_provider || 'wyzie', wyzieKey: s.wyzie_api_key || '', apiKey: s.opensubtitles_api_key || '', username: s.opensubtitles_username || '', password: s.opensubtitles_password || '', languages: s.subtitle_languages || 'en' };
   },
 });
 const vodRoutes    = require('./routes/vod')(appState, config, { watchStore, skipSegments, subtitles });

@@ -1351,7 +1351,7 @@ export default function SetupPage() {
           </div>
         </Card>
 
-        <Card title="Subtitles" description="Online subtitles from OpenSubtitles, offered in the movie and episode player beside the ones inside the videos — shared by every viewer.">
+        <Card title="Subtitles" description="Online subtitles, offered in the movie and episode player beside the ones inside the videos — shared by every viewer.">
           <SubtitleSettings />
         </Card>
           </>

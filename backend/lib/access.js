@@ -103,7 +103,7 @@ function levelFor(req, { logToken = false } = {}) {
   if (/^\/api\/(?:m3u|xspf|xmltv)(?:\/|$)/.test(p)) return 'share';
   if (p.startsWith('/api/logos/') && read) return 'share';
   // A subtitle file for the player, beside the stream (routes/vod.js).
-  if (/^\/api\/vod\/subtitles\/file\/\d+\.vtt$/.test(p) && read) return 'share';
+  if (/^\/api\/vod\/subtitles\/file\/(?:\d{1,12}|w[A-Za-z0-9_-]{1,60})\.vtt$/.test(p) && read) return 'share';
   if (PROTECTED_ROOTS.has(root)) return 'full';
   if (read && (APP_FILES.has(p) || p.startsWith('/assets/'))) return 'open';
   // A page of the web app (its routes have no file extension) — the server

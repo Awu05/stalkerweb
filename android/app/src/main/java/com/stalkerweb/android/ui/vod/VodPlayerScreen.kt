@@ -406,7 +406,7 @@ private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () 
 }
 
 /**
- * The subtitles: Off, the video's own, or OpenSubtitles' by language — with
+ * The subtitles: Off, the video's own, or the online ones by language — with
  * the online ones' delay. A side panel on wide screens and TV, a bottom one on phones.
  */
 @Composable
@@ -434,11 +434,11 @@ private fun SubtitlesPanel(
                     onPick(SubtitleChoice("embedded", t.group, t.track, language = t.language))
                 }
             }
-            item { SubtitleHeading("Online · OpenSubtitles") }
+            item { SubtitleHeading(subs.online?.provider?.takeIf { it.isNotBlank() }?.let { "Online · $it" } ?: "Online") }
             val online = subs.online
             when {
                 subs.onlineLoading || online == null -> item { SubtitleNote("Looking…") }
-                !online.configured -> item { SubtitleNote("Add an OpenSubtitles API key in the website's Settings → Playback to look them up.") }
+                !online.configured -> item { SubtitleNote("Add a subtitles key in the website's Settings → Playback to look them up.") }
                 online.error != null -> item { SubtitleNote(online.error, SwColors.Live) }
                 online.results.isEmpty() -> item { SubtitleNote("None found in your languages.") }
             }

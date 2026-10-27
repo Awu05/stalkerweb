@@ -371,7 +371,8 @@ data class SkipResponse(
     val autoSkip: Boolean = false,
 )
 
-// OpenSubtitles' subtitles for a movie or episode (GET api/vod/subtitles).
+// Online subtitles for a movie or episode (GET api/vod/subtitles), from the
+// site chosen in Settings ([SubtitlesResponse.provider]).
 @JsonClass(generateAdapter = false)
 data class OnlineSubtitle(
     val fileId: String,
@@ -385,6 +386,8 @@ data class OnlineSubtitle(
 @JsonClass(generateAdapter = false)
 data class SubtitlesResponse(
     val configured: Boolean = false,
+    /** "Wyzie Subs" or "OpenSubtitles". */
+    val provider: String = "",
     val imdbId: String? = null,
     val results: List<OnlineSubtitle> = emptyList(),
     val error: String? = null,
