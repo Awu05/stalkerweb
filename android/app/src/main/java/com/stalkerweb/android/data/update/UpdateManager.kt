@@ -49,7 +49,7 @@ class UpdateManager(private val context: Context) {
                 val asset = assets.getJSONObject(i)
                 asset.getString("name") to asset.getString("browser_download_url")
             }
-            val url = apkFor(named, com.stalkerweb.android.BuildConfig.IS_TV)
+            val url = apkFor(named, com.stalkerweb.android.BuildConfig.IS_TV, com.stalkerweb.android.BuildConfig.IS_SOLO)
                 ?: return@withContext UpdateCheck.NoApk(version)
             Log.i("UpdateManager", "New version found: $version")
             UpdateCheck.Found(ReleaseInfo(tagName, version, url))

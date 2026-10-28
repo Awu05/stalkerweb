@@ -96,27 +96,27 @@ jobs:
       # The app's unit tests first (ci.yml no longer runs on pull requests).
       - name: Android unit tests
         working-directory: android
-        run: gradle :app:testMobileDebugUnitTest
+        run: gradle :app:testMobileRemoteDebugUnitTest
 
       - name: Build APKs (mobile + tv)
         working-directory: android
         run: |
           VERSION="${{ needs.version.outputs.tag }}"
           VERSION_CLEAN="${VERSION#v}"
-          gradle :app:assembleMobileRelease :app:assembleTvRelease -PversionName="$VERSION_CLEAN"
+          gradle :app:assembleMobileRemoteRelease :app:assembleTvRemoteRelease -PversionName="$VERSION_CLEAN"
 
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-mobile-apk
-          path: android/app/build/outputs/apk/mobile/release/app-mobile-release.apk
+          path: android/app/build/outputs/apk/mobileRemote/release/app-mobile-remote-release.apk
           retention-days: 30
 
       - name: Upload tv APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-tv-apk
-          path: android/app/build/outputs/apk/tv/release/app-tv-release.apk
+          path: android/app/build/outputs/apk/tvRemote/release/app-tv-remote-release.apk
           retention-days: 30
 
   # ── Build & push Docker image ────────────────────────────────────────────
@@ -274,8 +274,8 @@ jobs:
 
       - name: Rename artifacts to include version
         run: |
-          mv app-mobile-release.apk stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
-          mv app-tv-release.apk     stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+          mv app-mobile-remote-release.apk stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
+          mv app-tv-remote-release.apk stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

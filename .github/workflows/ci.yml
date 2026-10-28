@@ -84,24 +84,24 @@ jobs:
 
       - name: Unit tests
         working-directory: android
-        run: gradle :app:testMobileDebugUnitTest
+        run: gradle :app:testMobileRemoteDebugUnitTest
 
       - name: Build debug APKs (mobile + tv)
         working-directory: android
-        run: gradle :app:assembleMobileDebug :app:assembleTvDebug
+        run: gradle :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug
 
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-mobile-debug
-          path: android/app/build/outputs/apk/mobile/debug/app-mobile-debug.apk
+          path: android/app/build/outputs/apk/mobileRemote/debug/app-mobile-remote-debug.apk
           retention-days: 7
 
       - name: Upload tv APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-tv-debug
-          path: android/app/build/outputs/apk/tv/debug/app-tv-debug.apk
+          path: android/app/build/outputs/apk/tvRemote/debug/app-tv-remote-debug.apk
           retention-days: 7
 
   # ── Docker build check (not published) ────────────────────────────────────

@@ -24,7 +24,7 @@ android {
         buildConfigField("String", "GITHUB_REPO", "\"Awu05/stalkerweb\"")
     }
 
-    flavorDimensions += "form"
+    flavorDimensions += listOf("form", "backend")
 
     productFlavors {
         create("mobile") {
@@ -35,6 +35,18 @@ android {
             dimension = "form"
             applicationIdSuffix = ".tv"
             buildConfigField("Boolean", "IS_TV", "true")
+        }
+        // Remote talks to a StalkerWeb server; Solo carries its own (the app's name and id differ so both can be installed).
+        create("remote") {
+            dimension = "backend"
+            resValue("string", "app_name", "stalkerweb")
+            buildConfigField("Boolean", "IS_SOLO", "false")
+        }
+        create("solo") {
+            dimension = "backend"
+            applicationIdSuffix = ".solo"
+            resValue("string", "app_name", "StalkerWeb Solo")
+            buildConfigField("Boolean", "IS_SOLO", "true")
         }
     }
 
