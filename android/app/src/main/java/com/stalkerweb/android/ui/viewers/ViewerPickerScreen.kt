@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.viewers
 
+import com.stalkerweb.android.ui.components.TvTextField
+
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
@@ -30,7 +32,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -165,7 +166,7 @@ fun ViewerPickerScreen(
             }
             if (adding) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    TvTextField(
                         value = name,
                         onValueChange = { name = it; nameError = null },
                         label = { Text("Name") },

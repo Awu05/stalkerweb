@@ -90,6 +90,10 @@ class MainActivity : ComponentActivity() {
         intent.removeExtra(ReminderReceiver.EXTRA_CHANNEL_ID)
     }
 
+    // A screen that must see the remote's keys wherever the focus is (RemoteKeys) sees them first.
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        com.stalkerweb.android.ui.utils.RemoteKeys.handler?.invoke(event) == true || super.dispatchKeyEvent(event)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         takeWatchExtra(intent)

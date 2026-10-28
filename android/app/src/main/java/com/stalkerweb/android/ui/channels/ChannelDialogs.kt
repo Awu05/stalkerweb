@@ -1,9 +1,11 @@
 package com.stalkerweb.android.ui.channels
 
+import com.stalkerweb.android.ui.components.TvTextField
+import com.stalkerweb.android.ui.utils.isOkKey
+
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
-import com.stalkerweb.android.ui.components.rememberTvTyping
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +42,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -114,7 +115,7 @@ fun ChannelActionsDialog(
         title = { Text(channel.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(Modifier.onPreviewKeyEvent { e ->
-                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                val ok = isOkKey(e.key)
                 if (!ok || armed) return@onPreviewKeyEvent false
                 if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) { armed = true; false } else true
             }) {
@@ -157,7 +158,7 @@ fun NameDialog(title: String, initial: String, onSave: (String) -> Unit, onDismi
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, modifier = Modifier.focusRequester(field)) },
+        text = { TvTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, modifier = Modifier.focusRequester(field)) },
         confirmButton = { Button(onClick = { onSave(name.trim()); onDismiss() }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -182,8 +183,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
         title = { Text("Set logo — ${channel.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                val tvSearch = rememberTvTyping()
-                OutlinedTextField(search, { search = it }, readOnly = tvSearch.readOnly, modifier = tvSearch.modifier, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                TvTextField(search, { search = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search by channel name") }, trailingIcon = if (search.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { search = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 found?.let { logo ->
                     Row(
                         Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { url = logo }
@@ -195,7 +195,7 @@ fun LogoDialog(channel: Channel, onCheck: suspend (String) -> String?, onSave: (
                     }
                 }
                 if (notFound) Text("No logo found", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Or paste a logo URL") })
+                TvTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Or paste a logo URL") })
             }
         },
         confirmButton = { Button(onClick = { onSave(url); onDismiss() }, enabled = url.isNotBlank()) { Text("Save") } },
@@ -280,7 +280,7 @@ fun GroupEditDialog(
         title = { Text("Edit group") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Name") })
+                TvTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Name") })
                 Text("Channels in group", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
                 LazyColumn(Modifier.heightIn(max = 160.dp)) {
                     items(members, key = { "m" + it.uniqueId }) { c ->
@@ -290,8 +290,7 @@ fun GroupEditDialog(
                         }
                     }
                 }
-                val tvQuery = rememberTvTyping()
-                OutlinedTextField(query, { query = it }, readOnly = tvQuery.readOnly, modifier = tvQuery.modifier, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
+                TvTextField(query, { query = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Search channels to add…") }, trailingIcon = if (query.isNotEmpty()) ({ TipIconButton(label = "Clear search", onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } }) else null)
                 LazyColumn(Modifier.heightIn(max = 180.dp)) {
                     items(suggestions, key = { "s" + it.uniqueId }) { c ->
                         Row(

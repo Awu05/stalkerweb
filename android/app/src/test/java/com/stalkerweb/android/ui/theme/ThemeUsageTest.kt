@@ -55,6 +55,15 @@ class ThemeUsageTest {
         assertEquals(emptyList<String>(), raw)
     }
 
+    @Test fun `opens the keyboard on a TV only on OK (TvTextField, not Material's OutlinedTextField)`() {
+        val raw = sources.filter { it.name != "TvTextField.kt" }.flatMap { file ->
+            file.readLines().mapIndexedNotNull { i, line ->
+                if (Regex("""(?<![\w])(?:[\w.]*\.)?OutlinedTextField\(""").containsMatchIn(line.substringBefore("//"))) "${file.name}:${i + 1}" else null
+            }
+        }
+        assertEquals(emptyList<String>(), raw)
+    }
+
     @Test fun `gives every viewer colour readable initials`() {
         for (v in VIEWER_COLORS) assertTrue("${v.hex} has initials", v.on == SwColors.PrimaryLight || v.on == SwColors.Bg)
     }
