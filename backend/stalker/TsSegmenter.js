@@ -25,7 +25,7 @@ const WRAP = 2 ** 33;                    // PTS is 33 bits and wraps about every
 const JUMP_SECONDS = 10;                 // a PTS jump bigger than this is a break
 const KEYLESS_TARGETS = 3;               // no keyframe for this many pieces' length: cut by the clock
 const KEEP_EXTRA = 2;                    // pieces kept past the window, for players a little behind
-const MAX_PIECE_BYTES = 32 * 1024 * 1024; // an open piece never cut (no timestamps?) is dropped past this
+const MAX_PIECE_BYTES = 32 * 1024 * 1024; // past this a piece is cut at the next frame, keyframe or not
 
 const H264 = 0x1b;
 const HEVC = 0x24;
@@ -68,9 +68,10 @@ function pesPts(pes) {
 
 /**
  * Whether the start of a frame holds a keyframe NAL: an H.264 IDR (type 5) or
- * an HEVC IRAP picture (types 16–21). Parameter sets (H.264 SPS; HEVC VPS,
- * SPS) count too: encoders send them just before a keyframe, and a long SEI
- * can push the keyframe's own NAL past this first packet.
+ * an HEVC IRAP picture (types 16–21). Parameter sets don't count: some
+ * encoders repeat them on every frame. (A keyframe whose NAL a long SEI pushes
+ * past this first packet is still found by its random-access flag, which
+ * most muxers set.)
  */
 function hasKeyframeNal(es, videoType) {
   if (videoType !== H264 && videoType !== HEVC) return false;
@@ -78,10 +79,10 @@ function hasKeyframeNal(es, videoType) {
     if (es[i] !== 0 || es[i + 1] !== 0 || es[i + 2] !== 1) continue;
     if (videoType === H264) {
       const t = es[i + 3] & 0x1f;
-      if (t === 5 || t === 7) return true;
+      if (t === 5) return true;
     } else {
       const t = (es[i + 3] >> 1) & 0x3f;
-      if ((t >= 16 && t <= 21) || t === 32 || t === 33) return true;
+      if (t >= 16 && t <= 21) return true;
     }
   }
   return false;
@@ -103,10 +104,12 @@ class TsSegmenter {
    * @param {object} [opts]
    * @param {number} [opts.targetSeconds]  a piece's length (it ends at the first keyframe after this)
    * @param {number} [opts.windowSize]     pieces listed in the playlist
-   * @param {() => number} [opts.now]      the clock, for durations across a break
+   * @param {() => number} [opts.now]      the clock, for a piece's length when its PTS can't give it
+   * @param {number} [opts.maxPieceBytes]  a piece's size cap (tests make it small)
    */
-  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now } = {}) {
+  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now, maxPieceBytes = MAX_PIECE_BYTES } = {}) {
     this.targetSeconds = targetSeconds;
+    this.maxPieceBytes = maxPieceBytes;
     this.windowSize = windowSize;
     this.now = now;
     this.rest = Buffer.alloc(0);   // bytes of a packet not yet complete
@@ -119,8 +122,10 @@ class TsSegmenter {
     this.audioType = null;
     this.lastPts = null;           // the latest frame's PTS, to spot a jump
     this.lastKeyPts = null;        // the latest keyframe's, to spot a stream without any
+    this.frameStep = null;         // the shortest step between frames seen, in seconds
+    this.at = 0;                   // when the bytes being read arrived
     this.waitFrom = null;          // with no piece open: the PTS we began waiting for a keyframe at
-    this.open = null;              // { seq, packets, bytes, startPts, endPts, startAt, disc }
+    this.open = null;              // { seq, packets, bytes, startPts, maxPts, startAt, lastAt, full, disc }
     this.pieces = [];              // closed, oldest first: { seq, data, dur, disc }
     this.seq = 0;
     this.pendingDisc = false;      // the next piece starts after a break
@@ -129,6 +134,7 @@ class TsSegmenter {
 
   /** Bytes of the stream, in any split. */
   push(chunk) {
+    this.at = this.now();
     const buf = this.rest.length ? Buffer.concat([this.rest, chunk]) : chunk;
     let i = 0;
     while (buf.length - i >= PACKET) {
@@ -143,7 +149,7 @@ class TsSegmenter {
 
   /** The source broke off (a reconnect): what comes next is a new piece, after a discontinuity. */
   discontinuity() {
-    this._break(this.now());
+    this._break();
   }
 
   /** The live media playlist, or null until the first piece is ready. */
@@ -190,7 +196,11 @@ class TsSegmenter {
     if (!this.open) return;   // before the first cut point (or after a break): dropped
     this.open.packets.push(p);
     this.open.bytes += PACKET;
-    if (this.open.bytes > MAX_PIECE_BYTES) {
+    this.open.lastAt = this.at;
+    // Too big (a high bitrate with a long GOP): cut at the next frame. Twice
+    // too big means no frame starts come at all, so it's dropped.
+    if (this.open.bytes > this.maxPieceBytes) this.open.full = true;
+    if (this.open.bytes > 2 * this.maxPieceBytes) {
       this.open = null;
       this.seq--;   // its number goes to the next piece, so the numbers stay in step with the media sequence
       this._afterBreak();
@@ -249,8 +259,11 @@ class TsSegmenter {
     const payload = payloadOf(p);
     const pts = payload && pesPts(payload);
     if (pts == null) return;
-    const at = this.now();
-    if (this.lastPts !== null && Math.abs(ptsSeconds(pts, this.lastPts)) > JUMP_SECONDS) this._break(at);
+    if (this.lastPts !== null) {
+      const step = ptsSeconds(pts, this.lastPts);
+      if (Math.abs(step) > JUMP_SECONDS) this._break();
+      else if (step > 0 && step <= 1 && (this.frameStep === null || step < this.frameStep)) this.frameStep = step;
+    }
     this.lastPts = pts;
 
     const key = pidOf(p) === this.videoPid
@@ -259,18 +272,19 @@ class TsSegmenter {
 
     let due;
     if (this.open) {
-      due = ptsSeconds(pts, this.open.startPts) >= this.targetSeconds && (key || this._keyless(pts));
+      due = this.open.full
+        || (ptsSeconds(pts, this.open.startPts) >= this.targetSeconds && (key || this._keyless(pts)));
     } else {
       // Wait for a keyframe to start on, but not longer than a piece's length.
       if (this.waitFrom === null) this.waitFrom = pts;
       due = key || ptsSeconds(pts, this.waitFrom) >= this.targetSeconds;
     }
     if (!due) {
-      if (this.open) this.open.endPts = pts;
+      if (this.open && ptsSeconds(pts, this.open.maxPts) > 0) this.open.maxPts = pts;
       return;
     }
     if (this.open) this._close(ptsSeconds(pts, this.open.startPts));
-    this._openPiece(pts, at);
+    this._openPiece(pts);
   }
 
   // No keyframe seen yet, or none for a while: the stream has no marks we can read.
@@ -279,15 +293,18 @@ class TsSegmenter {
   }
 
   /**
-   * The stream broke off at `at`. The open piece is closed there; its length,
-   * which the PTS can't give across a break, is its arrival time (or, when
-   * that's nothing, the time its frames cover).
+   * The stream broke off. The open piece is closed; with no next piece on its
+   * timeline to measure to, its length is the time its frames cover (first to
+   * last, plus one frame). With one frame and no frame rate known yet, it's
+   * the arrival time of its packets, first to last. Never the time to the
+   * break: a stall before it would make the piece far too long.
    */
-  _break(at) {
+  _break() {
     const o = this.open;
     if (o) {
-      const arrival = (at - o.startAt) / 1000;
-      this._close(arrival > 0 ? arrival : Math.max(ptsSeconds(o.endPts, o.startPts), 0.001));
+      const frames = ptsSeconds(o.maxPts, o.startPts) + (this.frameStep || 0);
+      const arrival = (o.lastAt - o.startAt) / 1000;
+      this._close(frames > 0 ? frames : Math.max(arrival, 0.001));
     }
     this._afterBreak();
   }
@@ -300,9 +317,12 @@ class TsSegmenter {
     this.waitFrom = null;
   }
 
-  _openPiece(pts, at) {
+  _openPiece(pts) {
     const head = [...(this.pat || []), ...(this.pmt || [])];
-    this.open = { seq: this.seq++, packets: head, bytes: head.length * PACKET, startPts: pts, endPts: pts, startAt: at, disc: this.pendingDisc };
+    this.open = {
+      seq: this.seq++, packets: head, bytes: head.length * PACKET,
+      startPts: pts, maxPts: pts, startAt: this.at, lastAt: this.at, full: false, disc: this.pendingDisc,
+    };
     this.pendingDisc = false;
     this.waitFrom = null;
   }

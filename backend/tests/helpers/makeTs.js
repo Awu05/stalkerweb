@@ -92,15 +92,15 @@ function pes(streamId, pts, es, bounded) {
   return [0x00, 0x00, 0x01, streamId, len >> 8, len & 0xff, 0x80, 0x80, 0x05, ...ptsBytes(pts), ...es]
 }
 
-const FILLER = new Array(400).fill(0x55)
-
 // A frame's elementary stream: an access unit delimiter, then a slice that is
 // a keyframe (IDR, HEVC IDR_W_RADL) or not. With mark 'rai' a keyframe's slice
-// stays ordinary, so only the random-access flag marks it.
-function frame(video, key) {
-  if (video === 0x1b) return [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 1, key ? 0x65 : 0x41, ...FILLER]
-  if (video === 0x24) return [0, 0, 0, 1, 0x46, 0x01, 0x50, 0, 0, 1, key ? 0x26 : 0x02, 0x01, ...FILLER]
-  return [0, 0, 1, 0x00, ...FILLER]   // MPEG-2 and others: a picture start, nothing a segmenter reads
+// stays ordinary, so only the random-access flag marks it. `sps` puts parameter
+// sets (H.264 SPS + PPS, HEVC VPS + SPS) before the slice, as some encoders do
+// on every frame.
+function frame(video, key, sps, filler) {
+  if (video === 0x1b) return [0, 0, 0, 1, 0x09, 0xf0, ...(sps ? [0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x68, 0xce] : []), 0, 0, 1, key ? 0x65 : 0x41, ...filler]
+  if (video === 0x24) return [0, 0, 0, 1, 0x46, 0x01, 0x50, ...(sps ? [0, 0, 1, 0x40, 0x01, 0, 0, 1, 0x42, 0x01] : []), 0, 0, 1, key ? 0x26 : 0x02, 0x01, ...filler]
+  return [0, 0, 1, 0x00, ...filler]   // MPEG-2 and others: a picture start, nothing a segmenter reads
 }
 
 /**
@@ -113,9 +113,12 @@ function frame(video, key) {
  * @param {number|null} [o.audio]   PMT stream type, null for none
  * @param {number} [o.startPts]     the first frame's PTS (90 kHz)
  * @param {'nal'|'rai'} [o.mark]    how keyframes are marked: a keyframe NAL, or the random-access flag
+ * @param {boolean} [o.spsEvery]    parameter sets before every frame, keyframe or not
+ * @param {number} [o.frameBytes]   filler per video frame (a bigger frame, a higher bitrate)
  */
-export function makeTs({ seconds, fps = 25, keyEvery = 2, pcrPid = VIDEO_PID, video = 0x1b, audio = 0x0f, startPts = 0, mark = 'nal' }) {
+export function makeTs({ seconds, fps = 25, keyEvery = 2, pcrPid = VIDEO_PID, video = 0x1b, audio = 0x0f, startPts = 0, mark = 'nal', spsEvery = false, frameBytes = 400 }) {
   const counters = {}
+  const filler = new Array(frameBytes).fill(0x55)
   const out = []
   const step = PTS_HZ / fps
   for (let i = 0; i < seconds * fps; i++) {
@@ -129,7 +132,7 @@ export function makeTs({ seconds, fps = 25, keyEvery = 2, pcrPid = VIDEO_PID, vi
       const af = []
       if (pcrPid === VIDEO_PID) af.push(0x10, ...pcrBytes(pts))
       if (key && mark === 'rai') { if (af.length) af[0] |= 0x40; else af.push(0x40) }
-      out.push(...packetize(VIDEO_PID, pes(0xe0, pts, frame(video, key && mark === 'nal'), false), af, counters))
+      out.push(...packetize(VIDEO_PID, pes(0xe0, pts, frame(video, key && mark === 'nal', spsEvery, filler), false), af, counters))
     }
     if (audio != null) {
       const af = pcrPid === AUDIO_PID ? [0x10, ...pcrBytes(pts)] : []
