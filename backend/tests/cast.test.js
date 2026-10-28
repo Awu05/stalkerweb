@@ -7,6 +7,8 @@ import { castBase, isLocalHost, vodContentType } from '../lib/castLink.js'
 import { CastHls } from '../stalker/CastHls.js'
 import vodModule from '../routes/vod.js'
 import streamModule from '../routes/stream.js'
+import proxyModule from '../routes/proxy.js'
+import { readSelfStream } from '../stalker/selfStreamReader.js'
 import { makeTs, startsWithKeyframe } from './helpers/makeTs.js'
 
 // A playlist's pieces, by name.
@@ -274,4 +276,71 @@ describe('CastHls over HTTP', () => {
       server.closeAllConnections(); server.close()
     }
   }, 20_000)
+})
+
+// /proxy/cast/live/<id>/index.m3u8 over HTTP, the real reader on a fake
+// /proxy/stream: an HLS channel the segmenter can't cut (encrypted, fMP4) is
+// sent to the channel's own HLS, under the token the TV came in on.
+describe('the cast playlist route', () => {
+  let server, base, hls
+  const playlistFor = {
+    42: '#EXT-X-KEY:METHOD=AES-128,URI="/key"',
+    43: '#EXT-X-MAP:URI="/init.mp4"',
+    44: null,
+  }
+  const fetchImpl = async (url) => {
+    const u = new URL(url)
+    const seg = /^\/seg\/(\d+)\.ts$/.exec(u.pathname)
+    if (seg) return new globalThis.Response(makeTs({ seconds: 2, startPts: Number(seg[1]) * 180000 }), { headers: { 'Content-Type': 'video/mp2t' } })
+    const id = u.pathname.split('/').pop()
+    const tag = playlistFor[id]
+    return new globalThis.Response(['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:2', '#EXT-X-MEDIA-SEQUENCE:0', ...(tag ? [tag] : []),
+      ...[0, 1, 2, 3].flatMap((i) => ['#EXTINF:2.0,', `/seg/${i}.ts`]), ''].join('\n'), { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } })
+  }
+  beforeAll(async () => {
+    hls = new CastHls({ inputUrlFor: (id) => `http://127.0.0.1:1/proxy/stream/${id}`, reader: (url, o) => readSelfStream(url, { ...o, fetchImpl, pollMs: 50 }) })
+    const app = express()
+    // As lib/access.js does for a /k/<token> link.
+    app.use((req, _res, next) => {
+      if (req.url.startsWith('/k/tok/')) { req.accessPrefix = '/k/tok'; req.url = req.url.slice('/k/tok'.length) }
+      next()
+    })
+    app.use('/proxy', proxyModule({ castHls: hls }))
+    await new Promise((r) => { server = app.listen(0, '127.0.0.1', r) })
+    base = `http://127.0.0.1:${server.address().port}`
+  })
+  afterAll(() => { hls.stopAll(); server.closeAllConnections(); server.close() })
+  const get = (p) => new Promise((resolve, reject) => {
+    http.get(base + p, (r) => {
+      const parts = []
+      r.on('data', (c) => parts.push(c))
+      r.on('end', () => resolve({ status: r.statusCode, headers: r.headers, body: Buffer.concat(parts) }))
+    }).on('error', reject)
+  })
+
+  it('sends the TV to the channel itself when its HLS is encrypted', async () => {
+    const r = await get('/k/tok/proxy/cast/live/42/index.m3u8')
+    expect(r.status).toBe(302)
+    expect(r.headers.location).toBe(`${base}/k/tok/proxy/stream/42`)
+    // Asked again: still passed through, nothing cut.
+    expect((await get('/k/tok/proxy/cast/live/42/index.m3u8')).status).toBe(302)
+    expect(hls.codecsOf('42')).toBeNull()
+  })
+
+  it('does the same for an fMP4 channel', async () => {
+    const r = await get('/k/tok/proxy/cast/live/43/index.m3u8')
+    expect(r.status).toBe(302)
+    expect(r.headers.location).toBe(`${base}/k/tok/proxy/stream/43`)
+  })
+
+  it('still cuts a plain TS channel into pieces', async () => {
+    const r = await get('/k/tok/proxy/cast/live/44/index.m3u8')
+    expect(r.status).toBe(200)
+    expect(r.headers['content-type']).toMatch(/mpegurl/)
+    const name = pieces(r.body.toString())[0]
+    const seg = await get(`/k/tok/proxy/cast/live/44/${name}`)
+    expect(seg.status).toBe(200)
+    expect(seg.headers['content-type']).toMatch(/video\/mp2t/)
+    expect(startsWithKeyframe(seg.body)).toBe(true)
+  })
 })

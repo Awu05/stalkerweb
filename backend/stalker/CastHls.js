@@ -12,6 +12,10 @@
 // playing. A session ends once the device stops asking for it; the next
 // request starts it again. Each holds a dozen pieces in memory — for 4K that's
 // a lot — so there are at most a few, and a stopped one lets go at once.
+//
+// An HLS channel whose segments the segmenter can't cut (encrypted, or fMP4)
+// is passed through: playlist() answers null, and the route sends the TV to
+// the channel's own HLS on this server, which it plays itself.
 
 const log = require('../logger');
 const { TsSegmenter } = require('./TsSegmenter');
@@ -48,11 +52,15 @@ class CastHls {
   /** Casting needs nothing outside this server. */
   available() { return true; }
 
-  /** The channel's playlist, once its first piece is ready (starting it if needed). */
+  /**
+   * The channel's playlist, once its first piece is ready (starting it if
+   * needed) — or null for a channel passed through as it is.
+   */
   playlist(channelId) {
     const id = String(channelId);
     const s = this._sessions.get(id) ?? this._start(id);
     s.lastUsed = this._now();
+    if (s.passthrough) return Promise.resolve(null);
     const text = s.seg.playlist();
     if (text) return Promise.resolve(text);
     return new Promise((resolve, reject) => {
@@ -72,12 +80,12 @@ class CastHls {
     const s = this._sessions.get(String(channelId));
     if (!s || !SEGMENT.test(String(name))) return null;
     s.lastUsed = this._now();
-    return s.seg.segment(String(name));
+    return s.seg?.segment(String(name)) ?? null;
   }
 
   /** The stream types of a channel being cast (for the log when a device can't play it), or null. */
   codecsOf(channelId) {
-    return this._sessions.get(String(channelId))?.seg.codecs ?? null;
+    return this._sessions.get(String(channelId))?.seg?.codecs ?? null;
   }
 
   /** The channel's session ended now (the sender stopped casting it, or moved on). */
@@ -97,14 +105,14 @@ class CastHls {
       this._stop(oldest, 'room for another channel');
     }
     log.info(TAG, `ch ${id}: casting as HLS`);
-    const s = { seg: new TsSegmenter({ now: this._now }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [] };
+    const s = { seg: new TsSegmenter({ now: this._now }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [], passthrough: null };
     this._sessions.set(id, s);
     const current = () => this._sessions.get(id) === s;
     this._reader(this._inputUrlFor(id), {
       userAgent: this._userAgent,
       signal: s.ctrl.signal,
       onData: (buf) => {
-        if (!current()) return;
+        if (!current() || !s.seg) return;
         s.seg.push(buf);
         if (s.waiters.length) {
           const text = s.seg.playlist();
@@ -112,12 +120,21 @@ class CastHls {
         }
       },
       onBreak: () => {
-        if (!current()) return;
+        if (!current() || !s.seg) return;
         log.info(TAG, `ch ${id}: the source broke off — reopening it`);
         s.seg.discontinuity();
       },
+      // Kept as a passthrough session (no pieces) until the idle sweep, so
+      // the TV's next ask is answered at once.
+      onUnsupported: (why) => {
+        if (!current()) return;
+        log.info(TAG, `ch ${id}: ${why} — the TV plays the channel's own HLS`);
+        s.passthrough = why;
+        s.seg = null;
+        for (const w of s.waiters.splice(0)) { clearTimeout(w.timer); w.resolve(null); }
+      },
     }).then(
-      () => { if (current()) this._stop(id, 'its source ended'); },
+      () => { if (current() && !s.passthrough) this._stop(id, 'its source ended'); },
       (e) => { if (current()) this._stop(id, `its source failed: ${e.message}`); },
     );
     return s;

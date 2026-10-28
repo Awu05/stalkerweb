@@ -1014,7 +1014,8 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
 
   // ── GET /proxy/cast/live/:channelId/index.m3u8 (+ its segments) ───────────
   // A live channel as HLS for a cast device (stalker/CastHls.js). Its links
-  // come from /api/stream/:id/cast.
+  // come from /api/stream/:id/cast. A channel the segmenter can't cut
+  // (encrypted or fMP4 HLS) goes to its own HLS here, under the same token.
   router.get('/cast/live/:channelId/index.m3u8', async (req, res) => {
     const id = String(req.params.channelId);
     if (!/^\d+$/.test(id)) return res.status(400).send('Invalid channel ID');
@@ -1022,6 +1023,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     try {
       const text = await appState.castHls.playlist(id);
       appState.touchActivity?.();
+      if (text === null) return res.redirect(302, `${baseUrl(req)}/proxy/stream/${id}`);
       res.set('Cache-Control', 'no-cache, no-store');
       res.type('application/vnd.apple.mpegurl').send(text);
     } catch (e) {

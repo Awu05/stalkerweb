@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { getEventListeners } from 'events'
 import { readSelfStream } from '../stalker/selfStreamReader.js'
 
 const { ReadableStream, Response, AbortController, AbortSignal } = globalThis
@@ -14,6 +15,10 @@ const body = (chunks, { hold = false } = {}) => new ReadableStream({
 const ts = (chunks, opts) => new Response(body(chunks, opts), { headers: { 'Content-Type': 'video/mp2t' } })
 const m3u8 = (text) => new Response(text, { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } })
 const text = (bufs) => bufs.map((b) => b.toString())
+// A live media playlist: 4 segments from `k`, 1 s each.
+const media = (k, extra = []) => m3u8(['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:1', `#EXT-X-MEDIA-SEQUENCE:${k}`, ...extra,
+  ...[0, 1, 2, 3].flatMap((i) => ['#EXTINF:1.0,', `/seg/s${k + i}.ts`]), ''].join('\n'))
+const segName = (url) => /\/seg\/(s\d+)\.ts$/.exec(new URL(url).pathname)?.[1]
 
 describe('readSelfStream', () => {
   it('streams a raw TS body', async () => {
@@ -107,5 +112,105 @@ describe('readSelfStream', () => {
     let asked = false
     await readSelfStream('http://x/', { onData() {}, onBreak() {}, signal: AbortSignal.abort(), fetchImpl: async () => { asked = true; return ts([]) } })
     expect(asked).toBe(false)
+  })
+
+  it('gives each request its own abort signal, so listeners never pile up (Node 18)', async () => {
+    const ctrl = new AbortController()
+    let most = 0
+    let polls = 0
+    const signals = new Set()
+    const fetchImpl = async (url, init) => {
+      // As undici does: a listener on the request's signal, freed only by GC.
+      init.signal.addEventListener('abort', () => {})
+      signals.add(init.signal)
+      most = Math.max(most, getEventListeners(init.signal, 'abort').length)
+      const name = segName(url)
+      return name ? ts([name]) : media(polls++)
+    }
+    let got = 0
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: () => { if (++got === 100) ctrl.abort() },
+      onBreak: () => { throw new Error('no break expected') },
+      signal: ctrl.signal, fetchImpl, pollMs: 0,
+    })
+    expect(signals.size).toBeGreaterThan(150)
+    expect(most).toBeLessThanOrEqual(2)
+    expect(getEventListeners(ctrl.signal, 'abort').length).toBeLessThanOrEqual(2)
+  })
+
+  it('carries on after a failed segment without replaying what it sent', async () => {
+    const ctrl = new AbortController()
+    const events = []
+    const hits = {}
+    let polls = 0
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (!name) return media(polls++)
+      hits[name] = (hits[name] ?? 0) + 1
+      if (name === 's4' && hits[name] === 1) return new Response('gone', { status: 404 })
+      return ts([name])
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { events.push(b.toString()); if (b.toString() === 's6') ctrl.abort() },
+      onBreak: () => events.push('break'),
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(events).toEqual(['s1', 's2', 's3', 'break', 's4', 's5', 's6'])
+    expect(hits).toEqual({ s1: 1, s2: 1, s3: 1, s4: 2, s5: 1, s6: 1 })
+  })
+
+  it('falls back to the live edge when the numbers went back', async () => {
+    const ctrl = new AbortController()
+    const events = []
+    let polls = 0
+    let restarted = false
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (name) return ts([name])
+      const k = polls++
+      return media(k < 2 ? 10 + k : 0)   // 10…13, 11…14, then 0…3
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { events.push(b.toString()); if (restarted && b.toString() === 's3') ctrl.abort() },
+      onBreak: () => { restarted = true; if (events.at(-1) !== 'break') events.push('break') },
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(events).toEqual(['s11', 's12', 's13', 's14', 'break', 's1', 's2', 's3'])
+  })
+
+  for (const [kind, tag, reason] of [
+    ['an encrypted', '#EXT-X-KEY:METHOD=AES-128,URI="/key"', /encrypt/i],
+    ['a SAMPLE-AES', '#EXT-X-KEY:METHOD=SAMPLE-AES,URI="/key"', /encrypt/i],
+    ['an fMP4', '#EXT-X-MAP:URI="/init.mp4"', /fmp4/i],
+  ]) {
+    it(`reports ${kind} HLS channel instead of piping its bytes`, async () => {
+      const reasons = []
+      let segs = 0
+      const fetchImpl = async (url) => {
+        if (segName(url)) { segs++; return ts(['x']) }
+        return media(0, [tag])
+      }
+      await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+        onData: () => { throw new Error('no bytes expected') },
+        onBreak: () => { throw new Error('no break expected') },
+        onUnsupported: (why) => reasons.push(why),
+        signal: new AbortController().signal, fetchImpl, pollMs: 10,
+      })
+      expect(reasons).toHaveLength(1)
+      expect(reasons[0]).toMatch(reason)
+      expect(segs).toBe(0)
+    })
+  }
+
+  it('reads a playlist whose key is METHOD=NONE as any other', async () => {
+    const ctrl = new AbortController()
+    const got = []
+    const fetchImpl = async (url) => (segName(url) ? ts([segName(url)]) : media(0, ['#EXT-X-KEY:METHOD=NONE']))
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { got.push(b.toString()); if (got.length === 3) ctrl.abort() },
+      onBreak: () => {}, onUnsupported: () => { throw new Error('supported') },
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(got).toEqual(['s1', 's2', 's3'])
   })
 })
