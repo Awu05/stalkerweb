@@ -29,20 +29,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.stalkerweb.android.data.repo.allTimezones
-import com.stalkerweb.android.data.repo.filterTimezones
+import com.stalkerweb.android.data.repo.ZoneEntry
+import com.stalkerweb.android.data.repo.filterZones
+import com.stalkerweb.android.data.repo.isZone
 import com.stalkerweb.android.data.repo.utcOffset
+import com.stalkerweb.android.data.repo.zoneEntries
 import com.stalkerweb.android.ui.theme.SwColors
-import java.time.Instant
 
 /**
  * A connection's time zone, picked from all of them (the web's
- * TimezonePicker): the field shows the zone and its UTC offset; pressing it
- * opens the list, which a search narrows (a city, a region, "+05:30").
+ * TimezonePicker — the same list, shared/timezones.json): the field shows
+ * the zone and its UTC offset; pressing it opens the list, which a search
+ * narrows (a city, a country, an offset like "UTC+1"). A real zone typed in
+ * full that isn't listed can be used too.
  */
 @Composable
 fun TimezoneField(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, label: String = "Timezone") {
@@ -71,32 +77,50 @@ fun TimezoneField(value: String, onChange: (String) -> Unit, modifier: Modifier 
 @Composable
 private fun TimezoneDialog(value: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    val zones = remember(value) { allTimezones(value) }
-    // The offsets now, once for the list (the same moment for all).
-    val offsets = remember(zones) { Instant.now().let { now -> zones.associateWith { utcOffset(it, now) } } }
-    val matches = remember(query, zones) { filterTimezones(zones, query) { offsets[it].orEmpty() } }
+    // Worked out once a dialog: every zone's country and offset now.
+    val entries = remember(value) { zoneEntries(value) }
+    val typed = query.trim()
+    val matches = remember(query, entries) {
+        val found = filterZones(entries, query)
+        // A real zone typed in full that the list hasn't: offered first, to use as it is.
+        if (typed.isNotEmpty() && isZone(typed) && entries.none { it.id.equals(typed, ignoreCase = true) }) {
+            listOf(ZoneEntry(typed, "", null, utcOffset(typed), "", "", "")) + found
+        } else found
+    }
     val listState = rememberLazyListState()
-    // Opened at the zone there is.
-    LaunchedEffect(Unit) { zones.indexOf(value).takeIf { it > 0 }?.let { listState.scrollToItem(it) } }
+    val currentFocus = remember { FocusRequester() }
+    // Opened at the zone there is, with the remote's focus on it.
+    LaunchedEffect(Unit) {
+        val at = entries.indexOfFirst { it.id == value }
+        if (at > 0) listState.scrollToItem(at)
+        withFrameNanos { }   // the row laid out, so it can take the focus
+        runCatching { currentFocus.requestFocus() }
+    }
     LaunchedEffect(query) { if (query.isNotEmpty()) listState.scrollToItem(0) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Timezone") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SearchField(query, { query = it }, "Search time zones…", Modifier.fillMaxWidth())
+                SearchField(query, { query = it }, "Search: a city, a country, UTC+1…", Modifier.fillMaxWidth())
                 if (matches.isEmpty()) Text("No time zone matches \"$query\".", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
                 LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
-                    itemsIndexed(matches, key = { _, z -> z }) { _, z ->
+                    itemsIndexed(matches, key = { i, z -> if (i == 0 && z.words.isEmpty()) "custom:${z.id}" else z.id }) { i, z ->
+                        val custom = i == 0 && z.words.isEmpty()
                         Row(
-                            Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { onPick(z) }.padding(horizontal = 8.dp, vertical = 10.dp),
+                            Modifier.fillMaxWidth()
+                                .then(if (z.id == value && query.isEmpty()) Modifier.focusRequester(currentFocus) else Modifier)
+                                .tvFocus(RoundedCornerShape(8.dp)).clickable { onPick(z.id) }.padding(horizontal = 8.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Box(Modifier.size(16.dp)) { if (z == value) Icon(Icons.Default.Check, "Chosen", tint = SwColors.PrimaryLight, modifier = Modifier.size(16.dp)) }
-                            Text(z.replace('_', ' '), color = if (z == value) SwColors.PrimaryLight else SwColors.Text,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Text(offsets[z].orEmpty(), color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            Box(Modifier.size(16.dp)) { if (z.id == value) Icon(Icons.Default.Check, "Chosen", tint = SwColors.PrimaryLight, modifier = Modifier.size(16.dp)) }
+                            Column(Modifier.weight(1f)) {
+                                Text(if (custom) "Use \"${z.id}\"" else z.id.replace('_', ' '), color = if (z.id == value) SwColors.PrimaryLight else SwColors.Text,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (z.country.isNotEmpty()) Text(z.country, color = SwColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                            Text(z.label, color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
