@@ -92,6 +92,7 @@ import com.stalkerweb.android.ui.components.Pill
 import com.stalkerweb.android.ui.components.passwordTransformation
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.theme.VIEWER_COLORS
+import com.stalkerweb.android.ui.components.TimezoneField
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.update.UpdateViewModel
@@ -415,7 +416,7 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 if (idsFromMac && p.mac.isNotBlank() && macDeviceId(p.mac).isEmpty()) {
                     Text("The device IDs fill in once the MAC is complete.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
-                field("Timezone", p.timezone) { p = p.copy(timezone = it) }
+                TimezoneField(p.timezone, { p = p.copy(timezone = it) }, Modifier.fillMaxWidth())
                 field("Language", p.lang) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
                 var passwordShown by remember { mutableStateOf(false) }

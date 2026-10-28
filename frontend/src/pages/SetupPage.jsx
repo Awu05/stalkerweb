@@ -32,6 +32,7 @@ import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
 import { AutoSkipSetting } from '@/components/SkipControls'
 import SubtitleSettings from '@/components/SubtitleSettings'
+import TimezonePicker from '@/components/TimezonePicker'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
@@ -291,7 +292,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Timezone" id="prof-tz">
-              <Input id="prof-tz" value={form.timezone} onChange={set('timezone')} />
+              <TimezonePicker id="prof-tz" value={form.timezone} onChange={(tz) => setForm((f) => ({ ...f, timezone: tz }))} />
             </Field>
             <Field label="Language" id="prof-lang">
               <Input id="prof-lang" value={form.lang} onChange={set('lang')} />
