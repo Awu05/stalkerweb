@@ -558,8 +558,6 @@ export default function PlayerPage() {
   // never carry over to the next channel, which is what made playback "always
   // start muted" once any channel hit the autoplay fallback.
   const userMutedRef     = useRef(muted)
-  // The browser, not the viewer, muted it (no click yet): the first click or key brings the sound back.
-  const [soundBlocked, setSoundBlocked] = useState(false)
 
   // Restore last-watched channel: URL param takes priority, then localStorage
   const [activeChannel, setActiveChannel] = useState(() => {
@@ -864,7 +862,6 @@ export default function PlayerPage() {
       startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
         if (!r || !active) return
         setMuted(r.muted)
-        setSoundBlocked(r.muted && !userMutedRef.current)
         if (r.playing) { setStatus('playing'); setPlaying(true); return }
         // Not started (refused, or a stream that wouldn't play): paused, with play to try again —
         // not left on the loading spinner. (A stream that fails to load is the stall recovery's.)
@@ -1198,7 +1195,6 @@ export default function PlayerPage() {
           break
         case 'KeyM':
           e.preventDefault()
-          setSoundBlocked(false)
           setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm })
           break
         case 'KeyP':
@@ -1235,7 +1231,10 @@ export default function PlayerPage() {
 
   // The key handler is bound once: through a ref, it sees casting start and stop.
   togglePlayPauseRef.current = togglePlayPause
-  useSoundOnFirstGesture(soundBlocked && muted && cast.mode !== 'chromecast', videoRef, setMuted, { isMuteKey: isMuteShortcut })
+  // Muted by the browser, not the viewer (no click yet): the first click or key brings the sound back.
+  // (Every mute the viewer sets goes with setMuted, so this follows it.)
+  const soundBlocked = muted && !userMutedRef.current && cast.mode !== 'chromecast'
+  useSoundOnFirstGesture(soundBlocked, videoRef, setMuted, { isMuteKey: isMuteShortcut, onPicture: resetHideTimer })
   function togglePlayPause() {
     if (cast.mode === 'chromecast') { cast.togglePlay(); return }
     const v = videoRef.current
@@ -1245,7 +1244,6 @@ export default function PlayerPage() {
       startPlaying(v, { userMuted: userMutedRef.current }).then((r) => {
         if (!r) return
         setMuted(r.muted)
-        setSoundBlocked(r.muted && !userMutedRef.current)
         if (r.playing) { setPlaying(true); setStatus('playing') }
       })
     } else {
@@ -1307,7 +1305,7 @@ export default function PlayerPage() {
         <StreamStats open={statsOpen && !cast.mode} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
           kind="live" id={activeChannel ? String(activeChannel.uniqueId) : null} className="top-14" />
         <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
-        {soundBlocked && muted && cast.mode !== 'chromecast' && status === 'playing' && <ForcedMuteNote />}
+        {soundBlocked && status === 'playing' && <ForcedMuteNote />}
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
@@ -1386,8 +1384,8 @@ export default function PlayerPage() {
             audioTracks={audioTracks} activeAudio={activeAudio}
             subtitleTracks={subtitleTracks} activeSub={activeSub}
             onPlayPause={togglePlayPause}
-            onMute={() => { setSoundBlocked(false); setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm }) }}
-            onVolume={(v) => { setVolume(v); setMuted(false); setSoundBlocked(false); userMutedRef.current = false }}
+            onMute={() => setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm })}
+            onVolume={(v) => { setVolume(v); setMuted(false); userMutedRef.current = false }}
             onFullscreen={toggleFullscreen}
             onToggleList={() => setShowList(v => !v)}
             onTogglePiP={togglePiP}
