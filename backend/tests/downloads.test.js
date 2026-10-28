@@ -1,9 +1,10 @@
+/* global ReadableStream */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-const DownloadManager = require('../downloads/DownloadManager');
-const FfmpegService = require('../stalker/FfmpegService');
+import DownloadManager from '../downloads/DownloadManager.js';
+import FfmpegService from '../stalker/FfmpegService.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dl-'));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

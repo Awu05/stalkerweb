@@ -1,8 +1,9 @@
+/* global ReadableStream, AbortController */
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-const { hlsConcat } = require('../downloads/hlsConcat');
+import { hlsConcat } from '../downloads/hlsConcat.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hlsc-'));
 afterEach(() => { for (const f of fs.readdirSync(dir)) fs.rmSync(path.join(dir, f), { force: true }); });
