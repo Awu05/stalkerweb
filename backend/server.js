@@ -418,8 +418,8 @@ app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
 // Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast links.
+// (They point at the cast listener once it's up, below.)
 const soloCast = require('./lib/soloCast');
-if (config.solo) soloCast.setCastPort(config.castPort);
 require('./routes/solo').mount(app, config, soloCast);
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback

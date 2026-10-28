@@ -15,10 +15,10 @@ const net = require('net');
 const log = require('../logger');
 const TAG = 'solo';
 
-let castPort = 0;      // 0 = no cast listener (not Solo)
+let castPort = 0;      // the cast listener's port while it's up; 0 = none
 let lanHost = null;    // the device's Wi-Fi address, as the app last said
 
-/** The port the cast listener is on (config.castPort); 0 turns Solo casting off. */
+/** The port the cast listener is on; 0 = it isn't (set by startLanListener). */
 function setCastPort(port) {
   castPort = Number.isInteger(port) && port > 0 ? port : 0;
 }
@@ -44,8 +44,9 @@ const active = () => castPort > 0;
 
 /**
  * In front of the app on the cast listener: only reading the stream under the
- * share token gets through; anything else is a bare 404, as if nothing were
- * there. Judged on the raw path, before the access middleware takes the prefix
+ * share token gets through — and the CORS preflight a receiver may send before
+ * it, which cors() in the app answers; anything else is a bare 404, as if
+ * nothing were there. Judged on the raw path, before the access middleware takes the prefix
  * off — and strictly: an escaped or upper-case spelling, or a "..", is refused
  * rather than worked out (the TV only ever asks for the links it was given).
  * Plain Node calls, so it can sit in front of the app without Express.
@@ -55,7 +56,7 @@ function lanGate(shareToken) {
   return function soloLanGate(req, res, next) {
     const p = String(req.url || '').split('?')[0];
     const ok = !!shareToken
-      && (req.method === 'GET' || req.method === 'HEAD')
+      && (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS')
       && p.startsWith(prefix)
       && !p.includes('%') && !p.includes('\\')
       && !p.split('/').some((s) => s === '..' || s === '.');
@@ -67,23 +68,40 @@ function lanGate(shareToken) {
 }
 
 /**
- * The cast listener: the app, behind lanGate, on host:port (every address by
- * default). Without a share token (no ACCESS_KEY) there'd be nothing it could
- * let through, so it isn't started. Returns the server, or null.
+ * The cast listener: the app, behind lanGate, on host:port — by default every
+ * address, IPv4 and IPv6 ('::'; just IPv4 on a system without IPv6), since the
+ * Wi-Fi address the app sends may be either. Without a share token (no
+ * ACCESS_KEY) there'd be nothing it could let through, so it isn't started.
+ * Cast links point at it only while it's listening (castOrigin()): one that
+ * failed to start, or stopped, gives links marked unreachable. Returns the
+ * server, or null.
  */
-function startLanListener({ app, port, host = '0.0.0.0', shareToken, logger = log }) {
+function startLanListener({ app, port, host, shareToken, logger = log }) {
+  castPort = 0;
   if (!shareToken) {
     logger.warn(TAG, 'Solo without an ACCESS_KEY — the cast listener is not started, so casting is off');
     return null;
   }
   const gate = lanGate(shareToken);
   const server = http.createServer((req, res) => gate(req, res, () => app(req, res)));
+  let bind = host || '::';
+  let up = false;
+  const down = () => { if (up) { up = false; castPort = 0; } };
+  server.on('listening', () => {
+    up = true;
+    castPort = server.address().port;
+    logger.info(TAG, `cast stream on port ${castPort}${bind === '::' ? '' : ` (${bind})`} — only the cast stream`);
+  });
   server.on('error', (e) => {
+    if (!host && bind === '::' && (e.code === 'EAFNOSUPPORT' || e.code === 'EADDRNOTAVAIL')) {
+      bind = '0.0.0.0';   // no IPv6 here
+      return server.listen(port, bind);
+    }
+    down();
     logger.error(TAG, `cast listener on port ${port} failed (${e.code || e.message}) — casting is off`);
   });
-  server.listen(port, host, () => {
-    logger.info(TAG, `cast stream on http://${host}:${server.address().port} (only the cast stream)`);
-  });
+  server.on('close', down);
+  server.listen(port, bind);
   return server;
 }
 

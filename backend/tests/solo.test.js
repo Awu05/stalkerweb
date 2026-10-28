@@ -3,6 +3,8 @@ import http from 'http'
 import process from 'process'
 import { createRequire } from 'module'
 import express from 'express'
+import cors from 'cors'
+import net from 'net'
 import { createAccess } from '../lib/access.js'
 
 // Through require, as the server loads them: castLink reads the same soloCast
@@ -62,7 +64,33 @@ describe('Solo config', () => {
     expect(app.solo).toBe(true)
     expect(app.castPort).toBe(18984)
   })
+
+  it('listens on 127.0.0.1 in Solo, whatever HOST says', () => {
+    const log = require('../logger.js')
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {})
+    try {
+      expect(load({ SOLO: '1' }).host).toBe('127.0.0.1')
+      expect(warn).not.toHaveBeenCalled()
+      expect(load({ SOLO: '1', HOST: '127.0.0.1' }).host).toBe('127.0.0.1')
+      expect(warn).not.toHaveBeenCalled()
+      expect(load({ SOLO: '1', HOST: '0.0.0.0' }).host).toBe('127.0.0.1')
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn.mock.calls[0].join(' ')).toMatch(/HOST.*ignored/)
+    } finally { warn.mockRestore() }
+  })
 })
+
+// Whether this machine can listen on ::1 at all.
+const ipv6 = await new Promise((resolve) => {
+  const s = net.createServer().once('error', () => resolve(false)).listen(0, '::1', () => s.close(() => resolve(true)))
+})
+
+// A port something else already holds.
+async function busyPort() {
+  const s = net.createServer()
+  await new Promise((r) => s.listen(0, '127.0.0.1', r))
+  return s
+}
 
 describe('the LAN listener', () => {
   const access = createAccess({ key: KEY, logger: quiet })
@@ -73,10 +101,11 @@ describe('the LAN listener', () => {
     // Like server.js: the access middleware, then stand-ins that answer 200
     // for anything — a request the LAN gate lets slip shows up as a 200.
     const app = express()
+    app.use(cors())
     app.use(access.stripPrefix)
     app.use(access.gate)
     app.use((req, res) => res.json({ url: req.url }))
-    server = soloCast.startLanListener({ app, port: 0, host: '127.0.0.1', shareToken: T, logger: quiet })
+    server = soloCast.startLanListener({ app, port: 0, shareToken: T, logger: quiet })
     await new Promise((r) => server.once('listening', r))
     base = `http://127.0.0.1:${server.address().port}`
   })
@@ -94,9 +123,25 @@ describe('the LAN listener', () => {
       `/k/${T}/proxy/%2e%2e/api/settings`, `/k/${T}/proxy%2f../api/settings`, `/K/${T}/PROXY/stream/1`,
     ]
     for (const p of refused) expect((await request(base, p)).status, p).toBe(404)
-    for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS']) {
+    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
       expect((await request(base, `/k/${T}/proxy/cast/live/1/index.m3u8`, { method })).status, method).toBe(404)
     }
+  })
+
+  it("lets a Chromecast's CORS preflight through under the share token, nowhere else", async () => {
+    const preflight = { method: 'OPTIONS', headers: { Origin: 'https://receiver.example', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'range' } }
+    const ok = await request(base, `/k/${T}/proxy/cast/live/1/index.m3u8`, preflight)
+    expect(ok.status).toBe(204)
+    for (const p of ['/api/settings', `/k/${T}/api/settings`, '/proxy/stream/1', `/k/wrong/proxy/stream/1`, `/k/${T}/proxy/../api/x`]) {
+      expect((await request(base, p, preflight)).status, p).toBe(404)
+    }
+  })
+
+  it.skipIf(!ipv6)('answers on IPv6 too, through the same gate', async () => {
+    const v6 = `http://[::1]:${server.address().port}`
+    expect((await request(v6, `/k/${T}/proxy/stream/1`)).status).toBe(200)
+    expect((await request(v6, '/api/health')).status).toBe(404)
+    expect((await request(base, `/k/${T}/proxy/stream/1`)).status).toBe(200)
   })
 
   it('answers a refused request without the token or the key', async () => {
@@ -111,6 +156,42 @@ describe('the LAN listener', () => {
     expect(soloCast.startLanListener({ app, port: 0, host: '127.0.0.1', shareToken: null, logger: { ...quiet, warn, error: warn } })).toBe(null)
     expect(warn).toHaveBeenCalledOnce()
     expect(warn.mock.calls[0].join(' ')).toMatch(/ACCESS_KEY/)
+  })
+})
+
+describe('cast links follow the cast listener', () => {
+  const access = createAccess({ key: KEY, logger: quiet })
+  const link = () => castLink(fakeReq('127.0.0.1:8983'), 'tok', '/proxy/cast/live/42/index.m3u8', 'application/x-mpegURL', true)
+
+  it('point at the listener once it is up', async () => {
+    const server = soloCast.startLanListener({ app: express(), port: 0, shareToken: access.shareToken, logger: quiet })
+    try {
+      soloCast.setLanHost('192.168.1.20')
+      expect(link().reachable).toBe(false)   // not listening yet
+      await new Promise((r) => server.once('listening', r))
+      expect(soloCast.castOrigin()).toBe(`http://192.168.1.20:${server.address().port}`)
+      expect(link().reachable).toBe(true)
+    } finally { server.close() }
+  })
+
+  it('are unreachable when the cast port is taken', async () => {
+    const holder = await busyPort()
+    const port = holder.address().port
+    soloCast.setCastPort(port)   // stale: what Solo said before the listener came up
+    try {
+      const server = soloCast.startLanListener({ app: express(), port, host: '127.0.0.1', shareToken: access.shareToken, logger: quiet })
+      await new Promise((r) => server.once('error', r))
+      soloCast.setLanHost('192.168.1.20')
+      expect(soloCast.castOrigin()).toBe(null)
+      expect(link().reachable).toBe(false)
+    } finally { holder.close() }
+  })
+
+  it('are unreachable when the listener was refused (no ACCESS_KEY)', () => {
+    soloCast.setCastPort(18984)
+    expect(soloCast.startLanListener({ app: express(), port: 18984, shareToken: null, logger: quiet })).toBe(null)
+    soloCast.setLanHost('192.168.1.20')
+    expect(link().reachable).toBe(false)
   })
 })
 

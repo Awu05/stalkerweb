@@ -3,12 +3,16 @@
 const path = require('path');
 
 const solo = process.env.SOLO === '1';
+const SOLO_HOST = '127.0.0.1';
+if (solo && (process.env.HOST || '').trim() && process.env.HOST.trim() !== SOLO_HOST) {
+  require('./logger').warn('config', `HOST=${process.env.HOST.trim()} is ignored in Solo — listening on ${SOLO_HOST} only`);
+}
 
 const config = {
   port: parseInt(process.env.PORT || '8983', 10),
   // The address to listen on. 0.0.0.0 = every address (IPv6 too, see
-  // server.js); the Solo app passes 127.0.0.1, so only the app reaches it.
-  host: (process.env.HOST || '').trim() || '0.0.0.0',
+  // server.js). Solo is always 127.0.0.1, so only the app reaches it.
+  host: solo ? SOLO_HOST : (process.env.HOST || '').trim() || '0.0.0.0',
   // Solo: the server runs inside the StalkerWeb Solo Android app, and a second
   // listener on CAST_PORT gives a Chromecast the cast stream only (lib/soloCast.js).
   solo,
