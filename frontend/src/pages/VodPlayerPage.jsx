@@ -8,6 +8,8 @@ import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { startPlaying } from '@/lib/startPlaying'
+import { useSoundOnFirstGesture } from '@/lib/forcedMute'
+import ForcedMuteNote from '@/components/ForcedMuteNote'
 import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
@@ -95,6 +97,8 @@ export default function VodPlayerPage() {
   const [errorMsg, setErrorMsg]       = useState('')
   const [playing, setPlaying]         = useState(false)
   const [muted, setMuted]             = useState(false)
+  // The browser, not the viewer, muted it (no click yet): the first click or key brings the sound back.
+  const [soundBlocked, setSoundBlocked] = useState(false)
   const [volume, setVolume]           = useState(80)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration]       = useState(0)
@@ -374,6 +378,7 @@ export default function VodPlayerPage() {
       startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
         if (!r || leftRef.current) return
         setMuted(r.muted)
+        setSoundBlocked(r.muted && !userMutedRef.current)
         if (r.playing) { setStatus('playing'); setPlaying(true); return }
         setPlaying(false)
         // A file this browser can't play says so; one it only won't start without a click waits for one.
@@ -585,12 +590,14 @@ export default function VodPlayerPage() {
   castRemoteRef.current = cast.remote
   onAirplayRef.current = cast.mode === 'airplay'
 
+  useSoundOnFirstGesture(soundBlocked && muted && !onTv, videoRef, setMuted)
+
   function togglePlayPause() {
     if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return
     if (!v.paused) { v.pause(); return }
     // As a title starts (lib/startPlaying.js): with the viewer's own sound.
-    startPlaying(v, { userMuted: userMutedRef.current }).then((r) => { if (r) setMuted(r.muted) })
+    startPlaying(v, { userMuted: userMutedRef.current }).then((r) => { if (r) { setMuted(r.muted); setSoundBlocked(r.muted && !userMutedRef.current) } })
   }
 
   function toggleFullscreen() {
@@ -660,6 +667,8 @@ export default function VodPlayerPage() {
             </button>
           </div>
         )}
+
+        {soundBlocked && muted && !onTv && status === 'playing' && <ForcedMuteNote className={resumedFrom > 0 ? 'top-24' : undefined} />}  {/* below the resumed-from banner */}
 
         {/* Video element */}
         {/* The video is pinned to this area's edges: sized from its own width
@@ -780,12 +789,12 @@ export default function VodPlayerPage() {
               </button>
             )}
             <div className="flex items-center gap-2 group/vol">
-              <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => { userMutedRef.current = !m; return !m })} className="text-white/90 hover:text-white p-1 transition-colors">
+              <button data-mute-button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => { setSoundBlocked(false); setMuted(m => { userMutedRef.current = !m; return !m }) }} className="text-white/90 hover:text-white p-1 transition-colors">
                 {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
               <div className="w-0 overflow-hidden group-hover/vol:w-20 transition-all duration-200">
                 <Slider min={0} max={100} step={1} value={[muted ? 0 : volume]}
-                  onValueChange={([v]) => { setVolume(v); setMuted(false); userMutedRef.current = false }} className="w-20" />
+                  onValueChange={([v]) => { setVolume(v); setMuted(false); setSoundBlocked(false); userMutedRef.current = false }} className="w-20" />
               </div>
             </div>
             <div className="flex-1" />

@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { startPlaying } from '@/lib/startPlaying'
+import { useSoundOnFirstGesture } from '@/lib/forcedMute'
+import ForcedMuteNote from '@/components/ForcedMuteNote'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
 import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
@@ -27,6 +29,9 @@ import { ClearSearch } from '@/components/ui/clear-search'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import { useCasting } from '@/lib/useCasting'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
+
+// M mutes and unmutes by itself (the key handler below): its first press is left to it.
+const isMuteShortcut = (e) => e.code === 'KeyM' && !isTypingTarget(e.target)
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -43,7 +48,7 @@ function Controls({
           {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
         </button>
         <div className="flex items-center gap-2 group/vol">
-          <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
+          <button data-mute-button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
             {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <div className="w-0 overflow-hidden group-hover/vol:w-20 group-focus-within/vol:w-20 transition-all duration-200">
@@ -553,6 +558,8 @@ export default function PlayerPage() {
   // never carry over to the next channel, which is what made playback "always
   // start muted" once any channel hit the autoplay fallback.
   const userMutedRef     = useRef(muted)
+  // The browser, not the viewer, muted it (no click yet): the first click or key brings the sound back.
+  const [soundBlocked, setSoundBlocked] = useState(false)
 
   // Restore last-watched channel: URL param takes priority, then localStorage
   const [activeChannel, setActiveChannel] = useState(() => {
@@ -857,6 +864,7 @@ export default function PlayerPage() {
       startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
         if (!r || !active) return
         setMuted(r.muted)
+        setSoundBlocked(r.muted && !userMutedRef.current)
         if (r.playing) { setStatus('playing'); setPlaying(true); return }
         // Not started (refused, or a stream that wouldn't play): paused, with play to try again —
         // not left on the loading spinner. (A stream that fails to load is the stall recovery's.)
@@ -1190,6 +1198,7 @@ export default function PlayerPage() {
           break
         case 'KeyM':
           e.preventDefault()
+          setSoundBlocked(false)
           setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm })
           break
         case 'KeyP':
@@ -1226,6 +1235,7 @@ export default function PlayerPage() {
 
   // The key handler is bound once: through a ref, it sees casting start and stop.
   togglePlayPauseRef.current = togglePlayPause
+  useSoundOnFirstGesture(soundBlocked && muted && cast.mode !== 'chromecast', videoRef, setMuted, { isMuteKey: isMuteShortcut })
   function togglePlayPause() {
     if (cast.mode === 'chromecast') { cast.togglePlay(); return }
     const v = videoRef.current
@@ -1235,6 +1245,7 @@ export default function PlayerPage() {
       startPlaying(v, { userMuted: userMutedRef.current }).then((r) => {
         if (!r) return
         setMuted(r.muted)
+        setSoundBlocked(r.muted && !userMutedRef.current)
         if (r.playing) { setPlaying(true); setStatus('playing') }
       })
     } else {
@@ -1296,6 +1307,7 @@ export default function PlayerPage() {
         <StreamStats open={statsOpen && !cast.mode} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
           kind="live" id={activeChannel ? String(activeChannel.uniqueId) : null} className="top-14" />
         <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
+        {soundBlocked && muted && cast.mode !== 'chromecast' && status === 'playing' && <ForcedMuteNote />}
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
@@ -1374,8 +1386,8 @@ export default function PlayerPage() {
             audioTracks={audioTracks} activeAudio={activeAudio}
             subtitleTracks={subtitleTracks} activeSub={activeSub}
             onPlayPause={togglePlayPause}
-            onMute={() => setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm })}
-            onVolume={(v) => { setVolume(v); setMuted(false); userMutedRef.current = false }}
+            onMute={() => { setSoundBlocked(false); setMuted(m => { const nm = !m; userMutedRef.current = nm; return nm }) }}
+            onVolume={(v) => { setVolume(v); setMuted(false); setSoundBlocked(false); userMutedRef.current = false }}
             onFullscreen={toggleFullscreen}
             onToggleList={() => setShowList(v => !v)}
             onTogglePiP={togglePiP}
