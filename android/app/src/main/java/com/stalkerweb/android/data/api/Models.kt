@@ -302,6 +302,8 @@ data class Profile(
     @param:Json(name = "send_device_id")   val sendDeviceId: Boolean = true,
     @param:Json(name = "send_device_id2")  val sendDeviceId2: Boolean = true,
     @param:Json(name = "connection_timeout") val connectionTimeout: Int = 10,
+    /** The box's UID (its System information screen): only to make device IDs from (DeviceId.kt). */
+    val uid: String = "",
     val disabledGenres: List<String> = emptyList(),
     // Coarser than disabledGenres and applied to VOD too (server-side). Hides
     // every genre whose "LANGUAGE | SECTION" name starts with one of these.
