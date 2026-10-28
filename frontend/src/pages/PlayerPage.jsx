@@ -11,6 +11,7 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
 import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
@@ -35,7 +36,7 @@ function Controls({
   onAudioTrack, onSubtitleTrack, cast, statsOpen, onToggleStats,
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
+    <div data-player-controls className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
       <div className="flex items-center gap-2">
         <button onClick={onPlayPause} className="text-white/90 hover:text-white transition-colors p-1" aria-label={playing ? 'Pause' : 'Play'}>
           {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
@@ -1134,9 +1135,12 @@ export default function PlayerPage() {
   }, [status])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  // Space: play / pause, on the video or its controls (lib/useSpaceToPlay.js);
+  // onKey below brings the controls up for it, as for any key.
+  useSpaceToPlay(togglePlayPause)
   useEffect(() => {
     function onKey(e) {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (isTypingTarget(e.target)) return
       resetHideTimer()   // a remote has no mouse: any key brings the controls up
 
       if (isBackKey(e)) {
@@ -1187,10 +1191,6 @@ export default function PlayerPage() {
       }
 
       switch (e.code) {
-        case 'Space':
-          e.preventDefault()
-          togglePlayPauseRef.current()
-          break
         case 'KeyF':
           e.preventDefault()
           toggleFullscreen()
@@ -1240,8 +1240,12 @@ export default function PlayerPage() {
     if (v.paused) {
       v.play()
         .then(() => { setPlaying(true); setStatus('playing') })
-        .catch(() => {
+        .catch((err) => {
+          // Only the browser's no-sound-autoplay rule gets the muted retry; a
+          // play() a pause cut short (AbortError) stays paused, sound as it was.
+          if (err?.name !== 'NotAllowedError') return
           v.muted = true
+          setMuted(true)
           v.play()
             .then(() => { setPlaying(true); setStatus('playing') })
             .catch(() => {})

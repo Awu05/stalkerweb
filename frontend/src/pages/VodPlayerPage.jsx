@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
+import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
@@ -182,7 +183,7 @@ export default function VodPlayerPage() {
   useEffect(() => {
     if (!isEpisode) return
     const onKey = (e) => {
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       const n = e.code === 'KeyN' ? nextRef.current : e.code === 'KeyP' ? prevRef.current : null
       if (!n) return
       e.preventDefault()
@@ -486,12 +487,15 @@ export default function VodPlayerPage() {
 
   useEffect(() => { resetHideTimer(); return () => clearTimeout(hideTimer.current) }, [resetHideTimer])
 
+  // Space: play / pause, on the video or its controls (lib/useSpaceToPlay.js).
+  useSpaceToPlay(togglePlayPause)
+
   // ← / →: back or forward 10 seconds. Not while typing, or on a slider (the
   // seek bar and volume take the arrows themselves).
   useEffect(() => {
     const onKey = (e) => {
       if (e.code !== 'ArrowLeft' && e.code !== 'ArrowRight') return
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable ||
+      if (isTypingTarget(e.target) ||
           e.target.closest?.('[role="slider"]') || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
       const v = videoRef.current
       if (!v || !Number.isFinite(v.duration)) return
@@ -720,7 +724,7 @@ export default function VodPlayerPage() {
         )}
 
         {/* Controls bar (the local video's — hidden while a Chromecast plays it: the overlay has the TV's) */}
-        <div className={cn(
+        <div data-player-controls className={cn(
           'absolute bottom-0 inset-x-0 z-20 transition-opacity duration-300',
           onTv ? 'hidden' : showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
