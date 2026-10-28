@@ -134,18 +134,20 @@ describe('My List', () => {
     expect(store.removeFromList('view_a', P, '200').list.map((e) => e.id)).toEqual(['100'])
   })
 
-  it('moves a movie to Completed when it is finished, and keeps it', () => {
+  it('keeps a finished movie in To watch — Completed only by hand', () => {
     store.addToList('view_a', P, heat)
-    play('100', 600)
-    expect(store.get('view_a', P).list[0].completedAt).toBe(null)
     const w = play('100', 5900)
-    expect(w.list[0].completedAt).toEqual(expect.any(Number))
+    expect(w.list).toHaveLength(1)
+    expect(w.list[0].completedAt).toBe(null)
+    expect(w.watched).toContain('100')   // still marked watched, for the "Not watched" filter
   })
 
-  it('moves a show to Completed only after its last episode', () => {
+  it("keeps a show in To watch after its last episode — what an old app's lastEpisode says too", () => {
     store.addToList('view_a', P, show)
-    expect(play('200:s1:e1', 5900).list[0].completedAt).toBe(null)
-    expect(play('200:s2:e9', 5900, 6000, { lastEpisode: true }).list[0].completedAt).toEqual(expect.any(Number))
+    play('200:s1:e1', 5900)
+    const w = play('200:s2:e9', 5900, 6000, { lastEpisode: true })
+    expect(w.list).toHaveLength(1)
+    expect(w.list[0].completedAt).toBe(null)
   })
 
   it('can be moved between To watch and Completed by hand', () => {

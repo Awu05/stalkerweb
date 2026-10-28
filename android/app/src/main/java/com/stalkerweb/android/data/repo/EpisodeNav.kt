@@ -33,10 +33,3 @@ fun episodeNeighbours(seasons: List<VodSeason>, bySeason: Map<String, List<VodEp
     val next = side(1)
     return Neighbours(prev, next, needs)
 }
-
-/** The show's very last episode — only once this episode is found and nothing follows (finishing it completes the show on My List). */
-fun isLastEpisode(seasons: List<VodSeason>, bySeason: Map<String, List<VodEpisode>>, seasonId: String, episodeId: String): Boolean {
-    val found = seasons.any { it.id == seasonId } && bySeason[seasonId]?.any { it.episodeId == episodeId } == true
-    val n = episodeNeighbours(seasons, bySeason, seasonId, episodeId)
-    return found && n.next == null && n.needs.isEmpty()
-}

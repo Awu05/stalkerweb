@@ -151,13 +151,6 @@ export default function VodPlayerPage() {
   useEffect(() => { if (seasons) { loadSeason(seasonId); loadSeason(panelSeason) } }, [seasons, seasonId, panelSeason, loadSeason])
 
   const neighbours = seasons ? episodeNeighbours(seasons, episodesBySeason, seasonId, episodeId) : { prev: null, next: null, needs: [] }
-  // The show's very last episode: finishing it moves the show to Completed on My
-  // List. Only once this episode is actually found in the show's seasons —
-  // seasons that failed to load also leave no next episode.
-  const found = !!seasons?.some((s) => String(s.id) === String(seasonId))
-    && !!episodesBySeason[seasonId]?.some((e) => String(e.episodeId) === String(episodeId))
-  const lastEpisode = isEpisode && found && !neighbours.next && neighbours.needs.length === 0
-  useEffect(() => { metaRef.current = { ...metaRef.current, lastEpisode } })
   const needsKey = neighbours.needs.join(',')
   useEffect(() => { needsKey.split(',').filter(Boolean).forEach(loadSeason) }, [needsKey, loadSeason])
 

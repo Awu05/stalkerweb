@@ -3,9 +3,7 @@ package com.stalkerweb.android.data.repo
 import com.stalkerweb.android.data.api.VodEpisode
 import com.stalkerweb.android.data.api.VodSeason
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // The cases of frontend/src/lib/episodeNav.test.js, plus the last-episode rule.
@@ -36,12 +34,5 @@ class EpisodeNavTest {
         assertNull(episodeNeighbours(seasons, eps, "s1", "a").prev)
         assertNull(episodeNeighbours(listOf(VodSeason("s1")), eps, "s1", "b").next)
         assertEquals(Neighbours(null, null, emptyList()), episodeNeighbours(seasons, eps, "s9", "x"))
-    }
-
-    @Test fun theLastEpisodeOnlyWhenItIsFoundAndNothingFollows() {
-        assertTrue(isLastEpisode(listOf(VodSeason("s1")), eps, "s1", "b"))
-        assertFalse(isLastEpisode(seasons, eps, "s1", "b"))
-        assertFalse(isLastEpisode(seasons, eps, "s2", "d"))          // season 3 not loaded yet
-        assertFalse(isLastEpisode(emptyList(), eps, "s1", "b"))      // seasons failed to load
     }
 }

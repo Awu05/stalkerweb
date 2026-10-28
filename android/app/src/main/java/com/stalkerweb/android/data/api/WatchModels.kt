@@ -49,7 +49,7 @@ data class WatchState(
     val list: List<ListEntry> = emptyList(),
 )
 
-/** A position reached; [lastEpisode]: finishing it completes the show on My List. */
+/** A position reached. */
 @JsonClass(generateAdapter = false)
 data class SaveWatchRequest(
     val key: String,
@@ -59,7 +59,6 @@ data class SaveWatchRequest(
     val params: String,
     val position: Double,
     val duration: Double,
-    val lastEpisode: Boolean,
 )
 
 @JsonClass(generateAdapter = false)
