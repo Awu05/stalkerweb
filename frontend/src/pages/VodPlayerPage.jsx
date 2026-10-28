@@ -8,6 +8,8 @@ import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { startPlaying } from '@/lib/startPlaying'
+import { useSoundOnFirstGesture } from '@/lib/forcedMute'
+import ForcedMuteNote from '@/components/ForcedMuteNote'
 import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
@@ -585,6 +587,11 @@ export default function VodPlayerPage() {
   castRemoteRef.current = cast.remote
   onAirplayRef.current = cast.mode === 'airplay'
 
+  // Muted by the browser, not the viewer (no click yet): the first click or key brings the sound back.
+  // (Every mute the viewer sets goes with setMuted, so this follows it.)
+  const soundBlocked = muted && !userMutedRef.current && !onTv
+  useSoundOnFirstGesture(soundBlocked, videoRef, setMuted, { onPicture: resetHideTimer })
+
   function togglePlayPause() {
     if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return
@@ -660,6 +667,8 @@ export default function VodPlayerPage() {
             </button>
           </div>
         )}
+
+        {soundBlocked && status === 'playing' && <ForcedMuteNote className={resumedFrom > 0 ? 'top-24' : undefined} />}  {/* below the resumed-from banner */}
 
         {/* Video element */}
         {/* The video is pinned to this area's edges: sized from its own width
@@ -780,7 +789,7 @@ export default function VodPlayerPage() {
               </button>
             )}
             <div className="flex items-center gap-2 group/vol">
-              <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => { userMutedRef.current = !m; return !m })} className="text-white/90 hover:text-white p-1 transition-colors">
+              <button data-mute-button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => { userMutedRef.current = !m; return !m })} className="text-white/90 hover:text-white p-1 transition-colors">
                 {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
               <div className="w-0 overflow-hidden group-hover/vol:w-20 transition-all duration-200">

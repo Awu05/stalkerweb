@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { startPlaying } from '@/lib/startPlaying'
+import { useSoundOnFirstGesture } from '@/lib/forcedMute'
+import ForcedMuteNote from '@/components/ForcedMuteNote'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
 import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
@@ -27,6 +29,9 @@ import { ClearSearch } from '@/components/ui/clear-search'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import { useCasting } from '@/lib/useCasting'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
+
+// M mutes and unmutes by itself (the key handler below): its first press is left to it.
+const isMuteShortcut = (e) => e.code === 'KeyM' && !isTypingTarget(e.target)
 
 // ── Controls bar ──────────────────────────────────────────────────────────
 function Controls({
@@ -43,7 +48,7 @@ function Controls({
           {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
         </button>
         <div className="flex items-center gap-2 group/vol">
-          <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
+          <button data-mute-button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={onMute} className="text-white/90 hover:text-white transition-colors p-1">
             {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <div className="w-0 overflow-hidden group-hover/vol:w-20 group-focus-within/vol:w-20 transition-all duration-200">
@@ -1226,6 +1231,10 @@ export default function PlayerPage() {
 
   // The key handler is bound once: through a ref, it sees casting start and stop.
   togglePlayPauseRef.current = togglePlayPause
+  // Muted by the browser, not the viewer (no click yet): the first click or key brings the sound back.
+  // (Every mute the viewer sets goes with setMuted, so this follows it.)
+  const soundBlocked = muted && !userMutedRef.current && cast.mode !== 'chromecast'
+  useSoundOnFirstGesture(soundBlocked, videoRef, setMuted, { isMuteKey: isMuteShortcut, onPicture: resetHideTimer })
   function togglePlayPause() {
     if (cast.mode === 'chromecast') { cast.togglePlay(); return }
     const v = videoRef.current
@@ -1296,6 +1305,7 @@ export default function PlayerPage() {
         <StreamStats open={statsOpen && !cast.mode} onClose={() => setStatsOpen(false)} videoRef={videoRef} sources={statsSources}
           kind="live" id={activeChannel ? String(activeChannel.uniqueId) : null} className="top-14" />
         <CastingOverlay cast={cast} live onActivity={resetHideTimer} />
+        {soundBlocked && status === 'playing' && <ForcedMuteNote />}
 
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
