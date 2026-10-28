@@ -77,6 +77,7 @@ describe('listenForSound', () => {
     const onSound = vi.fn()
     stop = listenForSound({ ...opts(onSound), isMuteKey: (e) => e.code === 'KeyM' })
     document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', key: 'r', ctrlKey: true, bubbles: true }))
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }))
     expect(onSound).not.toHaveBeenCalled()
     document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyM', key: 'm', bubbles: true }))
     document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyK', key: 'k', bubbles: true }))

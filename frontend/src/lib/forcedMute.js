@@ -26,7 +26,8 @@ export function listenForSound({ onSound, isPicture = () => false, isMuteButton 
     if (isPicture(e.target)) { e.stopPropagation(); e.preventDefault() }
   }
   function onKey(e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return
+    // Escape and shortcuts aren't a gesture to the browser: unmuted then, the video would stop.
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key === 'Escape') return
     if (isMuteKey(e)) { stop(); return }
     sound()
     if ((e.code === 'Space' || e.key === 'Enter') && isPicture(e.target)) { e.stopPropagation(); e.preventDefault() }
