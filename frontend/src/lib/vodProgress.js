@@ -106,7 +106,7 @@ export function getWatchedVodIds() {
 
 // ── My List ───────────────────────────────────────────────────────────────
 // Titles saved to watch later: [{ id, item, addedAt, completedAt }], newest
-// first. A title moves to Completed when finished (the server decides) or by
+// first. A title moves to Completed only by
 // hand. Changes show at once; the server's answer then replaces them.
 
 export function getMyList() {

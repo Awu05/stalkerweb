@@ -8,9 +8,9 @@
 //   watched:  ids of titles finished, for the "Not watched" filter
 //   watchedEpisodes: keys of episodes finished (or marked by hand), for the
 //             ticks in a show's seasons and episodes
-//   list:     My List — titles saved to watch later, newest first; each moves
-//             to Completed (completedAt) when finished: a movie at its end, a
-//             show at its last episode — or by hand
+//   list:     My List — titles saved to watch later, newest first; each stays
+//             in To watch, finished or not, until moved to Completed
+//             (completedAt) by hand
 // Ids are the portal's own, meaningless on another portal — hence per portal.
 
 const fs   = require('fs');
@@ -166,11 +166,8 @@ class WatchStore {
     if (finished) b.watched = [id, ...b.watched.filter((x) => x !== id)].slice(0, WATCHED_MAX);
     if (finished && isEpisodeKey(key)) b.watchedEpisodes = [key, ...b.watchedEpisodes.filter((x) => x !== key)].slice(0, WATCHED_EPISODES_MAX);
 
-    // My List: a movie is done at its end; a show at its last episode (the
-    // player says so — it knows the show's seasons).
-    const done = finished && (!key.includes(':') || entry.lastEpisode === true);
-    const saved = b.list.find((e) => e.id === id);
-    if (done && saved && !saved.completedAt) saved.completedAt = updatedAt;
+    // My List is left alone: a title finished stays in To watch until it's
+    // marked completed by hand. (`lastEpisode`, which older apps send, isn't read.)
   }
 
   /** A title onto My List (once; already there, it stays where it is). */

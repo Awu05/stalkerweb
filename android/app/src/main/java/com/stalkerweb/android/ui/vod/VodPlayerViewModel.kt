@@ -47,7 +47,6 @@ import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.WatchRepository
 import com.stalkerweb.android.data.repo.WatchRules
 import com.stalkerweb.android.data.repo.episodeNeighbours
-import com.stalkerweb.android.data.repo.isLastEpisode
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -549,8 +548,6 @@ class VodPlayerViewModel(
     }
 
     private fun save(params: PlayerParams, position: Double, duration: Double) {
-        val s = _state.value
-        val last = params.isEpisode && s.seasons != null && isLastEpisode(s.seasons, s.episodes, params.seasonId, params.episodeId)
         val stored = params.copy(screenshotUrl = links.relativeImage(params.screenshotUrl))
         watch.saveProgress(SaveWatchRequest(
             key = params.key,
@@ -560,7 +557,6 @@ class VodPlayerViewModel(
             params = stored.toQuery(),
             position = position,
             duration = duration,
-            lastEpisode = last,
         ))
     }
 
