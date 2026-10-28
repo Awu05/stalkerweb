@@ -12,7 +12,7 @@ import { Label }  from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { macDeviceId, normalizeMac } from '@/lib/macDeviceId'
+import { normalizeMac, DEVICE_ID_SOURCES, deviceIdFrom, deviceIdSourceOf } from '@/lib/macDeviceId'
 import {
   connect, disconnect, getConfig, saveConfig, getStatus, getSettings, saveSettings,
   getLogos, addLogoOverride, deleteLogoOverride, refreshLogosDb,
@@ -33,6 +33,7 @@ import ChannelFilters from '@/components/ChannelFilters'
 import { AutoSkipSetting } from '@/components/SkipControls'
 import SubtitleSettings from '@/components/SubtitleSettings'
 import TimezonePicker from '@/components/TimezonePicker'
+import { missingFields, prepareForm } from '@/lib/profileRequired'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
@@ -111,10 +112,14 @@ function parseStbEmuBackup(json) {
 
 // ── Shared UI primitives ─────────────────────────────────────────────────────
 
-function Field({ label, id, hint, children }) {
+function Field({ label, id, hint, required = false, children }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {required && <span className="ml-0.5 text-[var(--color-live)]" aria-hidden="true">*</span>}
+        {required && <span className="sr-only"> (required)</span>}
+      </Label>
       {children}
       {hint && <p className="text-xs text-[var(--color-muted)]">{hint}</p>}
     </div>
@@ -208,41 +213,54 @@ function LinkRow({ label, url, hint, icon: Icon, filename }) {
 // ── Profile form sheet ────────────────────────────────────────────────────────
 
 function ProfileSheet({ initial, onSave, onClose }) {
-  const [form, setForm]       = useState({ ...DEFAULT_FORM, ...initial })
+  // The blanks the server fills in anyway, shown as it does (lib/profileRequired.js).
+  const [form, setForm]       = useState(() => prepareForm({ ...DEFAULT_FORM, ...initial }))
   const [showAdv, setShowAdv] = useState(false)
 
   const set     = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
   const setBool = k => v => setForm(f => ({ ...f, [k]: v }))
 
-  // Device ID 1 and 2 from the MAC's hash, kept in step with it while ticked.
-  // Starts ticked when the saved IDs already are that hash.
-  const [idsFromMac, setIdsFromMac] = useState(() => {
-    const id = macDeviceId(initial?.mac)
-    return !!id && initial?.device_id === id && initial?.device_id2 === id
-  })
-  const withMacIds = f => {
-    const id = macDeviceId(f.mac)
-    return id ? { ...f, device_id: id, device_id2: id } : f
+  // Device ID 1 and 2, made from the MAC, the serial or the UID as the
+  // provider wants them (lib/macDeviceId.js) — kept in step while one is
+  // chosen. Starts on the one the saved IDs already are.
+  const [idSource, setIdSource] = useState(() => deviceIdSourceOf(initial))
+  const made = idSource !== 'typed'
+  const withIds = (source) => (f) => {
+    const id = deviceIdFrom(source, f)
+    return { ...f, device_id: id, device_id2: id, send_device_id: f.send_device_id || !!id, send_device_id2: f.send_device_id2 || !!id }
   }
-  const setMac = e => { const mac = e.target.value; setForm(f => idsFromMac ? withMacIds({ ...f, mac }) : { ...f, mac }) }
-  // The IDs before ticking, put back on unticking (an STBEmu import's own, say).
+  // A device ID typed in: sent once there is one (an empty one isn't sent).
+  const setDeviceId = (k, sendKey) => e => {
+    const v = e.target.value
+    setForm(f => ({ ...f, [k]: v, [sendKey]: f[k] ? f[sendKey] : f[sendKey] || !!v.trim() }))
+  }
+  // A field the IDs are made from, changed: the IDs again.
+  const setMade = k => e => { const v = e.target.value; setForm(f => (made ? withIds(idSource)({ ...f, [k]: v }) : { ...f, [k]: v })) }
+  const setMac = setMade('mac')
+  // The IDs typed in before one was chosen, put back on "Typed in" (an STBEmu import's own, say).
   const idsBefore = useRef(null)
-  const toggleIdsFromMac = on => {
-    setIdsFromMac(on)
-    if (on) {
-      idsBefore.current = { device_id: form.device_id, device_id2: form.device_id2 }
-      setForm(withMacIds)
-    } else if (idsBefore.current) {
+  const chooseIdSource = source => {
+    if (!made && source !== 'typed') idsBefore.current = { device_id: form.device_id, device_id2: form.device_id2 }
+    setIdSource(source)
+    if (source !== 'typed') setForm(withIds(source))
+    else if (idsBefore.current) {
       const before = idsBefore.current
       idsBefore.current = null
       setForm(f => ({ ...f, ...before }))
     }
   }
+  const sourceLabel = DEVICE_ID_SOURCES.find((s) => s.id === idSource)?.label ?? ''
+  const madeFrom = { mac: 'the MAC', 'mac-plain': 'the MAC', serial: 'the serial number', uid: 'the UID' }[idSource]
+
+  const missing = missingFields(form)
+  const missingAdvanced = missing.some((m) => m.advanced)
 
   function handleSubmit(e) {
     e.preventDefault()
+    if (missing.length) return
     // The portal is sent the MAC as saved: the same form its device IDs were hashed from.
-    const p = { ...form, portal: normalizePortal(form.portal), mac: normalizeMac(form.mac) || form.mac }
+    // The source saved with it: guessing it back from the IDs can pick the wrong one.
+    const p = { ...form, portal: normalizePortal(form.portal), mac: normalizeMac(form.mac) || form.mac, device_id_source: idSource }
     onSave(p)
   }
 
@@ -267,34 +285,36 @@ function ProfileSheet({ initial, onSave, onClose }) {
         {/* scrollable form body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
 
-          <Field label="Profile Name" id="prof-name" hint="A friendly label — shown in the profiles list.">
+          <Field label="Profile Name" id="prof-name" required hint="A friendly label — shown in the profiles list.">
             <Input id="prof-name" placeholder="e.g. Home IPTV" value={form.name} onChange={set('name')} />
           </Field>
 
-          <Field label="Portal URL" id="prof-portal">
+          <Field label="Portal URL" id="prof-portal" required>
             <Input id="prof-portal" type="url" placeholder="http://my.portal.com" value={form.portal}
               onChange={set('portal')}
               onBlur={() => { if (form.portal.trim()) setForm(f => ({ ...f, portal: normalizePortal(f.portal) })) }}
               required />
           </Field>
 
-          <Field label="MAC Address" id="prof-mac">
+          <Field label="MAC Address" id="prof-mac" required>
             <Input id="prof-mac" placeholder="00:1A:79:XX:XX:XX" value={form.mac} onChange={setMac} required />
-            <label className="flex items-center gap-2 text-xs text-[var(--color-muted)] cursor-pointer w-fit">
-              <input type="checkbox" checked={idsFromMac} onChange={e => toggleIdsFromMac(e.target.checked)}
-                className="size-3.5 accent-[var(--color-primary)]" />
-              Fill Device ID 1 and 2 from the MAC (SHA-256 of it in uppercase)
+            <label htmlFor="prof-idsrc" className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)] w-fit">
+              Device ID 1 and 2:
+              <select id="prof-idsrc" value={idSource} onChange={e => chooseIdSource(e.target.value)}
+                className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-xs text-[var(--color-text)]">
+                {DEVICE_ID_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
             </label>
-            {idsFromMac && !macDeviceId(form.mac) && form.mac.trim() && (
-              <p className="text-xs text-[var(--color-muted)]">The device IDs fill in once the MAC is complete.</p>
+            {made && !deviceIdFrom(idSource, form) && (
+              <p className="text-xs text-[var(--color-muted)]">The device IDs fill in once {madeFrom} is filled in{idSource === 'serial' || idSource === 'uid' ? ' (under Advanced)' : ''}.</p>
             )}
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Timezone" id="prof-tz">
+            <Field label="Timezone" id="prof-tz" required>
               <TimezonePicker id="prof-tz" value={form.timezone} onChange={(tz) => setForm((f) => ({ ...f, timezone: tz }))} />
             </Field>
-            <Field label="Language" id="prof-lang">
+            <Field label="Language" id="prof-lang" required>
               <Input id="prof-lang" value={form.lang} onChange={set('lang')} />
             </Field>
           </div>
@@ -320,29 +340,32 @@ function ProfileSheet({ initial, onSave, onClose }) {
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Serial Number" id="prof-sn">
-                  <Input id="prof-sn" value={form.serial_number} onChange={set('serial_number')} className="font-mono text-xs" />
+                <Field label="Serial Number" id="prof-sn" required>
+                  <Input id="prof-sn" value={form.serial_number} onChange={setMade('serial_number')} className="font-mono text-xs" />
                 </Field>
-                <Field label="Timeout (s)" id="prof-to">
-                  <Input id="prof-to" type="number" min={3} max={60} value={form.connection_timeout} onChange={set('connection_timeout')} />
+                <Field label="UID" id="prof-uid" hint="On the box's System information screen. Only used to make the device IDs.">
+                  <Input id="prof-uid" value={form.uid || ''} onChange={setMade('uid')} className="font-mono text-xs" />
                 </Field>
               </div>
-              <Field label="Device ID" id="prof-did"
+              <Field label="Timeout (s)" id="prof-to" required>
+                <Input id="prof-to" type="number" min={3} max={60} value={form.connection_timeout} onChange={set('connection_timeout')} />
+              </Field>
+              <Field label="Device ID" id="prof-did" required={form.send_device_id !== false}
                 hint={form.send_device_id === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did" value={form.device_id || ''} onChange={set('device_id')} readOnly={idsFromMac}
-                    title={idsFromMac ? 'From the MAC — untick "Fill Device ID 1 and 2 from the MAC" to edit' : undefined}
-                    className={cn('font-mono text-xs flex-1', idsFromMac && 'opacity-70')} />
+                  <Input id="prof-did" value={form.device_id || ''} onChange={setDeviceId('device_id', 'send_device_id')} readOnly={made}
+                    title={made ? `Made from ${madeFrom} (${sourceLabel}) — choose "Typed in" to edit` : undefined}
+                    className={cn('font-mono text-xs flex-1', made && 'opacity-70')} />
                   <Switch checked={form.send_device_id !== false} onCheckedChange={setBool('send_device_id')}
                     title={form.send_device_id !== false ? 'Sent to the portal' : 'Not sent to the portal'} />
                 </div>
               </Field>
-              <Field label="Device ID 2" id="prof-did2"
+              <Field label="Device ID 2" id="prof-did2" required={form.send_device_id2 !== false}
                 hint={form.send_device_id2 === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={set('device_id2')} readOnly={idsFromMac}
-                    title={idsFromMac ? 'From the MAC — untick "Fill Device ID 1 and 2 from the MAC" to edit' : undefined}
-                    className={cn('font-mono text-xs flex-1', idsFromMac && 'opacity-70')} />
+                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={setDeviceId('device_id2', 'send_device_id2')} readOnly={made}
+                    title={made ? `Made from ${madeFrom} (${sourceLabel}) — choose "Typed in" to edit` : undefined}
+                    className={cn('font-mono text-xs flex-1', made && 'opacity-70')} />
                   <Switch checked={form.send_device_id2 !== false} onCheckedChange={setBool('send_device_id2')}
                     title={form.send_device_id2 !== false ? 'Sent to the portal' : 'Not sent to the portal'} />
                 </div>
@@ -376,9 +399,19 @@ function ProfileSheet({ initial, onSave, onClose }) {
           )}
 
           {/* sticky footer */}
-          <div className="flex gap-3 pt-2 pb-1 mt-auto sticky bottom-0 bg-[var(--color-surface)] border-t border-[var(--color-border)] -mx-5 px-5 py-3">
-            <Button type="submit" className="flex-1">Save Profile</Button>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <div className="flex flex-col gap-2 pt-2 pb-1 mt-auto sticky bottom-0 bg-[var(--color-surface)] border-t border-[var(--color-border)] -mx-5 px-5 py-3">
+            {missing.length > 0 && (
+              <p className="text-xs text-[var(--color-muted)]" role="status">
+                <span className="text-[var(--color-live)]">*</span> Still needed: {missing.map((m) => m.label).join(', ')}
+                {missingAdvanced && !showAdv && (
+                  <> — <button type="button" onClick={() => setShowAdv(true)} className="underline hover:text-[var(--color-text)]">show Advanced options</button></>
+                )}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <Button type="submit" className="flex-1" disabled={missing.length > 0}>Save Profile</Button>
+              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            </div>
           </div>
         </form>
       </div>

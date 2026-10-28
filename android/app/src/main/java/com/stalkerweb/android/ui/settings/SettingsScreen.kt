@@ -5,7 +5,6 @@ import com.stalkerweb.android.ui.components.TvTextField
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
-import com.stalkerweb.android.data.repo.macDeviceId
 import com.stalkerweb.android.data.repo.normalizeMac
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -93,6 +92,11 @@ import com.stalkerweb.android.ui.components.passwordTransformation
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.theme.VIEWER_COLORS
 import com.stalkerweb.android.ui.components.TimezoneField
+import com.stalkerweb.android.data.repo.deviceIdSourceOf
+import com.stalkerweb.android.data.repo.missingProfileFields
+import com.stalkerweb.android.data.repo.prepareProfile
+import com.stalkerweb.android.data.repo.deviceIdFrom
+import com.stalkerweb.android.data.repo.DeviceIdSource
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.update.UpdateViewModel
@@ -386,38 +390,49 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
 
 @Composable
 private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss: () -> Unit) {
-    var p by remember { mutableStateOf(initial) }
-    // Device ID 1 and 2 from the MAC's hash, kept in step with it while ticked.
-    // Starts ticked when the saved IDs already are that hash.
-    var idsFromMac by remember {
-        val id = macDeviceId(initial.mac)
-        mutableStateOf(id.isNotEmpty() && initial.deviceId == id && initial.deviceId2 == id)
-    }
-    fun withMacIds(q: Profile): Profile = macDeviceId(q.mac).let { id -> if (id.isEmpty()) q else q.copy(deviceId = id, deviceId2 = id) }
-    // The IDs before ticking, put back on unticking (an STBEmu import's own, say).
+    // The blanks the server fills in anyway, shown as it does (ProfileRequired.kt).
+    var p by remember { mutableStateOf(prepareProfile(initial)) }
+    // Device ID 1 and 2, made from the MAC, the serial or the UID as the
+    // provider wants them (DeviceId.kt) — kept in step while one is chosen.
+    // Starts on the one the saved IDs already are.
+    var idSource by remember { mutableStateOf(deviceIdSourceOf(initial.mac, initial.serialNumber, initial.uid, initial.deviceId, initial.deviceId2, initial.deviceIdSource)) }
+    val made = idSource != DeviceIdSource.TYPED
+    // Always the source's IDs (none while what it hashes is empty — not the last source's), sent once there are some.
+    fun withIds(q: Profile, source: DeviceIdSource = idSource): Profile =
+        deviceIdFrom(source, q.mac, q.serialNumber, q.uid).let { id ->
+            q.copy(deviceId = id, deviceId2 = id, sendDeviceId = q.sendDeviceId || id.isNotEmpty(), sendDeviceId2 = q.sendDeviceId2 || id.isNotEmpty())
+        }
+    // The IDs typed in before one was chosen, put back on "Typed in" (an STBEmu import's own, say).
     var idsBefore by remember { mutableStateOf<Pair<String, String>?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial.id.isBlank()) "Add IPTV connection" else "Edit IPTV connection") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                @Composable fun field(label: String, value: String, readOnly: Boolean = false, set: (String) -> Unit) =
-                    TvTextField(value, set, singleLine = true, keyboardOptions = tvKeyboardOptions(), readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
-                field("Name", p.name) { p = p.copy(name = it) }
-                field("Portal URL", p.portal) { p = p.copy(portal = it) }
-                field("MAC address", p.mac) { p = p.copy(mac = it).let { q -> if (idsFromMac) withMacIds(q) else q } }
-                CheckRow("Device IDs from the MAC (SHA-256)", idsFromMac) { on ->
-                    idsFromMac = on
-                    if (on) {
-                        idsBefore = p.deviceId to p.deviceId2
-                        p = withMacIds(p)
-                    } else idsBefore?.let { (a, b) -> p = p.copy(deviceId = a, deviceId2 = b); idsBefore = null }
+                @Composable fun field(label: String, value: String, readOnly: Boolean = false, required: Boolean = false, set: (String) -> Unit) =
+                    TvTextField(value, set, singleLine = true, keyboardOptions = tvKeyboardOptions(), readOnly = readOnly,
+                        label = { Text(if (required) "$label *" else label) }, modifier = Modifier.fillMaxWidth())
+                Text("* required", color = SwColors.Muted, style = MaterialTheme.typography.labelSmall)
+                field("Name", p.name, required = true) { p = p.copy(name = it) }
+                field("Portal URL", p.portal, required = true) { p = p.copy(portal = it) }
+                field("MAC address", p.mac, required = true) { p = p.copy(mac = it).let { q -> if (made) withIds(q) else q } }
+                Text("Device ID 1 and 2 (SHA-256 of…)", color = SwColors.Muted, style = MaterialTheme.typography.labelMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(DeviceIdSource.entries) { source ->
+                        Pill(source.label, source == idSource, {
+                            if (!made && source != DeviceIdSource.TYPED) idsBefore = p.deviceId to p.deviceId2
+                            idSource = source
+                            if (source != DeviceIdSource.TYPED) p = withIds(p, source)
+                            else idsBefore?.let { (a, b) -> p = p.copy(deviceId = a, deviceId2 = b); idsBefore = null }
+                        })
+                    }
                 }
-                if (idsFromMac && p.mac.isNotBlank() && macDeviceId(p.mac).isEmpty()) {
-                    Text("The device IDs fill in once the MAC is complete.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
+                if (made && deviceIdFrom(idSource, p.mac, p.serialNumber, p.uid).isEmpty()) {
+                    val from = when (idSource) { DeviceIdSource.SERIAL -> "the serial number"; DeviceIdSource.UID -> "the UID"; else -> "the MAC" }
+                    Text("The device IDs fill in once $from is filled in.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
-                TimezoneField(p.timezone, { p = p.copy(timezone = it) }, Modifier.fillMaxWidth())
-                field("Language", p.lang) { p = p.copy(lang = it) }
+                TimezoneField(p.timezone, { p = p.copy(timezone = it) }, Modifier.fillMaxWidth(), label = "Timezone *")
+                field("Language", p.lang, required = true) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
                 var passwordShown by remember { mutableStateOf(false) }
                 TvTextField(
@@ -428,13 +443,23 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                     modifier = Modifier.fillMaxWidth(),
                 )
                 field("Token", p.token) { p = p.copy(token = it) }
-                field("Serial number", p.serialNumber) { p = p.copy(serialNumber = it) }
-                field("Device ID", p.deviceId, readOnly = idsFromMac) { p = p.copy(deviceId = it) }
-                field("Device ID 2", p.deviceId2, readOnly = idsFromMac) { p = p.copy(deviceId2 = it) }
+                field("Serial number", p.serialNumber, required = true) { p = p.copy(serialNumber = it).let { q -> if (made) withIds(q) else q } }
+                field("UID (System information; only to make the device IDs)", p.uid) { p = p.copy(uid = it).let { q -> if (made) withIds(q) else q } }
+                // A device ID typed in is sent once there is one; each has its switch (an empty one isn't sent).
+                field("Device ID", p.deviceId, readOnly = made, required = p.sendDeviceId) {
+                    p = p.copy(deviceId = it, sendDeviceId = if (p.deviceId.isEmpty()) p.sendDeviceId || it.isNotBlank() else p.sendDeviceId)
+                }
+                CheckRow("Send Device ID to the portal", p.sendDeviceId) { on -> p = p.copy(sendDeviceId = on) }
+                field("Device ID 2", p.deviceId2, readOnly = made, required = p.sendDeviceId2) {
+                    p = p.copy(deviceId2 = it, sendDeviceId2 = if (p.deviceId2.isEmpty()) p.sendDeviceId2 || it.isNotBlank() else p.sendDeviceId2)
+                }
+                CheckRow("Send Device ID 2 to the portal", p.sendDeviceId2) { on -> p = p.copy(sendDeviceId2 = on) }
                 field("Signature", p.signature) { p = p.copy(signature = it) }
+                val missing = missingProfileFields(p)
+                if (missing.isNotEmpty()) Text("* Still needed: ${missing.joinToString(", ")}", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = { onSave(p.copy(mac = normalizeMac(p.mac).ifEmpty { p.mac })); onDismiss() }, enabled = p.portal.isNotBlank() && p.mac.isNotBlank()) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(p.copy(mac = normalizeMac(p.mac).ifEmpty { p.mac }, deviceIdSource = idSource.id)); onDismiss() }, enabled = missingProfileFields(p).isEmpty()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

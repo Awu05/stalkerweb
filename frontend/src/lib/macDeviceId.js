@@ -1,6 +1,7 @@
 /**
- * The device ID a MAG box derives from its MAC: SHA-256 of the MAC in
- * uppercase with colons, as uppercase hex. The apps' DeviceId.kt does the same.
+ * A MAG box's device IDs, made from what identifies it: SHA-256 of its MAC
+ * (uppercase, with or without colons), its serial number or its UID, as
+ * uppercase hex — providers differ. The apps' DeviceId.kt does the same.
  */
 
 /** "00:1a:79-aa bb cc" → "00:1A:79:AA:BB:CC", or '' if it isn't 12 hex digits. */
@@ -13,6 +14,53 @@ export function normalizeMac(mac) {
 export function macDeviceId(mac) {
   const m = normalizeMac(mac)
   return m ? sha256Hex(m).toUpperCase() : ''
+}
+
+/**
+ * How a provider wants Device ID 1 and 2 made — boxes differ: SHA-256, as
+ * uppercase hex, of one of these. 'typed': not made, typed in as given.
+ */
+export const DEVICE_ID_SOURCES = [
+  { id: 'typed', label: 'Typed in' },
+  { id: 'mac', label: 'Hash of the MAC (uppercase, with colons)' },
+  { id: 'mac-plain', label: 'Hash of the MAC (uppercase, no colons)' },
+  { id: 'serial', label: 'Hash of the serial number' },
+  { id: 'uid', label: 'Hash of the UID' },
+]
+
+/**
+ * The device ID a source makes from a connection ({ mac, serial_number,
+ * uid }) — '' when what it hashes isn't filled in yet (or for 'typed'). The
+ * MAC is read as a MAC (any case or separators); the serial and the UID are
+ * hashed exactly as typed (a box shows them in lowercase, and hashes them so).
+ */
+// A new connection's serial until one is typed (lib/profiles.js) — the
+// server's own for a blank one. Not a box's: never hashed into its IDs.
+export const SERIAL_PLACEHOLDER = '0000000000000'
+
+export function deviceIdFrom(source, { mac = '', serial_number = '', uid = '' } = {}) {
+  const hash = (s) => (s && s !== SERIAL_PLACEHOLDER ? sha256Hex(s).toUpperCase() : '')
+  switch (source) {
+    case 'mac': return macDeviceId(mac)
+    case 'mac-plain': return hash(normalizeMac(mac).replace(/:/g, ''))
+    case 'serial': return hash(String(serial_number).trim())
+    case 'uid': return hash(String(uid).trim())
+    default: return ''
+  }
+}
+
+const SOURCE_IDS = new Set(DEVICE_ID_SOURCES.map((s) => s.id))
+
+/**
+ * Which source a connection's device IDs come from: the one saved with it
+ * (`device_id_source`), else — a connection saved before it was — the one
+ * its IDs are ('typed' when none of them makes both).
+ */
+export function deviceIdSourceOf(profile) {
+  if (SOURCE_IDS.has(profile?.device_id_source)) return profile.device_id_source
+  const id1 = profile?.device_id || ''
+  if (!id1 || id1 !== (profile?.device_id2 || '')) return 'typed'
+  return DEVICE_ID_SOURCES.find((s) => s.id !== 'typed' && deviceIdFrom(s.id, profile) === id1)?.id ?? 'typed'
 }
 
 // crypto.subtle only exists on https/localhost, and StalkerWeb is often opened

@@ -29,6 +29,8 @@ export const DEFAULT_FORM = {
   portal: '', mac: '', timezone: 'Europe/London', lang: 'en',
   login: '', password: '', token: '', serial_number: '0000000000000',
   device_id: '', device_id2: '', signature: '', portal_signature: '',
+  // The box's UID (its System information screen): only to make device IDs from (lib/macDeviceId.js).
+  uid: '',
   // Whether device_id / device_id2 are actually sent to the portal. STBEmu
   // backups can carry a populated device_id that was never transmitted
   // (send_device_id: false) — importing it verbatim without this flag would
