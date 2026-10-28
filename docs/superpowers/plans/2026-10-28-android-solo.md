@@ -458,6 +458,7 @@ Install the `tvSolo` debug APK from the CI artifacts. Expected:
 - `adb logcat | grep stalkerweb` shows `stalkerweb running on`.
 - `adb shell run-as com.stalkerweb.android.tv.solo ls files` lists the data dir.
 - `adb shell am kill com.stalkerweb.android.tv.solo:node` (where `pidof` is available) brings the server back within a few seconds.
+- On a 16 KB page-size device or emulator (an Android 15+ "16 KB" system image), `libnode.so` loads. If it doesn't, note it in the README's Solo section as a known limit; the spec says it doesn't block.
 
 - [ ] **Step 6: Commit**
 
@@ -485,13 +486,13 @@ git commit -m "feat(android): Solo runs the StalkerWeb server on the device (nod
 - Create: `android/app/src/solo/java/com/stalkerweb/android/solo/CastNetwork.kt` (a ConnectivityManager callback: on Wi-Fi up or change, sends `PUT /api/solo/network { lanHost }` with the Wi-Fi IPv4; on Wi-Fi lost, `{ lanHost: null }`)
 - Create: `android/app/src/main/java/com/stalkerweb/android/data/repo/SoloRules.kt`, pure rules shared by both flavors
 - Modify: the cast button's message when the cast link is `reachable: false` (in Solo: "Casting needs Wi-Fi")
-- Modify: `SoloServerService`. It goes foreground while playing, casting or downloading, through `SoloServer.hold(reason: String)` and `release(reason)`, called from the players and the downloads view model. These are no-ops in remote.
+- Modify: `SoloServerService`. It goes foreground while playing, casting or downloading, through `SoloServer.hold(reason: String)` and `release(reason)`, called from the players and the downloads view model. The remote `SoloServer` stub (Task 7) gains the same two as no-ops.
 - Test: `android/app/src/test/java/com/stalkerweb/android/data/repo/SoloRulesTest.kt`
 
 **Interfaces:**
 - Consumes: `SoloServer` (Task 7), `PUT /api/solo/network` (Task 5).
 - Produces:
-  - `enum class SettingsCard { Viewers, Filters, Channels, MoviesSeries, Activity, Server, PlaybackGuide, … }` and `fun shownCards(isSolo: Boolean): List<SettingsCard>`, with SettingsScreen rendering from it.
+  - `enum class SettingsCard` with one entry per `Card(` in SettingsScreen, in screen order (among them `Viewers`, `Filters`, `Channels`, `MoviesSeries`, `Activity`, `Server`, `PlaybackGuide`), and `fun shownCards(isSolo: Boolean): List<SettingsCard>`, with SettingsScreen rendering from it.
   - `fun lanHostOf(addresses: List<String>): String?`, the first private IPv4: 10/8, 172.16/12 or 192.168/16, ignoring loopback and link-local.
   - `fun castMessage(reachable: Boolean, isSolo: Boolean): String?`
 
@@ -530,7 +531,7 @@ Expected: success.
 
 On a fresh `mobileSolo` install, checks 1–4 are in the remaining steps, and check 5 is done later:
 1. "Starting…", then the Portal screen.
-2. Add a made-up-free real portal.
+2. Add the owner's own portal (on the device only, never in the repo).
 3. A channel plays.
 4. Settings shows no Viewers, Activity or Server cards.
 5. Cast a raw-TS channel. It plays on the TV, after Task 3.
