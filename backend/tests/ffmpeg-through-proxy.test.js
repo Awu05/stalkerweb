@@ -11,8 +11,9 @@ import { CastHls } from '../stalker/CastHls.js'
 
 // Real FFmpeg through the real proxy, as on the server: a live HLS channel
 // (master → media playlist → tokenised segments) behind a fake provider,
-// fetched the way this server fetches its own channels — the format probe and
-// the cast packager read /proxy/stream/<id>, whose playlists the proxy has
+// fetched the way this server fetches its own channels — the format probe
+// (FFmpeg) and the cast packager (no FFmpeg; FFmpeg only makes the test
+// channel here) read /proxy/stream/<id>, whose playlists the proxy has
 // rewritten (/proxy/hls?url=…, /proxy/hls/seg/<…>.ts?sig=…&ch=…).
 // HGTV 4K's probe read nothing and its cast pulled only the playlist: this is
 // that path, end to end.
@@ -85,12 +86,15 @@ describe.skipIf(!hasFfmpeg)('FFmpeg through /proxy/stream', () => {
   }, 30_000)
 
   it('casts an HLS channel read through the proxy', async () => {
-    const hls = new CastHls({ root: path.join(root, 'cast'), inputUrlFor: () => `${origin(app)}/proxy/stream/1896` })
+    const hls = new CastHls({ inputUrlFor: () => `${origin(app)}/proxy/stream/1896` })
     try {
-      const playlist = fs.readFileSync(await hls.playlist('1896'), 'utf8')
+      const playlist = await hls.playlist('1896')
       const seg = playlist.split('\n').find((l) => l.endsWith('.ts'))
       expect(seg, playlist).toBeTruthy()
-      expect(hls.segment('1896', seg)).toBeTruthy()
+      const buf = hls.segment('1896', seg)
+      expect(buf.length % 188).toBe(0)
+      expect(buf[0]).toBe(0x47)
+      expect(hls.codecsOf('1896')).toEqual({ videoType: 0x1b, audioType: 0x0f })
     } finally {
       hls.stopAll()
     }

@@ -351,22 +351,23 @@ function selfStreamUrl(id) {
 }
 
 // Cast devices: links under the playback-only share token, and live channels
-// re-wrapped as HLS while they're cast (FFmpeg reading this server's own
-// /proxy/stream, under the same token).
+// cut into HLS while they're cast (the segmenter reading this server's own
+// /proxy/stream, under the same token — no FFmpeg needed).
 appState.shareToken = access.shareToken;
 {
   const { CastHls } = require('./stalker/CastHls');
-  appState.castHls = new CastHls({
-    inputUrlFor: selfStreamUrl,
-    userAgent: appState.internalUA,
-    available: () => require('./stalker/FfmpegService').isAvailable(),   // checked when first needed
-  });
+  appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA });
 }
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).
+// Without FFmpeg: the stream types the cast packager read, if it's being cast.
 appState.describeChannel = async (id) => {
   const ffmpegSvc = require('./stalker/FfmpegService');
-  if (!ffmpegSvc.isAvailable()) return null;
+  if (!ffmpegSvc.isAvailable()) {
+    const c = appState.castHls.codecsOf(id);
+    const hex = (t) => (t == null ? 'none' : `0x${t.toString(16).padStart(2, '0')}`);
+    return c && (c.videoType != null || c.audioType != null) ? `stream types video ${hex(c.videoType)} audio ${hex(c.audioType)}` : null;
+  }
   const probe = await ffmpegSvc.probeCodecs(selfStreamUrl(id), { 'User-Agent': appState.internalUA });
   return probe?.describe ?? null;
 };
@@ -550,7 +551,7 @@ function shutdown(signal) {
   xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   watchStore.flush();      // positions from the last few seconds
   skipSegments.flush();    // shows matched in the last second
-  appState.castHls?.stopAll();   // FFmpeg for channels being cast
+  appState.castHls?.stopAll();   // channels being cast
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();

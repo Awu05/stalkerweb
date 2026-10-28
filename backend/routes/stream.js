@@ -61,7 +61,6 @@ module.exports = function streamRoutes(appState) {
   router.get('/:channelId/cast', (req, res) => {
     const rawId = req.params.channelId;
     if (!/^\d+$/.test(rawId)) return res.status(400).json({ error: 'Invalid channel ID' });
-    if (!appState.castHls?.available()) return res.status(415).json({ error: 'Casting live TV needs FFmpeg, which this server does not have' });
     // The TV plays it from its own address: claimed for any.
     appState.activity?.claim({ kind: 'live', id: rawId, viewerId: req.viewer?.id, cast: true,
       title: appState.channelManager?.getChannel?.(rawId)?.name });
@@ -69,7 +68,7 @@ module.exports = function streamRoutes(appState) {
   });
 
   // The sender stopped casting the channel, or moved the TV to another: its
-  // FFmpeg lets go of the channel now — it holds the channel's one portal
+  // cast session lets go of the channel now — it holds the channel's one portal
   // connection, which the phone or page playing it next needs.
   router.delete('/:channelId/cast', (req, res) => {
     appState.castHls?.stop(String(req.params.channelId), 'the sender stopped casting it');

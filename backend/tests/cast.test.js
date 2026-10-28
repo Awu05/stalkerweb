@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
-import fs from 'fs'
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
 import os from 'os'
-import path from 'path'
-import { EventEmitter } from 'events'
 import http from 'http'
-import { spawnSync } from 'child_process'
 import { setInterval, clearInterval } from 'timers'
 import express from 'express'
 import { castBase, isLocalHost, vodContentType } from '../lib/castLink.js'
-import { CastHls, hlsArgs } from '../stalker/CastHls.js'
+import { CastHls } from '../stalker/CastHls.js'
 import vodModule from '../routes/vod.js'
 import streamModule from '../routes/stream.js'
+import { makeTs, startsWithKeyframe } from './helpers/makeTs.js'
+
+// A playlist's pieces, by name.
+const pieces = (playlist) => playlist.split('\n').filter((l) => l.endsWith('.ts'))
 
 describe('cast links', () => {
   const req = (host, protocol = 'http') => ({ protocol, get: (h) => (h === 'host' ? host : undefined) })
@@ -33,13 +33,12 @@ describe('cast links', () => {
 })
 
 describe('/api/stream/:id/cast and /api/vod/cast', () => {
-  let server, base, stopped, ffmpeg
+  let server, base, stopped
   beforeAll(async () => {
     stopped = []
-    ffmpeg = true
     const appState = {
       shareToken: 'tok',
-      castHls: { available: () => ffmpeg, stop: (id) => stopped.push(id) },
+      castHls: { stop: (id) => stopped.push(id) },   // no FFmpeg needed: nothing asks whether it's there
       sessionManager: { isAuthenticated: () => true },
       vodManager: { getStreamUrl: async (id) => (id === 'hls' ? 'http://cdn/x/index.m3u8?t=1' : 'http://cdn/x/movie.mkv') },
     }
@@ -68,11 +67,6 @@ describe('/api/stream/:id/cast and /api/vod/cast', () => {
     expect((await get('/api/stream/42/cast')).body.reachable).toBe(false)
   })
 
-  it('says when the server has no FFmpeg to cast live TV with', async () => {
-    ffmpeg = false
-    try { expect((await get('/api/stream/42/cast')).status).toBe(415) } finally { ffmpeg = true }
-  })
-
   it("stops a channel's cast stream when the sender says so", async () => {
     const r = await new Promise((resolve, reject) => {
       http.request(base + '/api/stream/42/cast', { method: 'DELETE' }, resolve).on('error', reject).end()
@@ -98,211 +92,186 @@ describe('/api/stream/:id/cast and /api/vod/cast', () => {
 })
 
 describe('CastHls', () => {
-  let root, hls, procs, clock
-  const fakeSpawn = (cmd, args) => {
-    const p = new EventEmitter()
-    p.args = args
-    p.stderr = new EventEmitter()
-    p.killed = false
-    p.kill = () => { p.killed = true; p.emit('close', null) }
-    procs.push(p)
-    return p
+  let hls, readers, clock
+  // Stands in for readSelfStream: the test feeds each session's bytes itself.
+  const fakeReader = (url, o) => {
+    readers.push({ url, ...o })
+    return new Promise((resolve) => o.signal.addEventListener('abort', resolve))
   }
-  const make = (o = {}) => new CastHls({ root, inputUrlFor: (id) => `http://127.0.0.1:1/proxy/stream/${id}`, spawn: fakeSpawn, now: () => clock, pollMs: 5, ...o })
-  const dirOf = (id) => path.join(root, id)
-  const writePlaylist = (id) => fs.writeFileSync(path.join(dirOf(id), 'index.m3u8'), '#EXTM3U\n')
+  const make = (o = {}) => new CastHls({ inputUrlFor: (id) => `http://127.0.0.1:1/proxy/stream/${id}`, userAgent: 'StalkerWeb-internal/abc',
+    reader: fakeReader, now: () => clock, ...o })
 
-  beforeAll(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-')) })
-  afterEach(() => { hls?.stopAll(); procs = [] })
-  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
-  procs = []
-  clock = 0
+  beforeEach(() => { readers = []; clock = 0 })
+  afterEach(() => { hls?.stopAll() })
 
-  it('re-wraps the channel from this server, copying its streams into HLS', () => {
-    const a = hlsArgs('http://127.0.0.1:1/proxy/stream/5', '/tmp/x')
-    expect(a).toContain('copy')
-    // Never -reconnect_at_eof: an HLS playlist ends after every download (it looped on it).
-    expect(a).not.toContain('-reconnect_at_eof')
-    // A restarted session numbers on from the clock.
-    expect(a[a.indexOf('-hls_start_number_source') + 1]).toBe('datetime')
-    expect(a[a.indexOf('-i') + 1]).toBe('http://127.0.0.1:1/proxy/stream/5')
-    expect(a.at(-1)).toBe(path.join('/tmp/x', 'index.m3u8'))
-  })
-
-  it('starts a channel once, and answers with its playlist when FFmpeg has written it', async () => {
+  it('serves a playlist and its pieces for a channel while it is cast', async () => {
     hls = make()
     const first = hls.playlist('5')
     const second = hls.playlist('5')
-    expect(procs).toHaveLength(1)
-    writePlaylist('5')
-    expect(await first).toBe(path.join(dirOf('5'), 'index.m3u8'))
-    expect(await second).toBe(path.join(dirOf('5'), 'index.m3u8'))
+    expect(readers).toHaveLength(1)
+    expect(readers[0].url).toBe('http://127.0.0.1:1/proxy/stream/5')
+    expect(readers[0].userAgent).toBe('StalkerWeb-internal/abc')
+    // Waits for the first piece: the bytes come after the TV asked.
+    await new Promise((r) => setTimeout(r, 10))
+    readers[0].onData(makeTs({ seconds: 12 }))
+    const playlist = await first
+    expect(await second).toBe(playlist)
+    expect(playlist).toContain('#EXTM3U')
+    const names = pieces(playlist)
+    expect(names.length).toBeGreaterThanOrEqual(2)
+    const buf = hls.segment('5', names[0])
+    expect(Buffer.isBuffer(buf)).toBe(true)
+    expect(startsWithKeyframe(buf)).toBe(true)
+    expect(hls.segment('5', '../../etc/passwd')).toBeNull()
+    expect(hls.segment('5', 'index.m3u8')).toBeNull()
+    expect(hls.segment('5', 'seg999.ts')).toBeNull()
+    expect(hls.segment('9', names[0])).toBeNull()
+    expect(hls.codecsOf('5')).toEqual({ videoType: 0x1b, audioType: 0x0f })
+    expect(hls.codecsOf('9')).toBeNull()
+    expect(hls.available()).toBe(true)
   })
 
-  it('serves only its own segments', async () => {
+  it('keeps the TV playing across a source restart (EXT-X-DISCONTINUITY, pieces keep coming)', async () => {
     hls = make()
-    const p = hls.playlist('6'); writePlaylist('6'); await p
-    fs.writeFileSync(path.join(dirOf('6'), 'seg00001.ts'), 'x')
-    expect(hls.segment('6', 'seg00001.ts')).toBe(path.join(dirOf('6'), 'seg00001.ts'))
-    // Numbered by the clock, as FFmpeg does here.
-    fs.writeFileSync(path.join(dirOf('6'), 'seg20261021031523.ts'), 'x')
-    expect(hls.segment('6', 'seg20261021031523.ts')).toBe(path.join(dirOf('6'), 'seg20261021031523.ts'))
-    expect(hls.segment('6', '../../etc/passwd')).toBeNull()
-    expect(hls.segment('6', 'index.m3u8')).toBeNull()
-    expect(hls.segment('9', 'seg00001.ts')).toBeNull()
-  })
-
-  it('reopens a source that ended (an MPEG-TS restart) while the TV watches, carrying the playlist on', async () => {
-    hls = make()
-    const p = hls.playlist('21'); writePlaylist('21'); await p
-    procs[0].emit('close', 0)
-    expect(procs).toHaveLength(2)
-    expect(procs[1].args.join(' ')).toContain('append_list+discont_start')
-    expect(hls.size).toBe(1)
-    expect(fs.existsSync(dirOf('21'))).toBe(true)
-  })
-
-  it('gives up on a source that keeps ending, or that FFmpeg fails on', async () => {
-    hls = make({ maxRestartsPerMinute: 2 })
-    const p = hls.playlist('22'); writePlaylist('22'); await p
-    procs[0].emit('close', 0)
-    procs[1].emit('close', 0)
-    procs[2].emit('close', 0)
-    expect(procs).toHaveLength(3)
-    expect(hls.size).toBe(0)
-    hls.playlist('23').catch(() => {})
-    procs[3].emit('close', 1)
-    expect(procs).toHaveLength(4)
-  })
-
-  it("reads this server's stream with its own user agent", () => {
-    const a = hlsArgs('http://x', '/tmp/x', { userAgent: 'StalkerWeb-internal/abc' })
-    expect(a[a.indexOf('-user_agent') + 1]).toBe('StalkerWeb-internal/abc')
-  })
-
-  it('stops a channel when asked, and only that one', async () => {
-    hls = make()
-    hls.playlist('11').catch(() => {})
-    hls.playlist('12').catch(() => {})
-    hls.stop('11')
-    expect(procs[0].killed).toBe(true)
-    expect(procs[1].killed).toBe(false)
+    const p = hls.playlist('21')
+    readers[0].onData(makeTs({ seconds: 12 }))
+    const before = pieces(await p)
+    // The source dropped and came back with other timestamps.
+    readers[0].onBreak()
+    readers[0].onData(makeTs({ seconds: 12, startPts: 90000 * 3600 }))
+    const after = await hls.playlist('21')
+    expect(after).toContain('#EXT-X-DISCONTINUITY')
+    const names = pieces(after)
+    expect(names.length).toBeGreaterThan(before.length)
+    expect(names.slice(0, before.length)).toEqual(before)   // the TV's pieces stay, numbered on
+    expect(startsWithKeyframe(hls.segment('21', names.at(-1)))).toBe(true)
+    expect(readers).toHaveLength(1)
     expect(hls.size).toBe(1)
   })
 
-  it('stops a channel no one asks for, and tidies its folder', async () => {
+  it('stops a session no one asked for in idleMs', async () => {
     hls = make({ idleMs: 1000 })
-    const p = hls.playlist('7'); writePlaylist('7'); await p
+    const p = hls.playlist('7')
+    readers[0].onData(makeTs({ seconds: 12 }))
+    const name = pieces(await p)[0]
+    clock += 500
+    hls._sweep()
+    expect(hls.size).toBe(1)
+    expect(hls.segment('7', name)).toBeTruthy()   // asked again: still watched
     clock += 1500
     hls._sweep()
-    expect(procs[0].killed).toBe(true)
     expect(hls.size).toBe(0)
-    expect(fs.existsSync(dirOf('7'))).toBe(false)
+    expect(readers[0].signal.aborted).toBe(true)
+    expect(hls.segment('7', name)).toBeNull()
+    expect(hls.codecsOf('7')).toBeNull()
+    // The next request starts it again.
+    hls.playlist('7').catch(() => {})
+    expect(readers).toHaveLength(2)
   })
 
-  it('fails the request when FFmpeg gives up, and starts again next time', async () => {
-    hls = make()
-    const p = hls.playlist('8')
-    procs[0].emit('close', 1)
-    await expect(p).rejects.toThrow('stopped')
-    hls.playlist('8').catch(() => {})
-    expect(procs).toHaveLength(2)
-  })
-
-  it('makes room by stopping the channel used longest ago', async () => {
+  it('starts no more than maxSessions', async () => {
     hls = make({ maxSessions: 2 })
     hls.playlist('1').catch(() => {}); clock += 10
     hls.playlist('2').catch(() => {}); clock += 10
     hls.playlist('1').catch(() => {}); clock += 10   // 1 used again: 2 is the oldest
     hls.playlist('3').catch(() => {})
-    expect(procs[1].killed).toBe(true)
-    expect(procs[0].killed).toBe(false)
+    expect(readers.map((r) => r.url.split('/').pop())).toEqual(['1', '2', '3'])
+    expect(readers[1].signal.aborted).toBe(true)
+    expect(readers[0].signal.aborted).toBe(false)
+    expect(readers[2].signal.aborted).toBe(false)
     expect(hls.size).toBe(2)
   })
 
+  it('stops a channel when asked, and only that one', async () => {
+    hls = make()
+    const p = hls.playlist('11')
+    hls.playlist('12').catch(() => {})
+    hls.stop('11')
+    await expect(p).rejects.toThrow('stopped')
+    expect(readers[0].signal.aborted).toBe(true)
+    expect(readers[1].signal.aborted).toBe(false)
+    expect(hls.size).toBe(1)
+  })
+
   it('gives up on a channel that never starts', async () => {
-    let t = 0
-    hls = make({ startTimeoutMs: 50, now: () => (t += 20) })
+    hls = make({ startTimeoutMs: 50 })
     await expect(hls.playlist('4')).rejects.toThrow('too long')
-    expect(procs[0].killed).toBe(true)
+    expect(readers[0].signal.aborted).toBe(true)
+    expect(hls.size).toBe(0)
+  })
+
+  it('ends the session when its reader fails, and starts again next time', async () => {
+    let fail
+    hls = make({ reader: (url, o) => { readers.push({ url, ...o }); return new Promise((_, reject) => { fail = reject }) } })
+    const p = hls.playlist('8')
+    fail(new Error('boom'))
+    await expect(p).rejects.toThrow('stopped')
+    expect(hls.size).toBe(0)
+    hls.playlist('8').catch(() => {})
+    expect(readers).toHaveLength(2)
   })
 })
 
-// With a real FFmpeg (CI, the Docker image): a generated MPEG-TS stream, served
-// over HTTP as /proxy/stream would, comes out as an HLS playlist and segments.
-const hasFfmpeg = (() => {
-  // Both: the probe runs ffprobe, the packager ffmpeg.
-  try { return ['ffmpeg', 'ffprobe'].every((bin) => spawnSync(bin, ['-version'], { timeout: 5000 }).status === 0) } catch { return false }
-})()
+// The real reader over HTTP, as this server reads its own /proxy/stream: no
+// FFmpeg anywhere.
+describe('CastHls over HTTP', () => {
+  const listen = (handler) => new Promise((resolve) => {
+    const server = http.createServer(handler)
+    server.listen(0, '127.0.0.1', () => resolve(server))
+  })
 
-describe.skipIf(!hasFfmpeg)('CastHls with FFmpeg', () => {
+  it('turns a live MPEG-TS stream into HLS', async () => {
+    const data = makeTs({ seconds: 60 })
+    // Sent a little at a time, as a live channel comes.
+    const server = await listen((req, res) => {
+      res.setHeader('Content-Type', 'video/mp2t')
+      let at = 0
+      const tick = setInterval(() => {
+        if (at >= data.length || res.destroyed) { clearInterval(tick); return res.end() }
+        res.write(data.subarray(at, at += 64 * 1024))
+      }, 20)
+      req.on('close', () => clearInterval(tick))
+    })
+    const hls = new CastHls({ inputUrlFor: () => `http://127.0.0.1:${server.address().port}/proxy/stream/1` })
+    try {
+      const playlist = await hls.playlist('1')
+      expect(playlist).toContain('#EXTM3U')
+      expect(startsWithKeyframe(hls.segment('1', pieces(playlist)[0]))).toBe(true)
+    } finally {
+      hls.stopAll()
+      server.closeAllConnections(); server.close()
+    }
+  }, 20_000)
+
   it('reads an HLS channel at its own pace — not its playlist over and over', async () => {
-    // A live HLS source, as /proxy/stream serves an HLS channel: a playlist of
-    // 2 s segments that grows with the clock.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-hls-'))
-    spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine',
-      '-t', '60', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '50', '-c:a', 'aac', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0',
-      '-hls_segment_filename', path.join(root, 's%03d.ts'), path.join(root, 'all.m3u8')])
-    const segs = fs.readFileSync(path.join(root, 'all.m3u8'), 'utf8').split('\n').filter((l) => l.endsWith('.ts'))
+    // A live HLS source, as /proxy/stream serves an HLS channel: 2 s segments,
+    // a playlist that grows with the clock.
+    const segs = Array.from({ length: 30 }, (_, i) => makeTs({ seconds: 2, startPts: i * 2 * 90000 }))
     const started = Date.now()
     let playlistHits = 0
-    const server = http.createServer((req, res) => {
+    const server = await listen((req, res) => {
       if (req.url.startsWith('/live.m3u8')) {
         playlistHits++
         const n = Math.min(segs.length, 3 + Math.floor((Date.now() - started) / 2000))
         const from = Math.max(0, n - 5)
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl')
         return res.end(['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:2', `#EXT-X-MEDIA-SEQUENCE:${from}`,
-          ...segs.slice(from, n).flatMap((s) => ['#EXTINF:2.0,', `/${s}`]), ''].join('\n'))
+          ...segs.slice(from, n).flatMap((_, i) => ['#EXTINF:2.0,', `/s${from + i}.ts`]), ''].join('\n'))
       }
-      const file = path.join(root, path.basename(req.url))
-      if (!fs.existsSync(file)) { res.statusCode = 404; return res.end() }
+      const m = /^\/s(\d+)\.ts$/.exec(req.url)
+      if (!m || !segs[m[1]]) { res.statusCode = 404; return res.end() }
       res.setHeader('Content-Type', 'video/mp2t')
-      fs.createReadStream(file).pipe(res)
+      res.end(segs[m[1]])
     })
-    await new Promise((r) => server.listen(0, r))
-    const hls = new CastHls({ root: path.join(root, 'cast'), inputUrlFor: () => `http://127.0.0.1:${server.address().port}/live.m3u8` })
+    const hls = new CastHls({ inputUrlFor: () => `http://127.0.0.1:${server.address().port}/live.m3u8` })
     try {
-      const playlist = fs.readFileSync(await hls.playlist('2'), 'utf8')
-      expect(playlist).toContain('#EXTM3U')
-      await new Promise((r) => setTimeout(r, 6000))
+      expect(await hls.playlist('2')).toContain('#EXTM3U')
+      await new Promise((r) => setTimeout(r, 3000))
       const secs = (Date.now() - started) / 1000
-      // FFmpeg reloads a live playlist about once a segment (every ~2 s); the loop made it ~10 a second.
       expect(playlistHits / secs).toBeLessThan(2)
     } finally {
       hls.stopAll()
       server.closeAllConnections(); server.close()
-      fs.rmSync(root, { recursive: true, force: true })
     }
-  }, 40_000)
-
-  it('turns a live MPEG-TS stream into HLS', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-cast-real-'))
-    const src = path.join(root, 'src.ts')
-    spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine',
-      '-t', '120', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-c:a', 'aac', '-f', 'mpegts', src])
-    // Sent a little at a time, as a live channel comes (all at once, FFmpeg would finish and tidy up).
-    const data = fs.readFileSync(src)
-    const server = http.createServer((req, res) => {
-      res.setHeader('Content-Type', 'video/mp2t')
-      let at = 0
-      const tick = setInterval(() => {
-        if (at >= data.length || res.destroyed) { clearInterval(tick); return res.end() }
-        res.write(data.subarray(at, at += 32 * 1024))
-      }, 100)
-      req.on('close', () => clearInterval(tick))
-    })
-    await new Promise((r) => server.listen(0, r))
-    const hls = new CastHls({ root: path.join(root, 'cast'), inputUrlFor: () => `http://127.0.0.1:${server.address().port}/stream` })
-    try {
-      const playlist = fs.readFileSync(await hls.playlist('1'), 'utf8')
-      expect(playlist).toContain('#EXTM3U')
-      const seg = playlist.split('\n').find((l) => l.endsWith('.ts'))
-      expect(hls.segment('1', seg)).toBeTruthy()
-    } finally {
-      hls.stopAll()
-      server.closeAllConnections(); server.close()
-      fs.rmSync(root, { recursive: true, force: true })
-    }
-  }, 30_000)
+  }, 20_000)
 })
