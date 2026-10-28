@@ -7,6 +7,7 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
+import { startPlaying } from '@/lib/startPlaying'
 import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
@@ -87,6 +88,9 @@ export default function VodPlayerPage() {
   const hideTimer    = useRef(null)
   const volumeRef    = useRef(80)
   const mutedRef     = useRef(false)
+  // Muted by the viewer (the button, the volume at 0) — what each title starts
+  // with. A mute the browser forced (no sound before a click) is the title's alone.
+  const userMutedRef = useRef(false)
 
   const [status, setStatus]           = useState('loading') // loading | playing | paused | error
   const [errorMsg, setErrorMsg]       = useState('')
@@ -363,22 +367,25 @@ export default function VodPlayerPage() {
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
+    // Each title starts with the viewer's own mute, never a mute the browser forced on the last.
+    video.muted = userMutedRef.current
+    mutedRef.current = userMutedRef.current
+    setMuted(userMutedRef.current)
+
+    // With sound unless the viewer muted it; muted only if the browser refuses
+    // sound before a click — not because a newer load cut a play short (lib/startPlaying.js).
     const tryPlay = () => leftRef.current || onTvRef.current ? Promise.resolve() :
-      video.play()
-        .then(() => { setStatus('playing'); setPlaying(true) })
-        .catch(() => {
-          if (leftRef.current) return
-          video.muted = true; setMuted(true)
-          return video.play()
-            .then(() => { setStatus('playing'); setPlaying(true) })
-            .catch(() => { setStatus('paused'); setPlaying(false) })
-        })
+      startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
+        if (!r || leftRef.current) return
+        setMuted(r.muted)
+        if (r.playing) { setStatus('playing'); setPlaying(true) } else { setStatus('paused'); setPlaying(false) }
+      })
 
     const playNative = (src) => {
       allowRemotePlayback(video)
       video.src = src
       video.volume = volumeRef.current / 100
-      video.muted  = mutedRef.current
+      video.muted  = userMutedRef.current
       tryPlay()
     }
 
@@ -394,7 +401,7 @@ export default function VodPlayerPage() {
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.volume = volumeRef.current / 100
-        video.muted  = mutedRef.current
+        video.muted  = userMutedRef.current
         tryPlay()
       })
       hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -771,12 +778,12 @@ export default function VodPlayerPage() {
               </button>
             )}
             <div className="flex items-center gap-2 group/vol">
-              <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => !m)} className="text-white/90 hover:text-white p-1 transition-colors">
+              <button aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => { userMutedRef.current = !m; return !m })} className="text-white/90 hover:text-white p-1 transition-colors">
                 {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
               <div className="w-0 overflow-hidden group-hover/vol:w-20 transition-all duration-200">
                 <Slider min={0} max={100} step={1} value={[muted ? 0 : volume]}
-                  onValueChange={([v]) => { setVolume(v); setMuted(false) }} className="w-20" />
+                  onValueChange={([v]) => { setVolume(v); setMuted(false); userMutedRef.current = false }} className="w-20" />
               </div>
             </div>
             <div className="flex-1" />

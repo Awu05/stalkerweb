@@ -12,6 +12,7 @@ import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
+import { startPlaying } from '@/lib/startPlaying'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
 import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
@@ -849,28 +850,15 @@ export default function PlayerPage() {
     // unmuted) — never from a previous channel's forced-for-autoplay mute.
     setMuted(userMutedRef.current)
 
+    // With sound unless the viewer muted it; muted only if the browser refuses
+    // sound before a click — not because a newer load cut a play short, and
+    // never kept as a preference (lib/startPlaying.js).
     const tryPlay = () => !active ? Promise.resolve() :
-      video.play()
-        .then(() => { setStatus('playing'); setPlaying(true) })
-        .catch(() => {
-          if (!active) return
-          // Unmuted autoplay was blocked (no user activation yet). Start muted so
-          // the stream isn't stuck — but do NOT persist this as a preference.
-          video.muted = true
-          return video.play()
-            .then(() => {
-              setStatus('playing'); setPlaying(true)
-              // Restore sound unless the user explicitly muted, provided the page
-              // has had user interaction (so unmuting won't be blocked/re-paused).
-              if (!userMutedRef.current && navigator.userActivation?.hasBeenActive) {
-                video.muted = false
-                setMuted(false)
-              } else {
-                setMuted(true) // honestly reflect the forced mute for this channel
-              }
-            })
-            .catch(() => { setStatus('paused'); setPlaying(false) })
-        })
+      startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
+        if (!r || !active) return
+        setMuted(r.muted)
+        if (r.playing) { setStatus('playing'); setPlaying(true) } else { setStatus('paused'); setPlaying(false) }
+      })
 
     const playNative = (src) => {
       allowRemotePlayback(video)
