@@ -4,12 +4,15 @@
 // itself, without the browser's sign-in, so a link carries the playback-only
 // share token (/k/<token>, lib/access.js) — never the access key — and the
 // address the app was opened on, which the device must be able to reach too.
+// In Solo the app is on 127.0.0.1, so links go to the cast listener on the
+// device's Wi-Fi address instead (lib/soloCast.js).
 
 const { origin } = require('./publicUrl');
+const soloCast = require('./soloCast');
 
 /** Scheme, host and (with an access key) the share-token prefix. */
 function castBase(req, shareToken) {
-  return `${origin(req)}${shareToken ? `/k/${shareToken}` : ''}`;
+  return `${soloCast.castOrigin() || origin(req)}${shareToken ? `/k/${shareToken}` : ''}`;
 }
 
 /** Whether a host is only this machine — a cast device can't reach that. */
@@ -31,7 +34,9 @@ function castLink(req, shareToken, pathAndQuery, contentType, live) {
     url: `${castBase(req, shareToken)}${pathAndQuery}`,
     contentType,
     live,
-    reachable: !isLocalHost(req.get('host')),
+    // In Solo: reachable once there's a Wi-Fi address; without one the link
+    // stays on 127.0.0.1 and the app says casting needs Wi-Fi.
+    reachable: soloCast.active() ? !!soloCast.castOrigin() : !isLocalHost(req.get('host')),
   };
 }
 

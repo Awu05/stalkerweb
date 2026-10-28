@@ -2,8 +2,17 @@
 
 const path = require('path');
 
+const solo = process.env.SOLO === '1';
+
 const config = {
   port: parseInt(process.env.PORT || '8983', 10),
+  // The address to listen on. 0.0.0.0 = every address (IPv6 too, see
+  // server.js); the Solo app passes 127.0.0.1, so only the app reaches it.
+  host: (process.env.HOST || '').trim() || '0.0.0.0',
+  // Solo: the server runs inside the StalkerWeb Solo Android app, and a second
+  // listener on CAST_PORT gives a Chromecast the cast stream only (lib/soloCast.js).
+  solo,
+  castPort: solo ? parseInt(process.env.CAST_PORT || '0', 10) || 0 : 0,
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   nodeEnv: process.env.NODE_ENV || 'development',
   // Optional HTTPS listener (see server.js): port plus PEM certificate and key.

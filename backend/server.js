@@ -417,6 +417,10 @@ app.use('/api/xspf', xspfRoutes);
 app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
+// Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast links.
+const soloCast = require('./lib/soloCast');
+if (config.solo) soloCast.setCastPort(config.castPort);
+require('./routes/solo').mount(app, config, soloCast);
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
@@ -500,14 +504,30 @@ async function tryAutoConnect() {
 }
 
 // ── Start server ───────────────────────────────────────────────────────────
-const httpServer = app.listen(config.port, () => {
-  log.info('server', `stalkerweb running on http://0.0.0.0:${config.port}`);
+// HOST: 0.0.0.0 (the default) is every address — left to Node, which takes
+// IPv6 as well; anything else (Solo: 127.0.0.1) is that address only.
+const listenOn = (server, port, cb) =>
+  (config.host === '0.0.0.0' ? server.listen(port, cb) : server.listen(port, config.host, cb));
+const httpServer = listenOn(app, config.port, () => {
+  log.info('server', `stalkerweb running on http://${config.host}:${config.port}`);
   log.info('server', `dataDir: ${config.dataDir}`);
   log.info('server', access.enabled
     ? 'access key set — sign-in required for the web UI, links carry a token'
     : 'no ACCESS_KEY — anyone who can reach this server can use it (fine on a home network; set one before exposing it to the internet)');
   tryAutoConnect();
 });
+
+// Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast
+// (lib/soloCast.js). Not started without an access key: no share token, nothing
+// it could safely answer.
+let castServer = null;
+if (config.solo) {
+  if (config.castPort) {
+    castServer = soloCast.startLanListener({ app, port: config.castPort, shareToken: access.shareToken });
+  } else {
+    log.warn('server', 'Solo without CAST_PORT — the cast listener is not started, so casting is off');
+  }
+}
 
 // Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS
 // (except from 127.0.0.1), so this lets a TV or phone use the Stremio addon
@@ -524,8 +544,8 @@ if (config.httpsPort) {
     httpsServer.on('error', (e) => {
       log.error('server', `HTTPS listener on port ${config.httpsPort} failed (${e.code || e.message}) — HTTP is still up on ${config.port}`);
     });
-    httpsServer.listen(config.httpsPort, () => {
-      log.info('server', `stalkerweb also on https://0.0.0.0:${config.httpsPort}`);
+    listenOn(httpsServer, config.httpsPort, () => {
+      log.info('server', `stalkerweb also on https://${config.host}:${config.httpsPort}`);
     });
     const reload = (curr, prev) => {
       if (curr.mtimeMs === prev.mtimeMs) return;
@@ -557,6 +577,7 @@ function shutdown(signal) {
     appState.sessionManager.destroy();
   }
   httpsServer?.close();
+  castServer?.close();
   httpServer.close(() => {
     log.info('server', 'HTTP server closed');
     process.exit(0);
