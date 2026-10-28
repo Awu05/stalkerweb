@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.player
 
+import com.stalkerweb.android.ui.components.TvTextField
+
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
@@ -38,7 +40,7 @@ fun StreamOverrideSheet(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
 
-            OutlinedTextField(
+            TvTextField(
                 value         = text,
                 onValueChange = { text = it },
                 label         = { Text("Override URL (leave blank to use default)") },

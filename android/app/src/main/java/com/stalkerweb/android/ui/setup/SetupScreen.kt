@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.setup
 
+import com.stalkerweb.android.ui.components.TvTextField
+
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
@@ -151,7 +153,7 @@ fun SetupScreen(
             )
             Spacer(Modifier.height(32.dp))
 
-            OutlinedTextField(
+            TvTextField(
                 value = host,
                 onValueChange = { host = it; error = null },
                 label = { Text("Server address") },
@@ -168,7 +170,7 @@ fun SetupScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            OutlinedTextField(
+            TvTextField(
                 value = port,
                 onValueChange = { port = it.filter(Char::isDigit); error = null },
                 label = { Text("Port") },
@@ -186,7 +188,7 @@ fun SetupScreen(
             Spacer(Modifier.height(12.dp))
 
             // Only needed when the server sets ACCESS_KEY.
-            OutlinedTextField(
+            TvTextField(
                 value = accessKey,
                 onValueChange = { accessKey = it; error = null },
                 label = { Text("Access key (if set)") },

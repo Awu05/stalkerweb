@@ -74,11 +74,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,6 +93,10 @@ import com.stalkerweb.android.ui.components.highlightControllerFocus
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 import com.stalkerweb.android.ui.utils.rememberIsTV
+import androidx.compose.ui.focus.focusProperties
+import com.stalkerweb.android.ui.utils.isOkKey
+import com.stalkerweb.android.ui.utils.RemoteKeys
+import android.view.KeyEvent as AndroidKeyEvent
 import kotlinx.coroutines.delay
 
 /** While casting: the TV's name, where it is in the title, and its controls. */
@@ -178,61 +177,62 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     }
     LaunchedEffect(state.resumedFrom) { if (state.resumedFrom > 0) { delay(8_000); viewModel.dismissResumed() } }
 
-    // The remote's keys, wherever the focus is:
-    //   on the video (its controls hidden or showing), they reach Media3's
-    //     PlayerView first — not Compose — and it shows its controls on any of
-    //     them, so they're looked at there (dispatchKeyEvent below);
-    //   on the top bar or a panel — or left on a control that has since faded
-    //     away — Compose has them (onPreviewKeyEvent below).
-    // Both ask the same:
+    // The remote's keys, before any view sees them (RemoteKeys, from
+    // MainActivity) — so wherever the focus is: Media3 takes its buttons away
+    // with its controls, and the focus can be left on nothing at all.
     //   OK, with nothing on screen but the video: the Skip button's skip (the
-    //     button never takes the focus — that would pull it out of the
-    //     controls or the episodes, and leave it nowhere when it goes);
-    //   Next / Previous (channel up / down): the next or previous episode.
-    // The OK that skipped: its repeats and its release are kept from Media3 too.
-    var okSkipped by remember { mutableStateOf(false) }
+    //     button itself never takes the focus on a TV);
+    //   Next / Previous (channel up / down): the next or previous episode —
+    //     once per press, not once per auto-repeat;
+    //   any other D-pad key, with nothing but the video on screen and the focus
+    //     not on it: to the video, whose controls then show (as they would
+    //     with the focus there).
+    // A key used here keeps its repeats and its release too: Media3 would show
+    // its controls on the release.
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
-    val onRemoteKey by rememberUpdatedState { keyCode: Int, down: Boolean, controlsShowing: Boolean ->
-        val ok = keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
-            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+    val used = remember { object { var key: Int? = null } }
+    val onRemoteKey by rememberUpdatedState { e: AndroidKeyEvent ->
+        val down = e.action == AndroidKeyEvent.ACTION_DOWN
+        if (down && e.repeatCount == 0) used.key = null
+        if (used.key == e.keyCode) {
+            if (e.action == AndroidKeyEvent.ACTION_UP) used.key = null
+            return@rememberUpdatedState true
+        }
+        if (!down) return@rememberUpdatedState false
+        val videoOnly = !controlsVisible && !panelOpen && !subtitlesOpen && state.upNext == null &&
+            state.error == null && state.resumedFrom <= 0.0 && !casting
         val skipNow = state.skip
-        when {
-            ok && okSkipped -> { if (!down) okSkipped = false; true }
-            !down -> false
-            ok && skipNow != null && !controlsShowing && !panelOpen && !subtitlesOpen && state.upNext == null && !casting -> {
-                okSkipped = true
-                viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
-                true
+        val code = e.keyCode
+        val handled = when {
+            isOkKey(code) && videoOnly && skipNow != null -> {
+                viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null); true
             }
-            p.isEpisode && (keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT || keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_UP) -> { viewModel.playNext(); true }
-            p.isEpisode && (keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS || keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_DOWN) -> { viewModel.playPrevious(); true }
+            p.isEpisode && (code == AndroidKeyEvent.KEYCODE_MEDIA_NEXT || code == AndroidKeyEvent.KEYCODE_CHANNEL_UP) -> {
+                if (e.repeatCount == 0) viewModel.playNext(); true
+            }
+            p.isEpisode && (code == AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS || code == AndroidKeyEvent.KEYCODE_CHANNEL_DOWN) -> {
+                if (e.repeatCount == 0) viewModel.playPrevious(); true
+            }
             else -> false
         }
+        if (handled) { used.key = code; return@rememberUpdatedState true }
+        val view = playerView
+        val dpad = isOkKey(code) || code in AndroidKeyEvent.KEYCODE_DPAD_UP..AndroidKeyEvent.KEYCODE_DPAD_RIGHT
+        if (dpad && videoOnly && view != null && !view.hasFocus()) view.dispatchKeyEvent(e) else false
     }
-    // The controls gone (and no panel open): the focus back on the video, so
-    // the next key is the video's — not a hidden top-bar button's.
-    LaunchedEffect(controlsVisible, panelOpen, subtitlesOpen, playerView) {
-        if (isTV && !controlsVisible && !panelOpen && !subtitlesOpen) playerView?.requestFocus()
+    if (isTV) {
+        DisposableEffect(Unit) {
+            val handler: (AndroidKeyEvent) -> Boolean = { onRemoteKey(it) }
+            RemoteKeys.handler = handler
+            onDispose { if (RemoteKeys.handler === handler) RemoteKeys.handler = null }
+        }
     }
 
-    Box(
-        Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
-            val down = e.type == KeyEventType.KeyDown
-            if (!down && e.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
-            onRemoteKey(e.nativeKeyEvent.keyCode, down, playerView?.isControllerFullyVisible ?: controlsVisible)
-        },
-    ) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (player != null) {
             AndroidView(
                 factory = { ctx ->
-                    object : PlayerView(ctx) {
-                        override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-                            val down = event.action == android.view.KeyEvent.ACTION_DOWN
-                            val handled = (down || event.action == android.view.KeyEvent.ACTION_UP) &&
-                                onRemoteKey(event.keyCode, down, isControllerFullyVisible)
-                            return handled || super.dispatchKeyEvent(event)
-                        }
-                    }.also { playerView = it }.apply {
+                    PlayerView(ctx).also { playerView = it }.apply {
                         useController = true
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
@@ -346,8 +346,10 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 // The remote's OK skips (above); the button says so.
                 hint = isTV && !controlsVisible && !panelOpen && !subtitlesOpen,
                 onClick = { viewModel.skip(next) },
-                // Above Media3's seek bar while its controls show.
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
+                // Above Media3's seek bar while its controls show. On a TV, OK skips:
+                // the button never takes the focus (gone, it would leave it nowhere).
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp)
+                    .focusProperties { canFocus = !isTV },
             )
         }
 

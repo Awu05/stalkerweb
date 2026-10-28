@@ -1,5 +1,7 @@
 package com.stalkerweb.android.ui.settings
 
+import com.stalkerweb.android.ui.components.TvTextField
+
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
@@ -48,7 +50,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -400,7 +401,7 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 @Composable fun field(label: String, value: String, readOnly: Boolean = false, set: (String) -> Unit) =
-                    OutlinedTextField(value, set, singleLine = true, keyboardOptions = tvKeyboardOptions(), readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
+                    TvTextField(value, set, singleLine = true, keyboardOptions = tvKeyboardOptions(), readOnly = readOnly, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
                 field("Name", p.name) { p = p.copy(name = it) }
                 field("Portal URL", p.portal) { p = p.copy(portal = it) }
                 field("MAC address", p.mac) { p = p.copy(mac = it).let { q -> if (idsFromMac) withMacIds(q) else q } }
@@ -418,7 +419,7 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 field("Language", p.lang) { p = p.copy(lang = it) }
                 field("Login", p.login) { p = p.copy(login = it) }
                 var passwordShown by remember { mutableStateOf(false) }
-                OutlinedTextField(
+                TvTextField(
                     p.password, { p = p.copy(password = it) }, singleLine = true, label = { Text("Password") },
                     visualTransformation = passwordTransformation(passwordShown),
                     keyboardOptions = tvKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Password)),
@@ -485,7 +486,7 @@ private fun PlaybackTab(viewModel: SettingsViewModel, state: SettingsState) {
             ChoiceRow(listOf(0, 5, 10, 15, 30, 60), buffer, { if (it == 0) "Off" else "$it s" }) { buffer = it }
             Text("Disconnect when idle", color = SwColors.Text)
             ChoiceRow(listOf(0, 15, 30, 60, 120, 240), idle, { if (it == 0) "Never" else if (it < 60) "$it min" else "${it / 60} h" }) { idle = it }
-            OutlinedTextField(dir, { dir = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
+            TvTextField(dir, { dir = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
             Button(onClick = {
                 viewModel.savePlayback(SettingsUpdate(epgEnabled = epg, vodEnabled = vod, downloadDir = dir.trim().ifBlank { null },
                     idleTimeoutMinutes = idle, liveBufferSeconds = buffer))
@@ -527,8 +528,8 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
         }
         item {
             Card("Logo overrides", "A logo for a channel name, used before anything else.") {
-                OutlinedTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Channel name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Logo URL") }, modifier = Modifier.fillMaxWidth())
+                TvTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Channel name") }, modifier = Modifier.fillMaxWidth())
+                TvTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Logo URL") }, modifier = Modifier.fillMaxWidth())
                 Button(onClick = { viewModel.addOverride(name, url); name = ""; url = "" }, enabled = name.isNotBlank() && url.isNotBlank()) { Text("Add override") }
             }
         }
@@ -544,7 +545,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
         item {
             Card("Logo strip words", "Removed from channel names before logo matching (e.g. CANADA, so BBC CANADA matches BBC).") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(word, { word = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Word") }, modifier = Modifier.weight(1f))
+                    TvTextField(word, { word = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Word") }, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = { viewModel.addStripWord(word); word = "" }, enabled = word.isNotBlank()) { Text("Add") }
                 }
