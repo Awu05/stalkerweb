@@ -178,52 +178,61 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     }
     LaunchedEffect(state.resumedFrom) { if (state.resumedFrom > 0) { delay(8_000); viewModel.dismissResumed() } }
 
-    // The remote's keys. While the video has the focus (its controls hidden or
-    // showing), they reach Media3's PlayerView first — not Compose, whose key
-    // handlers never see them — and it shows its controls on any of them. So
-    // they're looked at in the PlayerView (dispatchKeyEvent below):
+    // The remote's keys, wherever the focus is:
+    //   on the video (its controls hidden or showing), they reach Media3's
+    //     PlayerView first — not Compose — and it shows its controls on any of
+    //     them, so they're looked at there (dispatchKeyEvent below);
+    //   on the top bar or a panel — or left on a control that has since faded
+    //     away — Compose has them (onPreviewKeyEvent below).
+    // Both ask the same:
     //   OK, with nothing on screen but the video: the Skip button's skip (the
     //     button never takes the focus — that would pull it out of the
     //     controls or the episodes, and leave it nowhere when it goes);
     //   Next / Previous (channel up / down): the next or previous episode.
     // The OK that skipped: its repeats and its release are kept from Media3 too.
     var okSkipped by remember { mutableStateOf(false) }
-    val onRemoteKey by rememberUpdatedState { e: android.view.KeyEvent, view: PlayerView ->
-        val ok = e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
-            e.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+    var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    val onRemoteKey by rememberUpdatedState { keyCode: Int, down: Boolean, controlsShowing: Boolean ->
+        val ok = keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
         val skipNow = state.skip
         when {
-            ok && okSkipped -> { if (e.action == android.view.KeyEvent.ACTION_UP) okSkipped = false; true }
-            e.action != android.view.KeyEvent.ACTION_DOWN -> false
-            ok && skipNow != null && !view.isControllerFullyVisible && !panelOpen && !subtitlesOpen && state.upNext == null && !casting -> {
+            ok && okSkipped -> { if (!down) okSkipped = false; true }
+            !down -> false
+            ok && skipNow != null && !controlsShowing && !panelOpen && !subtitlesOpen && state.upNext == null && !casting -> {
                 okSkipped = true
                 viewModel.skip(skipNow.kind == "outro" && state.neighbours.next != null)
                 true
             }
-            p.isEpisode && (e.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT || e.keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_UP) -> { viewModel.playNext(); true }
-            p.isEpisode && (e.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS || e.keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_DOWN) -> { viewModel.playPrevious(); true }
+            p.isEpisode && (keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT || keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_UP) -> { viewModel.playNext(); true }
+            p.isEpisode && (keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS || keyCode == android.view.KeyEvent.KEYCODE_CHANNEL_DOWN) -> { viewModel.playPrevious(); true }
             else -> false
         }
     }
+    // The controls gone (and no panel open): the focus back on the video, so
+    // the next key is the video's — not a hidden top-bar button's.
+    LaunchedEffect(controlsVisible, panelOpen, subtitlesOpen, playerView) {
+        if (isTV && !controlsVisible && !panelOpen && !subtitlesOpen) playerView?.requestFocus()
+    }
 
     Box(
-        // With the focus on the top bar or a panel instead, Compose has the keys: Next / Previous from there.
         Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || !p.isEpisode) return@onPreviewKeyEvent false
-            when (e.key) {
-                Key.MediaNext, Key.ChannelUp -> { viewModel.playNext(); true }
-                Key.MediaPrevious, Key.ChannelDown -> { viewModel.playPrevious(); true }
-                else -> false
-            }
+            val down = e.type == KeyEventType.KeyDown
+            if (!down && e.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+            onRemoteKey(e.nativeKeyEvent.keyCode, down, playerView?.isControllerFullyVisible ?: controlsVisible)
         },
     ) {
         if (player != null) {
             AndroidView(
                 factory = { ctx ->
                     object : PlayerView(ctx) {
-                        override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
-                            onRemoteKey(event, this) || super.dispatchKeyEvent(event)
-                    }.apply {
+                        override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+                            val down = event.action == android.view.KeyEvent.ACTION_DOWN
+                            val handled = (down || event.action == android.view.KeyEvent.ACTION_UP) &&
+                                onRemoteKey(event.keyCode, down, isControllerFullyVisible)
+                            return handled || super.dispatchKeyEvent(event)
+                        }
+                    }.also { playerView = it }.apply {
                         useController = true
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
