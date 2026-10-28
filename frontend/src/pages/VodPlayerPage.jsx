@@ -630,7 +630,7 @@ export default function VodPlayerPage() {
       >
         {/* Back button (always visible, top-left) */}
         <div className={cn(
-          'absolute top-0 inset-x-0 z-20 flex items-center gap-2 px-3 py-2 bg-gradient-to-b from-black/60 to-transparent transition-opacity duration-300',
+          'absolute top-0 inset-x-0 z-20 flex items-center gap-2 h-14 px-3 bg-gradient-to-b from-black/60 to-transparent transition-opacity duration-300',   // h-14: level with the sidebar's header
           showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
           <button
