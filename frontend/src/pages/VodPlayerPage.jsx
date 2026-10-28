@@ -87,7 +87,6 @@ export default function VodPlayerPage() {
   const containerRef = useRef(null)
   const hideTimer    = useRef(null)
   const volumeRef    = useRef(80)
-  const mutedRef     = useRef(false)
   // Muted by the viewer (the button, the volume at 0) — what each title starts
   // with. A mute the browser forced (no sound before a click) is the title's alone.
   const userMutedRef = useRef(false)
@@ -198,7 +197,6 @@ export default function VodPlayerPage() {
   }, [isEpisode])
 
   useEffect(() => { volumeRef.current = volume }, [volume])
-  useEffect(() => { mutedRef.current  = muted  }, [muted])
 
   // ── Continue Watching: persist position + resume ──────────────────────────
   const progressKey = makeVodKey({ videoId, seasonId, episodeId })
@@ -367,10 +365,8 @@ export default function VodPlayerPage() {
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
 
-    // Each title starts with the viewer's own mute, never a mute the browser forced on the last.
-    video.muted = userMutedRef.current
-    mutedRef.current = userMutedRef.current
-    setMuted(userMutedRef.current)
+    // Each title starts with the viewer's own mute (startPlaying), never a mute
+    // the browser forced on the last; the mute shown follows what it ends up with.
 
     // With sound unless the viewer muted it; muted only if the browser refuses
     // sound before a click — not because a newer load cut a play short (lib/startPlaying.js).
@@ -378,7 +374,11 @@ export default function VodPlayerPage() {
       startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
         if (!r || leftRef.current) return
         setMuted(r.muted)
-        if (r.playing) { setStatus('playing'); setPlaying(true) } else { setStatus('paused'); setPlaying(false) }
+        if (r.playing) { setStatus('playing'); setPlaying(true); return }
+        setPlaying(false)
+        // A file this browser can't play says so; one it only won't start without a click waits for one.
+        if (r.error && r.error !== 'NotAllowedError') { setStatus('error'); setErrorMsg(`This video can't be played in this browser (${r.error}).`) }
+        else setStatus('paused')
       })
 
     const playNative = (src) => {
@@ -411,6 +411,7 @@ export default function VodPlayerPage() {
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR && Date.now() - lastRecover > 60_000) {
             lastRecover = Date.now()
             hls.recoverMediaError()
+            if (video.paused && !leftRef.current) tryPlay()   // the play it cut short
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             // Can't be decoded here: the device's own player (Safari's takes
             // formats the page player won't) from where it was, or say so.
@@ -587,8 +588,9 @@ export default function VodPlayerPage() {
   function togglePlayPause() {
     if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return
-    if (v.paused) v.play().catch(() => {})
-    else v.pause()
+    if (!v.paused) { v.pause(); return }
+    // As a title starts (lib/startPlaying.js): with the viewer's own sound.
+    startPlaying(v, { userMuted: userMutedRef.current }).then((r) => { if (r) setMuted(r.muted) })
   }
 
   function toggleFullscreen() {

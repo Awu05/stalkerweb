@@ -846,9 +846,9 @@ export default function PlayerPage() {
 
     // Reset tracks on every new stream
     setAudioTracks([]); setActiveAudio(0); setSubtitleTracks([]); setActiveSub(-1)
-    // Each new channel starts from the user's explicit mute preference (default:
-    // unmuted) — never from a previous channel's forced-for-autoplay mute.
-    setMuted(userMutedRef.current)
+    // Each new channel starts from the viewer's own mute (default: unmuted) —
+    // never a previous channel's forced-for-autoplay mute (startPlaying); the
+    // mute shown follows what it ends up with.
 
     // With sound unless the viewer muted it; muted only if the browser refuses
     // sound before a click — not because a newer load cut a play short, and
@@ -857,7 +857,11 @@ export default function PlayerPage() {
       startPlaying(video, { userMuted: userMutedRef.current }).then((r) => {
         if (!r || !active) return
         setMuted(r.muted)
-        if (r.playing) { setStatus('playing'); setPlaying(true) } else { setStatus('paused'); setPlaying(false) }
+        if (r.playing) { setStatus('playing'); setPlaying(true); return }
+        // Not started (refused, or a stream that wouldn't play): paused, with play to try again —
+        // not left on the loading spinner. (A stream that fails to load is the stall recovery's.)
+        setPlaying(false)
+        setStatus('paused')
       })
 
     const playNative = (src) => {
@@ -981,6 +985,7 @@ export default function PlayerPage() {
             mediaErrorRetryRef.current++
             lastMediaRecoverRef.current = Date.now()
             hls.recoverMediaError()
+            if (video.paused && active) tryPlay()   // the play it cut short
           } else if (decodeFailed) {
             hls.destroy()
             hlsRef.current = null
@@ -1226,18 +1231,12 @@ export default function PlayerPage() {
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
-      v.play()
-        .then(() => { setPlaying(true); setStatus('playing') })
-        .catch((err) => {
-          // Only the browser's no-sound-autoplay rule gets the muted retry; a
-          // play() a pause cut short (AbortError) stays paused, sound as it was.
-          if (err?.name !== 'NotAllowedError') return
-          v.muted = true
-          setMuted(true)
-          v.play()
-            .then(() => { setPlaying(true); setStatus('playing') })
-            .catch(() => {})
-        })
+      // As a channel starts (lib/startPlaying.js): with the viewer's own sound.
+      startPlaying(v, { userMuted: userMutedRef.current }).then((r) => {
+        if (!r) return
+        setMuted(r.muted)
+        if (r.playing) { setPlaying(true); setStatus('playing') }
+      })
     } else {
       v.pause()
       setPlaying(false)
