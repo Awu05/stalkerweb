@@ -33,7 +33,7 @@ import ChannelFilters from '@/components/ChannelFilters'
 import { AutoSkipSetting } from '@/components/SkipControls'
 import SubtitleSettings from '@/components/SubtitleSettings'
 import TimezonePicker from '@/components/TimezonePicker'
-import { missingFields } from '@/lib/profileRequired'
+import { missingFields, prepareForm } from '@/lib/profileRequired'
 import SettingsTabs from '@/components/SettingsTabs'
 import { chooseTab, rememberedTab, rememberTab } from '@/lib/settingsTabs'
 import { viewerQuery, viewerPath } from '@/lib/viewer'
@@ -213,7 +213,8 @@ function LinkRow({ label, url, hint, icon: Icon, filename }) {
 // ── Profile form sheet ────────────────────────────────────────────────────────
 
 function ProfileSheet({ initial, onSave, onClose }) {
-  const [form, setForm]       = useState({ ...DEFAULT_FORM, ...initial })
+  // The blanks the server fills in anyway, shown as it does (lib/profileRequired.js).
+  const [form, setForm]       = useState(() => prepareForm({ ...DEFAULT_FORM, ...initial }))
   const [showAdv, setShowAdv] = useState(false)
 
   const set     = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -226,7 +227,12 @@ function ProfileSheet({ initial, onSave, onClose }) {
   const made = idSource !== 'typed'
   const withIds = (source) => (f) => {
     const id = deviceIdFrom(source, f)
-    return id ? { ...f, device_id: id, device_id2: id } : f
+    return { ...f, device_id: id, device_id2: id, send_device_id: f.send_device_id || !!id, send_device_id2: f.send_device_id2 || !!id }
+  }
+  // A device ID typed in: sent once there is one (an empty one isn't sent).
+  const setDeviceId = (k, sendKey) => e => {
+    const v = e.target.value
+    setForm(f => ({ ...f, [k]: v, [sendKey]: f[k] ? f[sendKey] : f[sendKey] || !!v.trim() }))
   }
   // A field the IDs are made from, changed: the IDs again.
   const setMade = k => e => { const v = e.target.value; setForm(f => (made ? withIds(idSource)({ ...f, [k]: v }) : { ...f, [k]: v })) }
@@ -253,7 +259,8 @@ function ProfileSheet({ initial, onSave, onClose }) {
     e.preventDefault()
     if (missing.length) return
     // The portal is sent the MAC as saved: the same form its device IDs were hashed from.
-    const p = { ...form, portal: normalizePortal(form.portal), mac: normalizeMac(form.mac) || form.mac }
+    // The source saved with it: guessing it back from the IDs can pick the wrong one.
+    const p = { ...form, portal: normalizePortal(form.portal), mac: normalizeMac(form.mac) || form.mac, device_id_source: idSource }
     onSave(p)
   }
 
@@ -346,7 +353,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
               <Field label="Device ID" id="prof-did" required={form.send_device_id !== false}
                 hint={form.send_device_id === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did" value={form.device_id || ''} onChange={set('device_id')} readOnly={made}
+                  <Input id="prof-did" value={form.device_id || ''} onChange={setDeviceId('device_id', 'send_device_id')} readOnly={made}
                     title={made ? `Made from ${madeFrom} (${sourceLabel}) — choose "Typed in" to edit` : undefined}
                     className={cn('font-mono text-xs flex-1', made && 'opacity-70')} />
                   <Switch checked={form.send_device_id !== false} onCheckedChange={setBool('send_device_id')}
@@ -356,7 +363,7 @@ function ProfileSheet({ initial, onSave, onClose }) {
               <Field label="Device ID 2" id="prof-did2" required={form.send_device_id2 !== false}
                 hint={form.send_device_id2 === false ? 'Stored but not sent to the portal.' : undefined}>
                 <div className="flex items-center gap-2">
-                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={set('device_id2')} readOnly={made}
+                  <Input id="prof-did2" value={form.device_id2 || ''} onChange={setDeviceId('device_id2', 'send_device_id2')} readOnly={made}
                     title={made ? `Made from ${madeFrom} (${sourceLabel}) — choose "Typed in" to edit` : undefined}
                     className={cn('font-mono text-xs flex-1', made && 'opacity-70')} />
                   <Switch checked={form.send_device_id2 !== false} onCheckedChange={setBool('send_device_id2')}

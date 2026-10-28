@@ -94,6 +94,7 @@ import com.stalkerweb.android.ui.theme.VIEWER_COLORS
 import com.stalkerweb.android.ui.components.TimezoneField
 import com.stalkerweb.android.data.repo.deviceIdSourceOf
 import com.stalkerweb.android.data.repo.missingProfileFields
+import com.stalkerweb.android.data.repo.prepareProfile
 import com.stalkerweb.android.data.repo.deviceIdFrom
 import com.stalkerweb.android.data.repo.DeviceIdSource
 import com.stalkerweb.android.ui.components.tvFocus
@@ -389,14 +390,18 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
 
 @Composable
 private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss: () -> Unit) {
-    var p by remember { mutableStateOf(initial) }
+    // The blanks the server fills in anyway, shown as it does (ProfileRequired.kt).
+    var p by remember { mutableStateOf(prepareProfile(initial)) }
     // Device ID 1 and 2, made from the MAC, the serial or the UID as the
     // provider wants them (DeviceId.kt) — kept in step while one is chosen.
     // Starts on the one the saved IDs already are.
-    var idSource by remember { mutableStateOf(deviceIdSourceOf(initial.mac, initial.serialNumber, initial.uid, initial.deviceId, initial.deviceId2)) }
+    var idSource by remember { mutableStateOf(deviceIdSourceOf(initial.mac, initial.serialNumber, initial.uid, initial.deviceId, initial.deviceId2, initial.deviceIdSource)) }
     val made = idSource != DeviceIdSource.TYPED
+    // Always the source's IDs (none while what it hashes is empty — not the last source's), sent once there are some.
     fun withIds(q: Profile, source: DeviceIdSource = idSource): Profile =
-        deviceIdFrom(source, q.mac, q.serialNumber, q.uid).let { id -> if (id.isEmpty()) q else q.copy(deviceId = id, deviceId2 = id) }
+        deviceIdFrom(source, q.mac, q.serialNumber, q.uid).let { id ->
+            q.copy(deviceId = id, deviceId2 = id, sendDeviceId = q.sendDeviceId || id.isNotEmpty(), sendDeviceId2 = q.sendDeviceId2 || id.isNotEmpty())
+        }
     // The IDs typed in before one was chosen, put back on "Typed in" (an STBEmu import's own, say).
     var idsBefore by remember { mutableStateOf<Pair<String, String>?>(null) }
     AlertDialog(
@@ -440,14 +445,21 @@ private fun ProfileDialog(initial: Profile, onSave: (Profile) -> Unit, onDismiss
                 field("Token", p.token) { p = p.copy(token = it) }
                 field("Serial number", p.serialNumber, required = true) { p = p.copy(serialNumber = it).let { q -> if (made) withIds(q) else q } }
                 field("UID (System information; only to make the device IDs)", p.uid) { p = p.copy(uid = it).let { q -> if (made) withIds(q) else q } }
-                field("Device ID", p.deviceId, readOnly = made, required = p.sendDeviceId) { p = p.copy(deviceId = it) }
-                field("Device ID 2", p.deviceId2, readOnly = made, required = p.sendDeviceId2) { p = p.copy(deviceId2 = it) }
+                // A device ID typed in is sent once there is one; each has its switch (an empty one isn't sent).
+                field("Device ID", p.deviceId, readOnly = made, required = p.sendDeviceId) {
+                    p = p.copy(deviceId = it, sendDeviceId = if (p.deviceId.isEmpty()) p.sendDeviceId || it.isNotBlank() else p.sendDeviceId)
+                }
+                CheckRow("Send Device ID to the portal", p.sendDeviceId) { on -> p = p.copy(sendDeviceId = on) }
+                field("Device ID 2", p.deviceId2, readOnly = made, required = p.sendDeviceId2) {
+                    p = p.copy(deviceId2 = it, sendDeviceId2 = if (p.deviceId2.isEmpty()) p.sendDeviceId2 || it.isNotBlank() else p.sendDeviceId2)
+                }
+                CheckRow("Send Device ID 2 to the portal", p.sendDeviceId2) { on -> p = p.copy(sendDeviceId2 = on) }
                 field("Signature", p.signature) { p = p.copy(signature = it) }
                 val missing = missingProfileFields(p)
                 if (missing.isNotEmpty()) Text("* Still needed: ${missing.joinToString(", ")}", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = { onSave(p.copy(mac = normalizeMac(p.mac).ifEmpty { p.mac })); onDismiss() }, enabled = missingProfileFields(p).isEmpty()) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(p.copy(mac = normalizeMac(p.mac).ifEmpty { p.mac }, deviceIdSource = idSource.id)); onDismiss() }, enabled = missingProfileFields(p).isEmpty()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

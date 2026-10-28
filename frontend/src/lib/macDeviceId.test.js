@@ -71,3 +71,14 @@ describe('deviceIdSourceOf', () => {
     expect(deviceIdSourceOf({})).toBe('typed')
   })
 })
+
+describe('the source, saved and placeholder', () => {
+  it('uses the source saved with a connection before guessing it from the IDs', () => {
+    expect(deviceIdSourceOf({ ...BOX, device_id_source: 'serial', device_id: EXPECTED.mac, device_id2: EXPECTED.mac })).toBe('serial')
+    expect(deviceIdSourceOf({ ...BOX, device_id_source: 'nonsense', device_id: EXPECTED.mac, device_id2: EXPECTED.mac })).toBe('mac')
+  })
+
+  it("never hashes the placeholder serial, which isn't a box's", () => {
+    expect(deviceIdFrom('serial', { serial_number: '0000000000000' })).toBe('')
+  })
+})

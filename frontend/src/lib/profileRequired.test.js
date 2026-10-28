@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { missingFields, isRequired } from './profileRequired'
+import { missingFields, isRequired, prepareForm } from './profileRequired'
 
 // A connection filled in: everything a portal needs.
 const FILLED = {
@@ -39,5 +39,19 @@ describe('missingFields', () => {
     expect(isRequired('portal')).toBe(true)
     expect(isRequired('login')).toBe(false)
     expect(isRequired('signature')).toBe(false)
+  })
+})
+
+describe('prepareForm', () => {
+  it('shows the blanks the server fills anyway as it does, so a working connection can be saved', () => {
+    const old = { portal: 'http://portal.example/c/', mac: '00:1A:79:12:34:56', timezone: 'UTC', lang: 'en', connection_timeout: 10,
+      name: '', serial_number: '', device_id: '', device_id2: '', send_device_id: true, send_device_id2: true }
+    const f = prepareForm(old)
+    expect(f).toMatchObject({ name: 'portal.example', serial_number: '0000000000000', send_device_id: false, send_device_id2: false })
+    expect(missingFields(f)).toEqual([])
+  })
+
+  it('leaves what is filled in as it is', () => {
+    expect(prepareForm(FILLED)).toEqual(FILLED)
   })
 })

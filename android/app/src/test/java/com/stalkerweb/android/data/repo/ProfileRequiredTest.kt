@@ -24,4 +24,14 @@ class ProfileRequiredTest {
         assertEquals(listOf("Device ID", "Device ID 2"), missingProfileFields(filled.copy(deviceId = "", deviceId2 = "")))
         assertEquals(emptyList<String>(), missingProfileFields(filled.copy(deviceId = "", sendDeviceId = false, deviceId2 = "", sendDeviceId2 = false)))
     }
+
+    @Test fun `shows the blanks the server fills anyway as it does, so a working connection can be saved`() {
+        val old = Profile(id = "p0", portal = "http://portal.example/c/", mac = "00:1A:79:12:34:56", name = "", serialNumber = "")
+        val p = prepareProfile(old)
+        assertEquals("portal.example", p.name)
+        assertEquals(SERIAL_PLACEHOLDER, p.serialNumber)
+        assertEquals(false, p.sendDeviceId)
+        assertEquals(emptyList<String>(), missingProfileFields(p))
+        assertEquals(filled, prepareProfile(filled))
+    }
 }

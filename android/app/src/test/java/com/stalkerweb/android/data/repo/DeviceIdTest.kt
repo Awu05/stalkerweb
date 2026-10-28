@@ -54,4 +54,11 @@ class DeviceIdTest {
         assertEquals(DeviceIdSource.TYPED, deviceIdSourceOf(mac, serial, uid, "ABC", "ABC"))
         assertEquals(DeviceIdSource.TYPED, deviceIdSourceOf(mac, serial, uid, expected.getValue(DeviceIdSource.MAC), "OTHER"))
     }
+
+    @Test fun `uses the source saved with a connection, and never hashes the placeholder serial`() {
+        val mac = expected.getValue(DeviceIdSource.MAC)
+        assertEquals(DeviceIdSource.SERIAL, deviceIdSourceOf(this.mac, serial, uid, mac, mac, saved = "serial"))
+        assertEquals(DeviceIdSource.MAC, deviceIdSourceOf(this.mac, serial, uid, mac, mac, saved = "nonsense"))
+        assertEquals("", deviceIdFrom(DeviceIdSource.SERIAL, "", SERIAL_PLACEHOLDER, ""))
+    }
 }

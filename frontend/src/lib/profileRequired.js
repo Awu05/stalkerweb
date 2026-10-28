@@ -1,4 +1,4 @@
-import { normalizeMac } from './macDeviceId'
+import { normalizeMac, SERIAL_PLACEHOLDER } from './macDeviceId'
 
 /**
  * What a connection needs before it can be saved (Settings → Connection's
@@ -27,4 +27,24 @@ export const isRequired = (key) => REQUIRED.has(key)
 /** The required fields still missing from a connection: [{ key, label, advanced }]. */
 export function missingFields(form) {
   return REQUIRED_FIELDS.filter((r) => !r.ok(form || {})).map(({ key, label, advanced = false }) => ({ key, label, advanced }))
+}
+
+/**
+ * A connection opened in the form, with the blanks the server fills in anyway
+ * shown as it does — so a connection that works is never one Save refuses:
+ *   an empty serial → the placeholder the server uses for one;
+ *   no name → the portal's address;
+ *   an empty device ID → shown as not sent (an empty one isn't), its switch
+ *     coming on once one is typed or made.
+ * Nothing sent to the portal changes.
+ */
+export function prepareForm(form) {
+  const f = { ...form }
+  if (!String(f.serial_number || '').trim()) f.serial_number = SERIAL_PLACEHOLDER
+  if (!String(f.name || '').trim()) {
+    try { f.name = new URL(f.portal).host } catch { f.name = String(f.portal || '').replace(/^\w+:\/\//, '').split('/')[0] }
+  }
+  if (!String(f.device_id || '').trim()) f.send_device_id = false
+  if (!String(f.device_id2 || '').trim()) f.send_device_id2 = false
+  return f
 }

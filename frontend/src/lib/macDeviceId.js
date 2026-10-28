@@ -34,8 +34,12 @@ export const DEVICE_ID_SOURCES = [
  * MAC is read as a MAC (any case or separators); the serial and the UID are
  * hashed exactly as typed (a box shows them in lowercase, and hashes them so).
  */
+// A new connection's serial until one is typed (lib/profiles.js) — the
+// server's own for a blank one. Not a box's: never hashed into its IDs.
+export const SERIAL_PLACEHOLDER = '0000000000000'
+
 export function deviceIdFrom(source, { mac = '', serial_number = '', uid = '' } = {}) {
-  const hash = (s) => (s ? sha256Hex(s).toUpperCase() : '')
+  const hash = (s) => (s && s !== SERIAL_PLACEHOLDER ? sha256Hex(s).toUpperCase() : '')
   switch (source) {
     case 'mac': return macDeviceId(mac)
     case 'mac-plain': return hash(normalizeMac(mac).replace(/:/g, ''))
@@ -45,8 +49,15 @@ export function deviceIdFrom(source, { mac = '', serial_number = '', uid = '' } 
   }
 }
 
-/** Which source a connection's saved device IDs came from ('typed' when none of them makes both). */
+const SOURCE_IDS = new Set(DEVICE_ID_SOURCES.map((s) => s.id))
+
+/**
+ * Which source a connection's device IDs come from: the one saved with it
+ * (`device_id_source`), else — a connection saved before it was — the one
+ * its IDs are ('typed' when none of them makes both).
+ */
 export function deviceIdSourceOf(profile) {
+  if (SOURCE_IDS.has(profile?.device_id_source)) return profile.device_id_source
   const id1 = profile?.device_id || ''
   if (!id1 || id1 !== (profile?.device_id2 || '')) return 'typed'
   return DEVICE_ID_SOURCES.find((s) => s.id !== 'typed' && deviceIdFrom(s.id, profile) === id1)?.id ?? 'typed'
