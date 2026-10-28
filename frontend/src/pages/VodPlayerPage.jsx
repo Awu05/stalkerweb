@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
+import { useSpaceToPlay } from '@/lib/useSpaceToPlay'
 import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
@@ -486,6 +487,10 @@ export default function VodPlayerPage() {
 
   useEffect(() => { resetHideTimer(); return () => clearTimeout(hideTimer.current) }, [resetHideTimer])
 
+  // Space: play / pause, wherever the focus is (lib/useSpaceToPlay.js).
+  const togglePlayPauseRef = useRef(null)
+  useSpaceToPlay(() => togglePlayPauseRef.current?.())
+
   // ← / →: back or forward 10 seconds. Not while typing, or on a slider (the
   // seek bar and volume take the arrows themselves).
   useEffect(() => {
@@ -573,6 +578,7 @@ export default function VodPlayerPage() {
   castRemoteRef.current = cast.remote
   onAirplayRef.current = cast.mode === 'airplay'
 
+  togglePlayPauseRef.current = togglePlayPause
   function togglePlayPause() {
     if (onTv) { cast.togglePlay(); return }
     const v = videoRef.current; if (!v) return

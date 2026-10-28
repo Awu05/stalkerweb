@@ -11,6 +11,7 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { useSpaceToPlay } from '@/lib/useSpaceToPlay'
 import { isAdult } from '@/lib/adultFilter'
 import { pushRecentlyWatched } from '@/lib/recentlyWatched'
 import { getStreamUrl, getChannelCastLink, stopChannelCast, streamKeepalive, getProxiedLogoUrl, getNowNext, getChannelEpg } from '../stalkerApi'
@@ -1134,6 +1135,8 @@ export default function PlayerPage() {
   }, [status])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  // Space: play / pause, wherever the focus is (lib/useSpaceToPlay.js).
+  useSpaceToPlay(() => togglePlayPauseRef.current())
   useEffect(() => {
     function onKey(e) {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
@@ -1187,10 +1190,6 @@ export default function PlayerPage() {
       }
 
       switch (e.code) {
-        case 'Space':
-          e.preventDefault()
-          togglePlayPauseRef.current()
-          break
         case 'KeyF':
           e.preventDefault()
           toggleFullscreen()
