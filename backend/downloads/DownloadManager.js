@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { spawn: spawnProcess } = require('child_process');
 const EventEmitter = require('events');
 const FfmpegService = require('../stalker/FfmpegService');
+const { hlsConcat } = require('./hlsConcat');
 const log = require('../logger');
 const TAG = 'downloads';
 
@@ -118,13 +119,13 @@ class DownloadManager extends EventEmitter {
 
       const cleanUrl = streamUrl.split('?')[0].split('#')[0];
       const isHls = /\.(m3u8?|m3u)$/i.test(cleanUrl);
-      if (isHls && !FfmpegService.isAvailable()) {
-        throw new Error('This title streams as HLS and needs FFmpeg installed on the server to save.');
-      }
+      // HLS: ffmpeg remuxes it to .mp4 when it's there (the Docker server);
+      // without it (the Solo app) the pieces are joined into one .ts file.
+      const useFfmpeg = isHls && FfmpegService.isAvailable();
 
       const dir = this.getDownloadDir();
       fs.mkdirSync(dir, { recursive: true });
-      const ext  = isHls ? 'mp4' : (cleanUrl.match(/\.([a-z0-9]{2,4})$/i)?.[1] || 'mp4').toLowerCase();
+      const ext  = isHls ? (useFfmpeg ? 'mp4' : 'ts') : (cleanUrl.match(/\.([a-z0-9]{2,4})$/i)?.[1] || 'mp4').toLowerCase();
       const base = sanitizeFilename(job.seriesTitle ? `${job.seriesTitle} - ${job.title}` : job.title);
       let filePath = path.join(dir, `${base}.${ext}`);
       let n = 1;
@@ -133,8 +134,18 @@ class DownloadManager extends EventEmitter {
 
       const headers = client?.streamHeadersFor ? client.streamHeadersFor(streamUrl) : {};
 
-      if (isHls) {
+      if (useFfmpeg) {
         await this._downloadWithFfmpeg(streamUrl, headers, tmpPath, job, controller);
+      } else if (isHls) {
+        let lastEmit = 0;
+        await hlsConcat(streamUrl, tmpPath, {
+          headers, signal: controller.signal,
+          onBytes: (n) => {
+            job.bytesDownloaded += n;
+            const now = Date.now();
+            if (now - lastEmit > 500) { lastEmit = now; this._emitUpdate(); }
+          },
+        });
       } else {
         const http = client?.getHttpClient ? client.getHttpClient() : require('axios');
 

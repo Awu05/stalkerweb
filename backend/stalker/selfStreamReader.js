@@ -222,4 +222,4 @@ async function followPlaylist(at, text, o) {
   }
 }
 
-module.exports = { readSelfStream };
+module.exports = { readSelfStream, request };
