@@ -1313,7 +1313,7 @@ export default function PlayerPage() {
         {/* Top bar: back to where the player was opened from. Shown with the controls. */}
         <div
           className={cn(
-            'absolute top-0 inset-x-0 z-20 flex items-center px-3 py-2 bg-black/45 backdrop-blur-sm transition-opacity duration-300',
+            'absolute top-0 inset-x-0 z-20 flex items-center h-14 px-3 bg-black/45 backdrop-blur-sm transition-opacity duration-300',   // h-14: level with the sidebar's header
             showControls || status !== 'playing' ? 'opacity-100' : 'opacity-0 pointer-events-none',
           )}
           onClick={e => e.stopPropagation()}

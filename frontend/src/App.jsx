@@ -90,13 +90,16 @@ function useStatusDetails(connected, lastPingAt, idleInfo) {
 function LogoMark({ collapsed }) {
   return (
     <div className={cn('flex items-center gap-2.5 overflow-hidden', collapsed && 'justify-center')}>
-      <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 text-[var(--color-primary-light)]">
+      {/* The whole mark — the dot and the arcs below it (a 32×32 box cut them off
+          at the bottom) — cropped to it, so it's as big as it looks and sits level
+          with the name beside it. */}
+      <svg width="30" height="19" viewBox="1.5 21.5 29 18.5" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="shrink-0 text-[var(--color-primary-light)]">
         <path d="M 3 25 A 13 13 0 0 0 29 25" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.35" />
         <path d="M 7 25 A 9 9 0 0 0 25 25" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.65" />
         <path d="M 11 25 A 5 5 0 0 0 21 25" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
         <circle cx="16" cy="25" r="2.5" fill="currentColor" />
       </svg>
-      {!collapsed && <span className="font-display font-semibold text-[15px] whitespace-nowrap text-[var(--color-text)]">StalkerWeb</span>}
+      {!collapsed && <span className="font-display font-semibold text-base leading-none whitespace-nowrap text-[var(--color-text)]">StalkerWeb</span>}
     </div>
   )
 }
@@ -140,7 +143,7 @@ function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, vers
             {connected && !collapsed && <ReminderBell reminders={reminders} onRemove={removeReminder} />}
             <button
               onClick={onToggle}
-              className="hidden lg:flex items-center justify-center w-7 h-7 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors shrink-0"
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors shrink-0"
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
