@@ -19,6 +19,14 @@ const COLORS   = require('./viewerColors.json').colors;
 const MAX_NAME = 30;
 const MAX_FORMER_NAMES = 5;   // old names kept for Xtream usernames (findByName)
 
+// The movie & series player's settings gear. Intro skipping: no Skip button
+// ('off'), a Skip button ('button'), or intros and recaps skipped by
+// themselves ('auto'). Before skipMode there was only autoSkip (true = 'auto').
+const SKIP_MODES = ['off', 'button', 'auto'];
+const skipModeOf = (v) => (SKIP_MODES.includes(v?.skipMode) ? v.skipMode : v?.autoSkip === true ? 'auto' : 'button');
+// The preferred audio language: '' (the stream's own) or a two-letter ISO 639-1 code.
+const audioLanguageOf = (v) => (typeof v?.audioLanguage === 'string' && /^[a-z]{2}$/.test(v.audioLanguage) ? v.audioLanguage : '');
+
 class ViewerError extends Error {
   constructor(status, message) {
     super(message);
@@ -53,6 +61,8 @@ function blankViewer(name, color) {
     disabledVodCategories: [],
     showAdult: false,
     autoSkip: false,
+    skipMode: 'button',
+    audioLanguage: '',
   };
 }
 
@@ -105,6 +115,9 @@ class ViewersManager {
       if (typeof v.name !== 'string' || !v.name.trim()) v.name = `Viewer ${i + 1}`;
       if (!COLORS.includes(v.color)) v.color = COLORS[i % COLORS.length];
       v.formerNames = strings(v.formerNames);
+      v.skipMode = skipModeOf(v);
+      v.autoSkip = v.skipMode === 'auto';
+      v.audioLanguage = audioLanguageOf(v);
     });
     const defaultViewerId = viewers.some((v) => v.id === raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
     const data = { defaultViewerId, viewers };
@@ -238,13 +251,19 @@ class ViewersManager {
     this._save(d);
   }
 
-  setFilters(id, { disabledGenres, disabledLanguages, disabledVodCategories, showAdult, autoSkip } = {}) {
+  setFilters(id, { disabledGenres, disabledLanguages, disabledVodCategories, showAdult, autoSkip, skipMode, audioLanguage } = {}) {
     const list = (value, label) => {
       if (!Array.isArray(value) || value.some((s) => typeof s !== 'string')) throw new ViewerError(400, `${label} must be a list of names.`);
       return [...new Set(value)];
     };
     if (showAdult !== undefined && typeof showAdult !== 'boolean') throw new ViewerError(400, 'showAdult must be true or false.');
     if (autoSkip !== undefined && typeof autoSkip !== 'boolean') throw new ViewerError(400, 'autoSkip must be true or false.');
+    if (skipMode !== undefined && !SKIP_MODES.includes(skipMode)) throw new ViewerError(400, `skipMode must be one of ${SKIP_MODES.join(', ')}.`);
+    if (audioLanguage !== undefined && (typeof audioLanguage !== 'string' || !/^([a-z]{2})?$/i.test(audioLanguage))) {
+      throw new ViewerError(400, "audioLanguage must be a two-letter language code, or empty for the stream's own.");
+    }
+    // An older app sends autoSkip (its on/off switch); skipMode wins when both come.
+    const mode = skipMode ?? (autoSkip === undefined ? undefined : autoSkip ? 'auto' : 'button');
     const genres    = disabledGenres    !== undefined ? list(disabledGenres, 'disabledGenres') : undefined;
     const languages = disabledLanguages !== undefined ? list(disabledLanguages, 'disabledLanguages') : undefined;
     const vod       = disabledVodCategories !== undefined ? list(disabledVodCategories, 'disabledVodCategories') : undefined;
@@ -253,7 +272,8 @@ class ViewersManager {
       if (languages) v.disabledLanguages = languages;
       if (vod) v.disabledVodCategories = vod;
       if (showAdult !== undefined) v.showAdult = showAdult;
-      if (autoSkip !== undefined) v.autoSkip = autoSkip;
+      if (mode !== undefined) { v.skipMode = mode; v.autoSkip = mode === 'auto'; }
+      if (audioLanguage !== undefined) v.audioLanguage = audioLanguage.toLowerCase();
     });
   }
 
@@ -269,3 +289,5 @@ class ViewersManager {
 module.exports = ViewersManager;
 module.exports.COLORS = COLORS;
 module.exports.ViewerError = ViewerError;
+module.exports.skipModeOf = skipModeOf;
+module.exports.audioLanguageOf = audioLanguageOf;

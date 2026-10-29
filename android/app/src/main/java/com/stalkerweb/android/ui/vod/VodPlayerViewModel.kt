@@ -41,7 +41,11 @@ import androidx.media3.common.C
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import com.stalkerweb.android.data.repo.autoSkipTo
+import com.stalkerweb.android.data.repo.nextPromptAt
 import com.stalkerweb.android.data.repo.skipAt
+import com.stalkerweb.android.data.repo.skipModeOf
+import com.stalkerweb.android.data.repo.AudioTrack
+import com.stalkerweb.android.data.repo.ViewerRepository
 import com.stalkerweb.android.data.api.SkipResponse
 import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.WatchRepository
@@ -68,6 +72,9 @@ data class SubtitleState(
     val delay: Double = 0.0,
 )
 
+/** The viewer's player settings (the gear), kept on the server: intro skipping ("off" | "button" | "auto") and the preferred audio language ("" or two letters). */
+data class PlayerSettings(val skipMode: String = "button", val audioLanguage: String = "")
+
 // The online file's track, told apart from the video's own by its label.
 private const val ONLINE_LABEL = "Online subtitles"
 
@@ -79,8 +86,10 @@ data class VodPlayerState(
     val seasons: List<VodSeason>? = null,             // a show's seasons, in order (null while loading)
     val episodes: Map<String, List<VodEpisode>> = emptyMap(),
     val upNext: EpisodeRef? = null,                   // after an episode ends
-    val skip: SkipNow? = null,                        // an intro, recap or the credits playing: the Skip button
+    val skip: SkipNow? = null,                        // an intro, recap or the credits playing, or "next" near the end: the Skip button
     val subtitles: SubtitleState = SubtitleState(),
+    val audio: List<AudioTrack> = emptyList(),        // the video's audio tracks (the gear's Audio)
+    val settings: PlayerSettings? = null,             // null until read from the server
 ) {
     val neighbours: Neighbours get() {
         val p = params ?: return Neighbours(null, null, emptyList())
@@ -105,6 +114,8 @@ class VodPlayerViewModel(
     val stats: StatsRepository,
     /** The subtitles picked last and their delay, on this device. */
     private val prefs: AppPrefs,
+    /** The viewer's player settings (the gear), on the server. */
+    private val viewers: ViewerRepository,
 ) : AndroidViewModel(application) {
 
     /** The viewer's watch state — the top bar's My List button reads it. */
@@ -192,6 +203,7 @@ class VodPlayerViewModel(
             val p = _player.value ?: return
             if (p.currentMediaItem?.mediaId != _state.value.params?.key) return
             subtitleTracksChanged(p, tracks)
+            audioTracksChanged(tracks)
         }
 
         // A stream that fails after it was handed to the player (404, decoder): say so, with Retry.
@@ -214,11 +226,18 @@ class VodPlayerViewModel(
             runCatching { future.get() }.getOrNull()?.let { controller ->
                 controller.addListener(listener)
                 _player.value = controller
+                applyPreferredAudio()
                 pendingPlay?.invoke()
                 pendingPlay = null
             }
         }, MoreExecutors.directExecutor())
 
+        // The viewer's gear settings, read afresh (changed on another device since).
+        viewModelScope.launch {
+            val me = viewers.refresh() ?: viewers.current.value
+            _state.value = _state.value.copy(settings = PlayerSettings(skipModeOf(me?.skipMode, me?.autoSkip == true), me?.audioLanguage.orEmpty()))
+            applyPreferredAudio()
+        }
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
         watch.load()
         load(params)
@@ -288,7 +307,10 @@ class VodPlayerViewModel(
         val same = _state.value.params?.key == params.key
         _state.value = _state.value.copy(subtitles = (if (same) _state.value.subtitles else SubtitleState())
             .copy(embedded = emptyList(), choice = SubtitleChoice(), delay = prefs.subtitleDelay))
-        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null, skip = null)
+        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null, skip = null,
+            audio = if (same) _state.value.audio else emptyList())
+        // A track picked by hand was for the last title: this one starts in the preferred language.
+        if (!same) _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build() }
         if (skipParts?.first != params.key) {
             skipParts = null
             viewModelScope.launch {
@@ -346,16 +368,23 @@ class VodPlayerViewModel(
         _state.value = _state.value.copy(resumedFrom = at)
     }
 
+    // The Skip button, auto-skip, and "Next episode" near the end. Not gated on
+    // the skip times having come back: Next episode shows without any. The
+    // position is read as it is, so it follows a seek at once.
     private fun checkSkip() {
         val p = _player.value
-        val key = skipParts?.first
-        val parts = skipParts?.second
-        if (p == null || key == null || parts == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
+        val key = _state.value.params?.key
+        if (p == null || key == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
             if (_state.value.skip != null) _state.value = _state.value.copy(skip = null)
             return
         }
+        // The skip mode set in the gear counts at once.
+        val found = skipParts?.takeIf { it.first == key }?.second
+        val mode = _state.value.settings?.skipMode
+        val parts = if (found != null && mode != null) found.copy(skipMode = mode) else found
         val t = p.currentPosition / 1000.0
-        if (parts.autoSkip) {
+        val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: 0.0
+        if (parts != null) {
             if (autoSkipped?.first != key) autoSkipped = key to mutableSetOf<String>()
             val done = autoSkipped!!.second
             autoSkipTo(parts, t, done)?.let { s ->
@@ -364,7 +393,11 @@ class VodPlayerViewModel(
                 return
             }
         }
-        val now = if (_state.value.upNext != null) null else skipAt(parts, t)
+        val now = when {
+            _state.value.upNext != null -> null
+            nextPromptAt(parts, t, duration, _state.value.neighbours.next != null) -> SkipNow("next", "Next episode", duration)
+            else -> skipAt(parts, t)
+        }
         if (now != _state.value.skip) _state.value = _state.value.copy(skip = now)
     }
 
@@ -374,13 +407,66 @@ class VodPlayerViewModel(
         return p.duration.takeIf { it > 0 }?.let { minOf(ms, it) } ?: ms
     }
 
-    /** The Skip button: past the part playing, or — at the credits, with one to come — the next episode. */
+    /** The Skip button: past the part playing, or — near the end or at the credits, with one to come — the next episode. */
     fun skip(toNextEpisode: Boolean) {
         if (toNextEpisode && _state.value.neighbours.next != null) { playNext(); return }
         val p = _player.value ?: return
         val s = _state.value.skip ?: return
         p.seekTo(seekable(p, s.to))
         _state.value = _state.value.copy(skip = null)
+    }
+
+    // ── The settings gear: audio track, preferred language, intro skipping ───
+
+    private fun audioTracksChanged(tracks: Tracks) {
+        val audio = mutableListOf<AudioTrack>()
+        tracks.groups.forEachIndexed { g, group ->
+            if (group.type != C.TRACK_TYPE_AUDIO) return@forEachIndexed
+            for (t in 0 until group.length) {
+                if (!group.isTrackSupported(t)) continue
+                val f = group.getTrackFormat(t)
+                audio += AudioTrack(g, t, f.language.orEmpty(), f.label.orEmpty(), f.channelCount.coerceAtLeast(0), group.isTrackSelected(t))
+            }
+        }
+        if (audio != _state.value.audio) _state.value = _state.value.copy(audio = audio)
+    }
+
+    // The preferred language, for Media3 to choose by (it matches "en" with
+    // "eng"); a track picked by hand (an override) wins over it.
+    private fun applyPreferredAudio() {
+        val p = _player.value ?: return
+        val lang = _state.value.settings?.audioLanguage ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setPreferredAudioLanguage(lang.ifEmpty { null }).build()
+    }
+
+    /** A track picked by hand: it plays now, and stays for this title. */
+    fun pickAudio(track: AudioTrack) {
+        val p = _player.value ?: return
+        val group = p.currentTracks.groups.getOrNull(track.group)?.takeIf { it.type == C.TRACK_TYPE_AUDIO } ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.track)).build()
+    }
+
+    fun setSkipMode(mode: String) = saveSettings(skipMode = mode)
+    fun setAudioLanguage(code: String) = saveSettings(audioLanguage = code)
+
+    // Shown at once; put back, and the viewer told, if the server won't keep it.
+    private fun saveSettings(skipMode: String? = null, audioLanguage: String? = null) {
+        val before = _state.value.settings ?: PlayerSettings()
+        _state.value = _state.value.copy(settings = before.copy(skipMode = skipMode ?: before.skipMode, audioLanguage = audioLanguage ?: before.audioLanguage))
+        if (audioLanguage != null) applyPreferredAudio()
+        viewModelScope.launch {
+            runCatching { viewers.savePlayerSettings(skipMode, audioLanguage) }.onFailure {
+                val now = _state.value.settings ?: before
+                _state.value = _state.value.copy(settings = now.copy(
+                    skipMode = if (skipMode != null) before.skipMode else now.skipMode,
+                    audioLanguage = if (audioLanguage != null) before.audioLanguage else now.audioLanguage,
+                ))
+                if (audioLanguage != null) applyPreferredAudio()
+                _messages.tryEmit("Couldn't save: ${it.toApiError().message ?: "try again"}")
+            }
+        }
     }
 
     // ── Subtitles ─────────────────────────────────────────────────────────────

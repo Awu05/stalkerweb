@@ -238,12 +238,19 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
             CheckRow(c, c in shownCats) { on -> shownCats = if (on) shownCats + c else shownCats - c }
         }
         if (shows(SettingsCard.ViewerPlayback)) item {
-            Card(ownedTitle("playback", me?.name, BuildConfig.IS_SOLO), "Skip intros and recaps without asking, where their times are known (from IntroDB, a community database). Otherwise a Skip button shows while they play; credits are never skipped by themselves.") {
-                Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable(enabled = me != null && !state.busy) { viewModel.setAutoSkip(me?.autoSkip != true) }.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("Skip intros & recaps automatically", color = SwColors.Text, modifier = Modifier.weight(1f))
-                    Switch(checked = me?.autoSkip == true, onCheckedChange = null)
-                }
+            Card(ownedTitle("playback", me?.name, BuildConfig.IS_SOLO), "How movies and episodes play for this viewer — the same as the player's settings gear.") {
+                Text("Intro skipping", color = SwColors.Text)
+                Text("Where their times are known (from IntroDB, a community database): a Skip button while an intro, recap or the credits play, or intros and recaps skipped by themselves. Credits are never skipped by themselves.",
+                    style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
+                com.stalkerweb.android.ui.components.SkipModePills(
+                    selected = me?.let { com.stalkerweb.android.data.repo.skipModeOf(it.skipMode, it.autoSkip) },
+                    enabled = me != null && !state.busy, onPick = viewModel::setSkipMode,
+                )
+                Text("Preferred audio language", color = SwColors.Text, modifier = Modifier.padding(top = 6.dp))
+                Text("A movie or episode with a track in it starts in it; otherwise the stream's own plays.", style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
+                com.stalkerweb.android.ui.components.AudioLanguagePicker(
+                    selected = me?.audioLanguage, enabled = me != null && !state.busy, onPick = viewModel::setAudioLanguage,
+                )
             }
         }
         if (shows(SettingsCard.AdultContent)) item {

@@ -180,7 +180,7 @@ interface StalkerApi {
     suspend fun getSubtitleFile(@Path("file") file: String, @Query("offset") offset: String? = null): okhttp3.ResponseBody
 
     @PUT("api/viewers/me/filters")
-    suspend fun saveAutoSkip(@Body body: AutoSkipRequest): ViewerDetails
+    suspend fun savePlayerSettings(@Body body: PlayerSettingsRequest): ViewerDetails
 
     // A cast device's link for a movie or episode (as api/vod/stream).
     @GET("api/vod/cast")

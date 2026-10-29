@@ -25,8 +25,6 @@ class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPr
     /** Adds a viewer without switching this device to it (as the web's Viewers card). */
     suspend fun createViewer(name: String) = apis.get().createViewer(CreateViewerRequest(name.trim()))
     suspend fun saveFilters(f: ViewerFiltersRequest) = apis.get().saveMyFilters(f)
-    /** The viewer's "skip intros & recaps automatically". */
-    suspend fun saveAutoSkip(on: Boolean) = apis.get().saveAutoSkip(com.stalkerweb.android.data.api.AutoSkipRequest(on))
     /** Every channel genre (unfiltered), for the viewer's checklist. */
     suspend fun allGenres(): List<Group> = apis.get().getGroups().groups.filter { it.id != "*" }
     /** The portal's own movie or series categories, for the checklist. */

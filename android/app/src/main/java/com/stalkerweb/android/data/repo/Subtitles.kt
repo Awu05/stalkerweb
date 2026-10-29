@@ -23,6 +23,9 @@ private val TWO_LETTER = mapOf(
     "dut" to "nl", "nld" to "nl", "rus" to "ru", "ara" to "ar", "chi" to "zh", "zho" to "zh", "jpn" to "ja", "kor" to "ko",
     "tur" to "tr", "pol" to "pl", "swe" to "sv", "nor" to "no", "dan" to "da", "fin" to "fi", "gre" to "el", "ell" to "el",
     "heb" to "he", "hin" to "hi", "rum" to "ro", "ron" to "ro", "hun" to "hu", "cze" to "cs", "ces" to "cs",
+    "per" to "fa", "fas" to "fa", "ukr" to "uk", "bul" to "bg", "hrv" to "hr", "srp" to "sr", "slo" to "sk", "slk" to "sk",
+    "slv" to "sl", "tha" to "th", "vie" to "vi", "ind" to "id", "may" to "ms", "msa" to "ms", "ben" to "bn", "urd" to "ur",
+    "tam" to "ta", "tel" to "te", "pan" to "pa", "cat" to "ca", "alb" to "sq", "sqi" to "sq", "nob" to "no", "nno" to "no",
 )
 
 /** A language code as two letters where it can be: "eng" → "en", "pt-BR" → "pt". */

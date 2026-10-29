@@ -373,7 +373,9 @@ data class SkipResponse(
     val intro: SkipPart? = null,
     val recap: SkipPart? = null,
     val outro: SkipPart? = null,
-    /** The viewer's choice: intros and recaps skipped without asking. */
+    /** The viewer's intro skipping: "off", "button" or "auto" (data/repo/SkipSegments.kt); null from an older server. */
+    val skipMode: String? = null,
+    /** The same for older servers: intros and recaps skipped without asking. */
     val autoSkip: Boolean = false,
 )
 

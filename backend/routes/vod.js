@@ -18,6 +18,7 @@ const sessionMiddleware = require('../middleware/session');
 const { visibleVodCategories, isAllCategory } = require('../lib/vodCategoryFilter');
 const { vodLayout } = require('../lib/seriesCategories');
 const { refuseIfGone } = require('./viewers');
+const { skipModeOf } = require('../viewers/ViewersManager');
 const { isAdult } = require('../lib/exportFilter');
 
 // The "All" StalkerWeb adds to Movies or Series when the portal's own can't
@@ -330,19 +331,21 @@ module.exports = function vodRoutes(appState, config, { watchStore = null, skipS
 
   // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
   // GET /api/vod/skip?videoId=&name=&year=&season=&episode=&movie=1
-  //   → { imdbId, match, intro, recap, outro, autoSkip }: each part { start, end }
-  //   in seconds or null; autoSkip is the viewer's choice. `videoId` is the
+  //   → { imdbId, match, intro, recap, outro, skipMode, autoSkip }: each part
+  //   { start, end } in seconds or null; skipMode is the viewer's choice ('off',
+  //   'button', 'auto'), autoSkip the same for older apps (= 'auto'). `videoId` is the
   //   movie or show, `name` its portal title; season and episode numbers for
   //   an episode. Nothing to skip when the IMDb or IntroDB lookup fails.
   router.get('/skip', refuseIfGone, async (req, res) => {
     const q = req.query;
-    const autoSkip = req.viewer?.autoSkip === true;
-    if (!skipSegments) return res.json({ imdbId: null, match: null, intro: null, recap: null, outro: null, autoSkip });
+    const skipMode = skipModeOf(req.viewer);
+    const autoSkip = skipMode === 'auto';
+    if (!skipSegments) return res.json({ imdbId: null, match: null, intro: null, recap: null, outro: null, skipMode, autoSkip });
     const found = await skipSegments.lookup({
       portal: portalOf(), videoId: q.videoId, name: q.name, year: q.year,
       season: q.season, episode: q.episode, isMovie: q.movie === '1',
     });
-    res.json({ ...found, autoSkip });
+    res.json({ ...found, skipMode, autoSkip });
   });
 
   // PUT /api/vod/skip/match/:videoId { imdbId: "tt…" | "off" | null } — the

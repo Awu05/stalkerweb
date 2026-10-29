@@ -26,12 +26,17 @@ data class ViewerDetails(
     val disabledLanguages: List<String> = emptyList(),
     val disabledVodCategories: List<String> = emptyList(),
     val showAdult: Boolean = false,
-    /** Skip intros and recaps without asking (the player's Skip button otherwise). */
+    /** Intro skipping: "off", "button" or "auto" (data/repo/SkipSegments.kt); null from an older server. */
+    val skipMode: String? = null,
+    /** An older server's on/off for skipping intros and recaps without asking. */
     val autoSkip: Boolean = false,
+    /** The preferred audio language: two letters, or "" for the stream's own. */
+    val audioLanguage: String = "",
 )
 
+/** The player's settings gear (and Settings): only what's set is sent. */
 @JsonClass(generateAdapter = false)
-data class AutoSkipRequest(val autoSkip: Boolean)
+data class PlayerSettingsRequest(val skipMode: String? = null, val audioLanguage: String? = null)
 
 @JsonClass(generateAdapter = false)
 data class CreateViewerRequest(
