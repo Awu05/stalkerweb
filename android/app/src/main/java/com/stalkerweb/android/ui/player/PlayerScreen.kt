@@ -41,6 +41,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -51,6 +52,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,11 +74,15 @@ import coil.compose.AsyncImage
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
-import com.stalkerweb.android.data.repo.LiveKey
-import com.stalkerweb.android.data.repo.liveKey
 import com.stalkerweb.android.data.repo.nowPlaying
 import com.stalkerweb.android.data.repo.progressAt
 import com.stalkerweb.android.data.repo.progressOf
+import com.stalkerweb.android.ui.utils.LiveFocus
+import com.stalkerweb.android.ui.utils.LiveKey
+import com.stalkerweb.android.ui.utils.RemoteKeys
+import com.stalkerweb.android.ui.utils.UsedKeys
+import com.stalkerweb.android.ui.utils.liveAnywhereKey
+import com.stalkerweb.android.ui.utils.livePictureKey
 import com.stalkerweb.android.ui.utils.rememberIsTV
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -146,8 +152,6 @@ private class LiveActions(
     val onToggleStats: () -> Unit,
     val onGoFullscreen: () -> Unit,
     val onHideControls: () -> Unit,
-    /** Whether a control has the remote's focus — the controls stay up while it does. */
-    val onControlsFocused: (Boolean) -> Unit,
 )
 
 @OptIn(UnstableApi::class)
@@ -177,7 +181,6 @@ fun PlayerScreen(
     }
 
     var showControls by remember { mutableStateOf(true) }
-    var controlsFocused by remember { mutableStateOf(false) }
     var isPlaying    by remember { mutableStateOf(false) }
     var isBuffering  by remember { mutableStateOf(true) }
     var playerError  by remember { mutableStateOf<String?>(null) }
@@ -255,16 +258,6 @@ fun PlayerScreen(
 
     LaunchedEffect(activeId) { playerError = null }
 
-    // The controls hide after 3 s of playing — but not while the channel list is
-    // open (it covers their List button, and nothing else would close it), nor
-    // while the remote is on one of them.
-    LaunchedEffect(showControls, isPlaying, isLandscape, isTV, state.showChannelList, controlsFocused) {
-        if (showControls && isPlaying && (isLandscape || isTV) && !state.showChannelList && !controlsFocused) {
-            delay(3_000)
-            showControls = false
-        }
-    }
-
     // Back: first a number being typed, then the list, then out of the player.
     // (The list is only on screen in landscape and on TV; portrait shows its own.)
     BackHandler(enabled = state.jumpDigits.isNotEmpty() || (state.showChannelList && (isLandscape || isTV))) {
@@ -315,7 +308,6 @@ fun PlayerScreen(
         onToggleControls       = { showControls = !showControls },
         onShowControls         = { showControls = true },
         onHideControls         = { showControls = false },
-        onControlsFocused      = { controlsFocused = it },
         onTogglePlayPause      = { if (isPlaying) player?.pause() else player?.play() },
         onRetry                = { viewModel.loadStream(activeId) },
         onSleepTimer           = { showSleepTimer = true },
@@ -356,13 +348,6 @@ fun PlayerScreen(
 
 // ── Landscape / fullscreen layout ─────────────────────────────────────────────
 
-/** The digit a remote's number key (top row or keypad) stands for. */
-private fun digitOf(keyCode: Int): Char? = when (keyCode) {
-    in AndroidKeyEvent.KEYCODE_0..AndroidKeyEvent.KEYCODE_9 -> '0' + (keyCode - AndroidKeyEvent.KEYCODE_0)
-    in AndroidKeyEvent.KEYCODE_NUMPAD_0..AndroidKeyEvent.KEYCODE_NUMPAD_9 -> '0' + (keyCode - AndroidKeyEvent.KEYCODE_NUMPAD_0)
-    else -> null
-}
-
 @OptIn(UnstableApi::class)
 @Composable
 private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.stalkerweb.android.cast.CastManager?) {
@@ -377,8 +362,31 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
     }
     val isFav = c.activeId in s.favoriteIds
 
-    // The remote is on the picture, or on one of the controls (lib: data/repo/LiveRules liveKey).
-    var onPicture by remember { mutableStateOf(true) }
+    // Where the remote's focus is (ui/utils/LiveKeys): on the picture, on
+    // something over it (a control, Retry), in the channel list — or nowhere,
+    // when its button went away (Subtitles with the old stream, Retry at play).
+    var onPicture by remember { mutableStateOf(false) }
+    var inPicture by remember { mutableStateOf(false) }   // the picture or anything over it
+    var inList by remember { mutableStateOf(false) }
+    fun focusNow() = when {
+        onPicture -> LiveFocus.Picture
+        inList    -> LiveFocus.List
+        inPicture -> LiveFocus.Control
+        else      -> LiveFocus.Nothing
+    }
+    val focus = focusNow()
+    // Nothing in focus on a TV: the remote back on the picture — or no key
+    // would reach it. Not while a menu or a dialog has the window.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    if (c.isTV) {
+        LaunchedEffect(focus == LiveFocus.Nothing, windowFocused) {
+            if (focus == LiveFocus.Nothing && windowFocused) {
+                withFrameNanos { }
+                runCatching { playerFocusRequester.requestFocus() }
+            }
+        }
+    }
+
     val playPauseFocus = remember { FocusRequester() }
     var focusControls by remember { mutableStateOf(false) }
     // OK on the picture: the controls come up with Play/Pause in focus, once they're on screen.
@@ -389,40 +397,92 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
             focusControls = false
         }
     }
-    // The controls gone (timed out, Back): the remote back on the picture.
+    // The controls gone (timed out, Back): the remote back on the picture, and
+    // no Play/Pause focus left waiting for the next time they come up.
     LaunchedEffect(c.showControls) {
-        if (!c.showControls && !s.showChannelList) runCatching { playerFocusRequester.requestFocus() }
+        if (!c.showControls) {
+            focusControls = false
+            if (!s.showChannelList) runCatching { playerFocusRequester.requestFocus() }
+        }
     }
-    val onControls = c.showControls && !onPicture && !s.showChannelList
-    LaunchedEffect(onControls) { a.onControlsFocused(onControls) }
+    val onControl = c.showControls && focus == LiveFocus.Control && !s.showChannelList
+    // The controls hide after 3 s of playing — but not while the channel list is
+    // open (it covers their List button, and nothing else would close it), nor
+    // while the remote is on one of them.
+    val hideControls by rememberUpdatedState(a.onHideControls)
+    LaunchedEffect(c.showControls, c.isPlaying, s.showChannelList, onControl) {
+        if (c.showControls && c.isPlaying && !s.showChannelList && !onControl) {
+            delay(3_000)
+            hideControls()
+        }
+    }
     // Back on a control: the controls go, the remote is on the picture again.
-    BackHandler(enabled = onControls) { a.onHideControls() }
+    BackHandler(enabled = onControl) { a.onHideControls() }
+
+    val listLeftEdge = remember { ListLeftEdge() }
+    val usedKeys = remember { UsedKeys() }
+    // A remote key, as LiveKeys reads it, done. True: the player used it.
+    fun act(key: LiveKey): Boolean {
+        when (key) {
+            LiveKey.PlayPause       -> a.onTogglePlayPause()
+            LiveKey.Play            -> c.player?.play()
+            LiveKey.Pause           -> c.player?.pause()
+            LiveKey.PreviousChannel -> a.onPreviousChannel()
+            LiveKey.NextChannel     -> a.onNextChannel()
+            is LiveKey.Digit        -> a.onDigit(key.digit)
+            LiveKey.OpenControls    -> focusControls = true
+            LiveKey.OpenList        -> a.onToggleChannelList()
+            LiveKey.CloseList       -> a.onCloseChannelList()
+            LiveKey.Guide           -> a.onToggleGuide()
+            LiveKey.Stats           -> a.onToggleStats()
+            LiveKey.FocusPicture    -> runCatching { playerFocusRequester.requestFocus() }
+            LiveKey.Ignore          -> {}
+            LiveKey.Pass            -> return false
+        }
+        return true
+    }
+    // On a TV, the keys that work wherever the focus is (RemoteKeys, before any
+    // button sees them): play/pause, CH+/CH−, the numbers, Guide/Info, ≡ — and,
+    // with nothing in focus, the D-pad and OK back to the picture. A key the
+    // player used keeps its repeats and its release, here or on the picture: a
+    // held OK brings the controls up, and the rest of it mustn't press Play/Pause.
+    val onRemoteKey by rememberUpdatedState { e: AndroidKeyEvent ->
+        val down = e.action == AndroidKeyEvent.ACTION_DOWN
+        if (usedKeys.swallow(e.keyCode, down, e.repeatCount)) return@rememberUpdatedState true
+        if (!down) return@rememberUpdatedState false
+        val key = liveAnywhereKey(e.keyCode, focusNow(), s.showChannelList)
+        if (key == LiveKey.Pass) return@rememberUpdatedState false
+        a.onShowControls()
+        act(key)
+        usedKeys.use(e.keyCode)
+        true
+    }
+    if (c.isTV) {
+        DisposableEffect(Unit) {
+            val handler: (AndroidKeyEvent) -> Boolean = { onRemoteKey(it) }
+            RemoteKeys.handler = handler
+            onDispose { if (RemoteKeys.handler === handler) RemoteKeys.handler = null }
+        }
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
-            .onFocusChanged { onPicture = it.isFocused }
+            .onFocusChanged { onPicture = it.isFocused; inPicture = it.hasFocus }
             .focusable()
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                 a.onShowControls()
                 val code = event.nativeKeyEvent.keyCode
-                if (onPicture) digitOf(code)?.let { if (!s.showChannelList) { a.onDigit(it); return@onKeyEvent true } }
-                when (liveKey(code, onPicture = onPicture, listOpen = s.showChannelList)) {
-                    LiveKey.PlayPause       -> { a.onTogglePlayPause(); true }
-                    LiveKey.Play            -> { c.player?.play(); true }
-                    LiveKey.Pause           -> { c.player?.pause(); true }
-                    LiveKey.PreviousChannel -> { a.onPreviousChannel(); true }
-                    LiveKey.NextChannel     -> { a.onNextChannel(); true }
-                    LiveKey.OpenControls    -> { focusControls = true; true }
-                    LiveKey.OpenList        -> { a.onToggleChannelList(); true }
-                    LiveKey.CloseList       -> { a.onCloseChannelList(); true }
-                    LiveKey.Guide           -> { a.onToggleGuide(); true }
-                    LiveKey.Stats           -> { a.onToggleStats(); true }
-                    LiveKey.Pass            -> false
-                }
+                val now = focusNow()
+                // On a TV the keys that work anywhere were RemoteKeys' already; here
+                // they're for a phone's keyboard. Then the picture's own D-pad and OK.
+                val key = liveAnywhereKey(code, now, s.showChannelList).takeIf { it != LiveKey.Pass }
+                    ?: livePictureKey(code, now, s.showChannelList,
+                        canMoveLeft = now == LiveFocus.Control || (now == LiveFocus.List && !listLeftEdge.focused))
+                act(key).also { if (it) usedKeys.use(code) }
             }
             .clickable(
                 indication        = null,
@@ -541,9 +601,9 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
             visible  = s.showChannelList,
             enter    = slideInHorizontally { it },
             exit     = slideOutHorizontally { it },
-            modifier = Modifier.align(Alignment.CenterEnd),
+            modifier = Modifier.align(Alignment.CenterEnd).onFocusChanged { inList = it.hasFocus },
         ) {
-            ChannelListPanel(c, a, dark = true, onClose = a.onCloseChannelList)
+            ChannelListPanel(c, a, dark = true, onClose = a.onCloseChannelList, leftEdge = listLeftEdge)
         }
     }
 }
@@ -884,7 +944,7 @@ private fun LiveBadge() {
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onClose: (() -> Unit)?) {
+private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onClose: (() -> Unit)?, leftEdge: ListLeftEdge? = null) {
     val s        = c.state
     // Worked out when its inputs change, not on every 15 s tick (thousands of channels).
     val channels = remember(s.channels, s.query, s.favoritesOnly, s.selectedGenre, s.favoriteIds) { s.displayedChannels }
@@ -899,6 +959,12 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
     val listState = rememberLazyListState()
     // The playing channel, or the first row when a filter leaves it out.
     val activeFocus = remember { FocusRequester() }
+    // Left goes where it's drawn to go: from a button to the one before it,
+    // never out to a control under the list (a row, the search and the genre
+    // are the leftmost: Left there closes the list — leftEdge).
+    val searchFocus = remember { FocusRequester() }
+    val favoritesFocus = remember { FocusRequester() }
+    DisposableEffect(leftEdge) { onDispose { leftEdge?.clear() } }
     LaunchedEffect(channels.isNotEmpty()) {
         if (channels.isEmpty()) return@LaunchedEffect
         listState.scrollToItem((activeIdx - 3).coerceAtLeast(0))
@@ -931,14 +997,17 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                             cursorBrush = SolidColor(textCol),
                             // On a TV, OK opens the keyboard (rememberTvTyping).
                             keyboardOptions = tvKeyboardOptions(KeyboardOptions(imeAction = ImeAction.Search)),
-                            modifier = Modifier.fillMaxWidth().then(tvTyping.modifier),
+                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus)
+                                .onFocusChanged { leftEdge?.track("search", it.hasFocus) }.then(tvTyping.modifier),
                         )
                     }
                     if (s.query.isNotEmpty()) {
-                        Icon(Icons.Default.Close, "Clear search", tint = mutedCol, modifier = Modifier.size(16.dp).clickable { a.onQuery("") })
+                        Icon(Icons.Default.Close, "Clear search", tint = mutedCol,
+                            modifier = Modifier.size(16.dp).focusProperties { left = searchFocus }.clickable { a.onQuery("") })
                     }
                 }
-                TipIconButton(label = if (s.favoritesOnly) "Show all channels" else "Show favorites only", onClick = a.onToggleFavoritesOnly) {
+                TipIconButton(label = if (s.favoritesOnly) "Show all channels" else "Show favorites only", onClick = a.onToggleFavoritesOnly,
+                    modifier = Modifier.focusRequester(favoritesFocus).focusProperties { left = searchFocus }) {
                     Icon(
                         if (s.favoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (s.favoritesOnly) "Show all channels" else "Show favorites only",
@@ -946,7 +1015,7 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     )
                 }
                 if (onClose != null) {
-                    TipIconButton(label = "Close channel list", onClick = onClose) { Icon(Icons.Default.Close, "Close channel list", tint = textCol) }
+                    TipIconButton(label = "Close channel list", onClick = onClose, modifier = Modifier.focusProperties { left = favoritesFocus }) { Icon(Icons.Default.Close, "Close channel list", tint = textCol) }
                 }
             }
             // Beside the picture, the genre is a picker (on a phone's portrait list it's the chips above).
@@ -954,7 +1023,8 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                 var open by remember { mutableStateOf(false) }
                 Box(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
                     Row(
-                        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp)).clickable { open = true }
+                        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                            .onFocusChanged { leftEdge?.track("genre", it.isFocused) }.clickable { open = true }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -978,11 +1048,15 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                     val isActive = ch.uniqueId == c.activeId
                     val isFav    = ch.uniqueId in s.favoriteIds
                     var focused  by remember { mutableStateOf(false) }
+                    val rowFocus = remember { FocusRequester() }
+                    // A row scrolled away or filtered out with the focus on it: no longer the edge.
+                    DisposableEffect(ch.uniqueId) { onDispose { leftEdge?.track("channel:${ch.uniqueId}", false) } }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(if (isActive || (activeIdx < 0 && index == 0)) Modifier.focusRequester(activeFocus) else Modifier)
-                            .onFocusChanged { focused = it.isFocused }
+                            .focusRequester(rowFocus)
+                            .onFocusChanged { focused = it.isFocused; leftEdge?.track("channel:${ch.uniqueId}", it.isFocused) }
                             .border(
                                 width = if (focused) 2.dp else 0.dp,
                                 color = if (focused) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -1028,7 +1102,8 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
                             )
                             NowLine(s.nowNext[ch.uniqueId], c.nowSecs, mutedCol)
                         }
-                        TipIconButton(label = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites", onClick = { a.onToggleFavorite(ch) }, size = 32.dp) {
+                        TipIconButton(label = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites", onClick = { a.onToggleFavorite(ch) }, size = 32.dp,
+                            modifier = Modifier.focusProperties { left = rowFocus }) {
                             Icon(
                                 imageVector        = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = if (isFav) "Remove ${ch.name} from favorites" else "Add ${ch.name} to favorites",
@@ -1042,6 +1117,17 @@ private fun ChannelListPanel(c: LiveControls, a: LiveActions, dark: Boolean, onC
             }
         }
     }
+}
+
+/**
+ * Which of the channel list's leftmost things (a row, the search, the genre)
+ * has the remote's focus: Left from one of them closes the list.
+ */
+private class ListLeftEdge {
+    private var on: String? = null
+    val focused: Boolean get() = on != null
+    fun track(id: String, has: Boolean) { if (has) on = id else if (on == id) on = null }
+    fun clear() { on = null }
 }
 
 /** What's on a row's channel now, with how far through it is. */
