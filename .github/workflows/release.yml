@@ -73,7 +73,7 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-  # ── Build Android APKs (mobile + tv, remote + Solo) ────────────────────────────────────────
+  # ── Build Android APKs (mobile + tv, remote + Solo) ───────────────────────
   build-apk:
     needs: [version, check]
     runs-on: ubuntu-latest
@@ -99,6 +99,16 @@ jobs:
 
       # What a Solo build needs, made before Gradle (as in ci.yml): Node, checked
       # against its pinned SHA-256, and the server.
+      - name: Which nodejs-mobile Solo pins
+        id: libnode
+        run: echo "key=libnode-$(grep -E '^(VERSION|SHA256)=' android/scripts/fetch-libnode.sh | tr -d '"' | cut -d= -f2 | paste -sd- -)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the nodejs-mobile download
+        uses: actions/cache@v5
+        with:
+          path: android/app/libnode-cache
+          key: ${{ steps.libnode.outputs.key }}
+
       - name: Fetch Node for Solo
         run: android/scripts/fetch-libnode.sh
 

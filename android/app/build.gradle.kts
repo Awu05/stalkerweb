@@ -56,7 +56,8 @@ android {
         }
     }
 
-    // CMake sees every variant, but builds nothing unless Solo's flag is set
+    // CMake sees every variant, but its tasks don't run for the remote apps
+    // (below), and it builds nothing unless Solo's flag is set
     // (src/solo/cpp/CMakeLists.txt) — the remote apps carry no native code.
     externalNativeBuild {
         cmake { path = file("src/solo/cpp/CMakeLists.txt") }
@@ -151,6 +152,16 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+}
+
+// The remote apps carry no native code: the CMake tasks Gradle makes for them
+// (the bridge's path is set for every variant — AGP has no per-flavor one)
+// don't run at all, so they need no NDK. CI checks none ran, and that the
+// remote APKs hold no .so.
+tasks.configureEach {
+    val native = name.startsWith("configureCMake") || name.startsWith("buildCMake") ||
+        name.startsWith("externalNativeBuild") || name.startsWith("generateJsonModel")
+    if (native && name.contains("Remote")) enabled = false
 }
 
 // Name every unit test in the build output, so CI logs show what ran.
