@@ -76,4 +76,63 @@ describe('hlsConcat', () => {
     await expect(hlsConcat('http://h.example/v.m3u8', out, { fetchImpl, signal: ctrl.signal, onBytes: () => ctrl.abort() })).rejects.toThrow();
     expect(seen).not.toContain('http://h.example/b.ts');
   });
+  // Answers from a list per URL, one per request: a Buffer, a status number,
+  // 'cut' (part of the body, then an error) or 'stall' (part, then nothing).
+  function flakyFetch(script, seen = []) {
+    const calls = {};
+    return async (url, { signal } = {}) => {
+      seen.push(url);
+      const list = script[url];
+      if (list === undefined) return { ok: false, status: 404, url };
+      const step = list[Math.min(calls[url] = (calls[url] ?? -1) + 1, list.length - 1)];
+      if (typeof step === 'number') return { ok: false, status: step, url, body: null };
+      if (typeof step === 'string') {
+        if (step.startsWith('#')) return { ok: true, status: 200, url, text: async () => step };
+        return {
+          ok: true, status: 200, url,
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(new Uint8Array([0xee, 0xee]));   // bytes that must not stay in the file
+              if (step === 'cut') setTimeout(() => c.error(new Error('connection reset')), 5);
+              signal?.addEventListener('abort', () => { try { c.error(new Error('aborted')); } catch { /* closed */ } });
+            },
+          }),
+        };
+      }
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(step)); c.close(); } }) };
+    };
+  }
+  const quick = { retryDelaysMs: [0, 0] };
+
+  it('fetches a piece that failed again, from its start — no bytes twice', async () => {
+    const a = Buffer.from([1, 2, 3]); const b = Buffer.from([4, 5, 6, 7]); const c = Buffer.from([8]);
+    const fetchImpl = flakyFetch({ 'http://h.example/v.m3u8': [media(['a.ts', 'b.ts', 'c.ts'])],
+      'http://h.example/a.ts': [503, a], 'http://h.example/b.ts': ['cut', b], 'http://h.example/c.ts': [c] });
+    const out = path.join(dir, 'o.ts'); let n = 0;
+    await hlsConcat('http://h.example/v.m3u8', out, { fetchImpl, onBytes: (k) => { n += k; }, ...quick });
+    expect(fs.readFileSync(out)).toEqual(Buffer.concat([a, b, c]));
+    expect(n).toBe(8);   // the failed try's bytes taken back
+  });
+
+  it('gives up on a piece after 3 tries, saying which, and leaves no file', async () => {
+    const seen = [];
+    const fetchImpl = flakyFetch({ 'http://h.example/v.m3u8': [media(['a.ts', 'b.ts', 'c.ts'])],
+      'http://h.example/a.ts': [Buffer.from([1])], 'http://h.example/b.ts': [500, 'cut', 502], 'http://h.example/c.ts': [Buffer.from([3])] }, seen);
+    const out = path.join(dir, 'o.ts');
+    await expect(hlsConcat('http://h.example/v.m3u8', out, { fetchImpl, ...quick })).rejects.toThrow(/segment 2 of 3 failed 3 times \(HTTP 502\)/);
+    expect(seen.filter((u) => u.endsWith('/b.ts'))).toHaveLength(3);
+    expect(seen).not.toContain('http://h.example/c.ts');
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('gives up on a request that sends nothing for a while, and tries the piece again', async () => {
+    const b = Buffer.from([4, 5]);
+    const fetchImpl = flakyFetch({ 'http://h.example/v.m3u8': [media(['a.ts', 'b.ts'])],
+      'http://h.example/a.ts': [Buffer.from([1])], 'http://h.example/b.ts': ['stall', b] });
+    const out = path.join(dir, 'o.ts');
+    const t0 = Date.now();
+    await hlsConcat('http://h.example/v.m3u8', out, { fetchImpl, idleMs: 50, ...quick });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([1, 4, 5]));
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
 });
