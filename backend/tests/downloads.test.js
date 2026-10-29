@@ -3,8 +3,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import DownloadManager from '../downloads/DownloadManager.js';
-import FfmpegService from '../stalker/FfmpegService.js';
+import { createRequire } from 'module';
+
+// Loaded the way DownloadManager loads FfmpegService (one shared CJS instance),
+// so stubbing isAvailable here is what the manager sees.
+const require = createRequire(import.meta.url);
+const DownloadManager = require('../downloads/DownloadManager');
+const FfmpegService = require('../stalker/FfmpegService');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dl-'));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
