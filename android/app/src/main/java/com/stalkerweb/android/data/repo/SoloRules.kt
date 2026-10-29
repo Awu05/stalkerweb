@@ -183,3 +183,65 @@ const val SOLO_FIRST_START_MS = 60_000L
 
 /** How long to wait for the server to answer: [askedMs], or longer when this version isn't [installed] yet. */
 fun startWaitMs(askedMs: Long, installed: Boolean): Long = if (installed) askedMs else maxOf(askedMs, SOLO_FIRST_START_MS)
+
+/**
+ * What Solo's server proves on GET /api/health?nonce=<nonce>: HMAC-SHA256 of
+ * "solo-health:<nonce>" keyed with the access key, in hex (routes/solo.js).
+ * Only a server holding the key can give it, so the app sends the key to a
+ * port only after the server there has given it (SoloServer).
+ */
+fun soloHealthProof(key: String, nonce: String): String {
+    val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+    mac.init(javax.crypto.spec.SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+    return mac.doFinal("solo-health:$nonce".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+}
+
+/** Whether a /api/health answer carries the proof for [nonce] under [key] (compared in constant time). */
+fun healthProves(json: String, key: String, nonce: String): Boolean {
+    val proof = Regex(""""proof"\s*:\s*"([0-9a-f]{64})"""").find(json)?.groupValues?.get(1) ?: return false
+    return java.security.MessageDigest.isEqual(proof.toByteArray(), soloHealthProof(key, nonce).toByteArray())
+}
+
+/** Restarts for a refused key allowed in [SOLO_RESTART_WINDOW_MS]: more means the restart doesn't help. */
+const val SOLO_MAX_RESTARTS = 3
+const val SOLO_RESTART_WINDOW_MS = 120_000L
+
+/**
+ * Whether a refused key (AccessProblem) may restart the server again, given
+ * when it was restarted for one before ([restartsAt]): not after
+ * [SOLO_MAX_RESTARTS] in [SOLO_RESTART_WINDOW_MS] — then the Failed screen,
+ * with Try again, rather than restart for ever.
+ */
+fun mayRestartForAccess(restartsAt: List<Long>, nowMs: Long): Boolean =
+    restartsAt.count { nowMs - it in 0 until SOLO_RESTART_WINDOW_MS } < SOLO_MAX_RESTARTS
+
+/** The kinds of network a TV may reach this device on, best first. */
+enum class LanKind { Wifi, Ethernet, Hotspot }
+
+/** A network the device is on (or gives, as a hotspot), and its addresses. */
+data class LanNetwork(val kind: LanKind, val addresses: List<String>)
+
+/**
+ * The address for cast links: Wi-Fi first, then Ethernet, then the device's
+ * own hotspot (a TV joined to it) — the same answer whichever came up first.
+ * Within a kind, the networks' order as given (the caller keeps it stable).
+ */
+fun lanHostOf(networks: List<LanNetwork>): String? =
+    networks.sortedBy { it.kind.ordinal }.firstNotNullOfOrNull { lanHostOf(it.addresses) }
+
+/**
+ * Whether a network interface is one the device shares its connection on —
+ * a hotspot (ap0, swlan0, softap0, wlan1…) or USB/Bluetooth tethering — whose
+ * clients (a TV on the phone's hotspot) can reach it. wlan0 is the Wi-Fi itself.
+ */
+fun isTetherInterface(name: String): Boolean =
+    Regex("""(ap|swlan|softap|rndis|usb|bt-pan)\d*|wlan[1-9]\d*""").matches(name)
+
+/**
+ * Whether to ask for notifications now (Android 13+): once, the first time the
+ * server is held in the foreground (playing, casting, downloading) — its
+ * "running" notification shows only with them. Never asked again, never in
+ * the way: the server runs the same without.
+ */
+fun asksForNotifications(sdk: Int, granted: Boolean, askedBefore: Boolean, holds: Set<String>): Boolean =
+    sdk >= 33 && !granted && !askedBefore && holds.isNotEmpty()

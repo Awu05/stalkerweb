@@ -37,6 +37,7 @@ import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.repo.doneLabel
 import com.stalkerweb.android.data.repo.downloadsEmptyHint
 import com.stalkerweb.android.data.repo.formatBytes
+import com.stalkerweb.android.solo.DownloadPublisher
 import com.stalkerweb.android.ui.components.EmptyState
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
@@ -53,6 +54,10 @@ fun DownloadsScreen(viewModel: DownloadsViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         Text("Downloads", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.padding(16.dp))
+        // Solo on Android 8-9, storage refused: why nothing lands in Downloads.
+        val storageDenied by DownloadPublisher.storageDenied.collectAsStateWithLifecycle()
+        if (storageDenied) Text("Allow storage to save to Downloads", style = MaterialTheme.typography.labelMedium,
+            color = SwColors.Muted, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
         when {
             state.loading -> CircularProgressIndicator(Modifier.padding(32.dp))
             state.jobs.isEmpty() -> EmptyState(Icons.Default.Download, "No downloads", state.error ?: downloadsEmptyHint(BuildConfig.IS_SOLO))

@@ -3,6 +3,9 @@ package com.stalkerweb.android.solo
 import android.app.Application
 import androidx.activity.ComponentActivity
 import com.stalkerweb.android.data.repo.AppContainer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 /**
@@ -28,4 +31,13 @@ object SoloServer {
 
     @Suppress("UNUSED_PARAMETER")
     fun attach(activity: ComponentActivity) {}
+
+    /** The server is the person's own, set up by them: the key goes to it as always. */
+    @Suppress("UNUSED_PARAMETER")
+    fun keyAllowed(url: HttpUrl): Boolean = true
+
+    /** No server kept running here, so no notification to ask for. */
+    val notificationAsk: StateFlow<Boolean> = MutableStateFlow(false)
+
+    fun notificationAsked() {}
 }

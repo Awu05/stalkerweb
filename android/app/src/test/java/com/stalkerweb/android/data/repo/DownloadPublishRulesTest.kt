@@ -80,4 +80,27 @@ class DownloadPublishRulesTest {
         assertEquals("A_B.mp4", publicFileName("A:B.mp4"))
         assertEquals("download", publicFileName("  "))
     }
+
+    @Test fun `a name of only dots, or ending in dots or spaces, becomes a safe one`() {
+        assertEquals("download", publicFileName(".."))
+        assertEquals("download", publicFileName("."))
+        assertEquals("download", publicFileName(" . . "))
+        assertEquals("Heat", publicFileName("Heat. . "))
+        assertEquals("Heat.ts", publicFileName("Heat.ts..."))
+        assertEquals(".hidden.ts", publicFileName(".hidden.ts"))
+    }
+
+    @Test fun `a done download with a blank file path is not published`() {
+        val jobs = listOf(job("a", "done", ""), job("b", "done", "  "), job("c", "done", null), job("d", "done", "/d/dl/x.ts"))
+        assertEquals(listOf("d"), toPublish(jobs, emptySet()).map { it.id })
+    }
+
+    @Test fun `an opened download is copied only when it's a regular file inside the folder`() {
+        val dir = "/data/user/0/app/files/downloads"
+        assertTrue(openedInside(dir, "$dir/Heat.ts", isRegular = true))
+        assertFalse(openedInside(dir, "$dir/Heat.ts", isRegular = false))            // a folder, a pipe
+        assertFalse(openedInside(dir, "/data/user/0/app/files/data/config.json", isRegular = true))   // a link that pointed out
+        assertFalse(openedInside(dir, "${dir}2/x.ts", isRegular = true))            // a folder next to it
+        assertFalse(openedInside(dir, dir, isRegular = true))
+    }
 }

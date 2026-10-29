@@ -4,8 +4,12 @@ import android.Manifest
 import android.app.Application
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -18,6 +22,7 @@ import com.stalkerweb.android.data.repo.FolderFile
 import com.stalkerweb.android.data.repo.goneKey
 import com.stalkerweb.android.data.repo.isInside
 import com.stalkerweb.android.data.repo.mimeOf
+import com.stalkerweb.android.data.repo.openedInside
 import com.stalkerweb.android.data.repo.orphansToPublish
 import com.stalkerweb.android.data.repo.publicFileName
 import com.stalkerweb.android.data.repo.publicName
@@ -25,12 +30,17 @@ import com.stalkerweb.android.data.repo.stalePartsToDelete
 import com.stalkerweb.android.data.repo.toPublish
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The server downloads into the app's private folder, where no other app (nor
@@ -44,6 +54,13 @@ import java.nio.file.Files
  * and for files no job lists any more (the server forgets its jobs when it's
  * started again), which are saved too, and `.part` files a day old, left by a
  * download cut short, which are deleted.
+ *
+ * Each file is opened first and then checked — the opened file itself: a
+ * regular file, really inside the download folder — so it can't be swapped
+ * for a link to something else between the check and the copy. On Android
+ * 8–9 a file written to the folder directly is handed to the media scanner,
+ * so it shows in the Downloads and gallery apps; and storage refused, the
+ * Downloads screen says why nothing is saved there ([storageDenied]).
  */
 object DownloadPublisher {
     private const val TAG = "DownloadPublisher"
@@ -57,7 +74,10 @@ object DownloadPublisher {
     @Volatile private var scope: CoroutineScope? = null
     // Android 8-9: a download is waiting for the permission to the Downloads folder.
     private val needsPermission = MutableStateFlow(false)
-    private var asked = false
+    private val asked = AtomicBoolean(false)
+    private val _storageDenied = MutableStateFlow(false)
+    /** Android 8–9: storage was refused, so downloads can't be saved to Downloads (said on the Downloads screen). */
+    val storageDenied: StateFlow<Boolean> = _storageDenied.asStateFlow()
 
     fun start(scope: CoroutineScope, app: Application, container: AppContainer) {
         this.scope = scope
@@ -76,11 +96,12 @@ object DownloadPublisher {
     fun attach(activity: ComponentActivity) {
         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return
         val launcher = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            _storageDenied.value = !granted
             if (granted) { publish(lastJobs); scope?.launch { sweep(lastJobs) } }
         }
         activity.lifecycleScope.launch {
             needsPermission.first { it }
-            if (!asked) { asked = true; launcher.launch(PERMISSION) }
+            if (asked.compareAndSet(false, true)) launcher.launch(PERMISSION)
         }
     }
 
@@ -157,9 +178,43 @@ object DownloadPublisher {
         return copyOut(File(job.filePath ?: return false), publicName(job))
     }
 
+    /**
+     * [source] opened, if the opened file is a regular file inside the download
+     * folder (by the real path of its descriptor, /proc/self/fd/<n>); else null.
+     */
+    private fun openChecked(source: File): InputStream? {
+        val context = app ?: return null
+        val pfd = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val regular = OsConstants.S_ISREG(Os.fstat(pfd.fileDescriptor).st_mode)
+            val real = File("/proc/self/fd/${pfd.fd}").canonicalPath
+            if (!openedInside(SoloEnv.downloadDir(context.filesDir).canonicalPath, real, regular)) {
+                Log.w(TAG, "a download's file is not a plain file in the download folder; not saved")
+                pfd.close()
+                return null
+            }
+            return ParcelFileDescriptor.AutoCloseInputStream(pfd)
+        } catch (e: Exception) {
+            pfd.close()
+            throw e
+        }
+    }
+
     /** Copies [source] to the Downloads folder as [name], then deletes it here. False if it couldn't (yet). */
     private fun copyOut(source: File, name: String): Boolean {
         val context = app ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(context, PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            needsPermission.value = true
+            return false
+        }
+        val input = openChecked(source) ?: throw IOException("not a file to save")
+        input.use { copyOut(context, it, name) }
+        source.delete()
+        return true
+    }
+
+    private fun copyOut(context: android.content.Context, input: InputStream, name: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
@@ -169,32 +224,28 @@ object DownloadPublisher {
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             // A name taken is not overwritten: MediaStore picks another.
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("MediaStore took no new file")
             try {
                 val out = resolver.openOutputStream(uri) ?: error("no output")
-                out.use { o -> source.inputStream().use { it.copyTo(o) } }
+                out.use { input.copyTo(it) }
                 resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             } catch (e: Exception) {
                 runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
         } else {
-            if (ContextCompat.checkSelfPermission(context, PERMISSION) != PackageManager.PERMISSION_GRANTED) {
-                needsPermission.value = true
-                return false
-            }
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FOLDER)
-            if (!dir.isDirectory && !dir.mkdirs()) return false
+            if (!dir.isDirectory && !dir.mkdirs()) throw IOException("can't make the Downloads folder")
             val target = freeName(dir, name)
             try {
-                source.inputStream().use { i -> target.outputStream().use { i.copyTo(it) } }
+                target.outputStream().use { input.copyTo(it) }
             } catch (e: Exception) {
                 target.delete()
                 throw e
             }
+            // Written past MediaStore: the scanner adds it, so the Downloads and gallery apps show it.
+            MediaScannerConnection.scanFile(context, arrayOf(target.path), arrayOf(mimeOf(name)), null)
         }
-        source.delete()
-        return true
     }
 
     /** [name] in [dir], or "name (2).ext" and on, if it's taken. */

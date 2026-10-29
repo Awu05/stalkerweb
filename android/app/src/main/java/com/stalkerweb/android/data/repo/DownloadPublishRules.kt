@@ -32,8 +32,22 @@ private val refused = Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]")
 /** The file's name in the Downloads folder: the server's own, without what MediaStore refuses. */
 fun publicName(job: DownloadJob): String = publicFileName(fileNameOf(job.filePath.orEmpty()))
 
-/** [name] as it can be in the Downloads folder: without what MediaStore refuses. */
-fun publicFileName(name: String): String = refused.replace(name, "_").trim().ifEmpty { "download" }
+/**
+ * [name] as it can be in the Downloads folder: without what MediaStore
+ * refuses, nor dots or spaces at its end (Windows, where it may be copied,
+ * drops them) — and a name of only dots ("..") is no name at all.
+ */
+fun publicFileName(name: String): String =
+    refused.replace(name, "_").trim().trimEnd('.', ' ').ifEmpty { "download" }
+
+/**
+ * Whether a download's file, once opened, is one to copy out: a regular file
+ * whose real path ([realPath], what the open descriptor points at) is inside
+ * the download folder ([dir], canonical). Checked on the opened file, so it
+ * can't be swapped for a link between the check and the copy.
+ */
+fun openedInside(dir: String, realPath: String, isRegular: Boolean): Boolean =
+    isRegular && realPath.length > dir.length && realPath.startsWith(dir) && realPath[dir.length] == File.separatorChar
 
 private fun fileNameOf(path: String): String = path.substringAfterLast('/').substringAfterLast('\\')
 

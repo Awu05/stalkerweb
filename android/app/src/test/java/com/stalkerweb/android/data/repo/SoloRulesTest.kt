@@ -3,7 +3,6 @@ package com.stalkerweb.android.data.repo
 import com.stalkerweb.android.data.api.DownloadJob
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,7 +71,10 @@ class SoloRulesTest {
     }
 
     @Test fun `the remote apps say to set the server up by its network address`() {
-        assertNotNull(castMessage(reachable = false, isSolo = false))
+        assertEquals(
+            "The TV can't reach this server's address — set it up by its network address (not localhost) to cast",
+            castMessage(reachable = false, isSolo = false),
+        )
         assertNull(castMessage(reachable = true, isSolo = false))
     }
 
@@ -141,5 +143,51 @@ class SoloRulesTest {
         assertEquals(20_000L, startWaitMs(20_000, installed = true))
         assertEquals(60_000L, startWaitMs(20_000, installed = false))
         assertEquals(90_000L, startWaitMs(90_000, installed = false))
+    }
+
+    @Test fun `the health proof is the server's HMAC of the nonce, under the key`() {
+        // As routes/solo.js computes it (the same vector is in backend/tests/solo.test.js's key).
+        val proof = "ba68c1cebc43bea9dfe350e31cc229496dc2dbcf5ee2bac40606c4b5a9046449"
+        assertEquals(proof, soloHealthProof("correct horse battery", "abcdefghijklmnop0123"))
+        assertTrue(healthProves("""{"status":"ok","proof":"$proof"}""", "correct horse battery", "abcdefghijklmnop0123"))
+        assertFalse(healthProves("""{"status":"ok","proof":"$proof"}""", "another key", "abcdefghijklmnop0123"))
+        assertFalse(healthProves("""{"status":"ok","proof":"$proof"}""", "correct horse battery", "a different nonce1"))
+        assertFalse(healthProves("""{"status":"ok"}""", "correct horse battery", "abcdefghijklmnop0123"))   // not our server
+        assertFalse(healthProves("not json", "correct horse battery", "abcdefghijklmnop0123"))
+    }
+
+    @Test fun `a refused key restarts the server at most 3 times in 2 minutes`() {
+        val now = 1_000_000L
+        assertTrue(mayRestartForAccess(emptyList(), now))
+        assertTrue(mayRestartForAccess(listOf(now - 10_000, now - 5_000), now))
+        assertFalse(mayRestartForAccess(listOf(now - 100_000, now - 10_000, now - 5_000), now))
+        // Older ones don't count.
+        assertTrue(mayRestartForAccess(listOf(now - 200_000, now - 130_000, now - 10_000, now - 5_000), now))
+    }
+
+    @Test fun `cast links take Wi-Fi over Ethernet over the hotspot, whatever came up first`() {
+        val wifi = LanNetwork(LanKind.Wifi, listOf("192.168.1.20"))
+        val wired = LanNetwork(LanKind.Ethernet, listOf("10.0.0.5"))
+        val hotspot = LanNetwork(LanKind.Hotspot, listOf("192.168.43.1"))
+        assertEquals("192.168.1.20", lanHostOf(listOf(wired, wifi, hotspot)))
+        assertEquals("192.168.1.20", lanHostOf(listOf(hotspot, wifi, wired)))
+        assertEquals("10.0.0.5", lanHostOf(listOf(hotspot, wired)))
+        assertEquals("192.168.43.1", lanHostOf(listOf(hotspot)))   // a TV on the phone's own hotspot
+        assertEquals("10.0.0.5", lanHostOf(listOf(LanNetwork(LanKind.Wifi, listOf("fe80::1")), wired)))   // a Wi-Fi with no usable address
+        assertNull(lanHostOf(emptyList<LanNetwork>()))
+    }
+
+    @Test fun `a hotspot or tethering interface is told from the Wi-Fi itself`() {
+        for (n in listOf("ap0", "swlan0", "softap0", "wlan1", "rndis0", "bt-pan")) assertTrue(n, isTetherInterface(n))
+        for (n in listOf("wlan0", "eth0", "rmnet0", "lo", "tun0", "p2p0")) assertFalse(n, isTetherInterface(n))
+    }
+
+    @Test fun `notifications are asked for once, when the server is first held, on Android 13 and up`() {
+        val held = setOf(SoloHold.PLAYING)
+        assertTrue(asksForNotifications(33, granted = false, askedBefore = false, holds = held))
+        assertFalse(asksForNotifications(32, granted = false, askedBefore = false, holds = held))
+        assertFalse(asksForNotifications(34, granted = true, askedBefore = false, holds = held))
+        assertFalse(asksForNotifications(34, granted = false, askedBefore = true, holds = held))
+        assertFalse(asksForNotifications(34, granted = false, askedBefore = false, holds = emptySet()))
     }
 }

@@ -22,10 +22,12 @@ class StalkerWebApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
+        // Solo's server has a process of its own (":node"), which runs this too:
+        // it needs none of the app's data layer, so none is built there.
+        if (!isMainProcess()) return
         container = AppContainer(this)
-        // Solo: start the server inside the app (a no-op in the remote apps). Not
-        // from the server's own process (":node"), which runs this too.
-        if (isMainProcess()) SoloServer.boot(this, container)
+        // Solo: start the server inside the app (a no-op in the remote apps).
+        SoloServer.boot(this, container)
     }
 
     private fun isMainProcess(): Boolean {
@@ -38,5 +40,6 @@ class StalkerWebApp : Application(), ImageLoaderFactory {
     // the access key to the server — so image links needn't carry a token — and
     // its access guard keeps a refused key from being retried by every image.
     override fun newImageLoader(): ImageLoader =
-        ImageLoader.Builder(this).okHttpClient { container.httpClient }.build()
+        if (::container.isInitialized) ImageLoader.Builder(this).okHttpClient { container.httpClient }.build()
+        else ImageLoader(this)   // not the app's process: no images are shown there
 }

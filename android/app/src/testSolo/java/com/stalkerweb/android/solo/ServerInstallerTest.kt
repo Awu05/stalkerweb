@@ -88,4 +88,25 @@ class ServerInstallerTest {
         assertTrue(ServerInstaller.isInstalled("v1", root))
         assertFalse(ServerInstaller.isInstalled("v2", root))
     }
+
+    @Test fun `a done-marker over an empty or missing server js is not trusted`() {
+        val root = tmp.newFolder("server")
+        val assets = FakeAssets(serverZip)
+        val entry = ServerInstaller.ensureInstalled(assets, "v1", root)
+        entry.writeText("")   // the marker landed, the file didn't (a power cut)
+        assertFalse(ServerInstaller.isInstalled("v1", root))
+        assertEquals("// server", ServerInstaller.ensureInstalled(assets, "v1", root).readText())
+        assertEquals(2, assets.opened)
+        entry.delete()
+        assertEquals("// server", ServerInstaller.ensureInstalled(assets, "v1", root).readText())
+        assertEquals(3, assets.opened)
+    }
+
+    @Test fun `a package without a server js is refused, and not marked done`() {
+        val root = tmp.newFolder("server")
+        val failed = runCatching { ServerInstaller.ensureInstalled(FakeAssets(zipOf("backend/lib/a.js" to "// a")), "v1", root) }.isFailure
+        assertTrue(failed)
+        assertFalse(File(root, "v1/.installed").exists())
+        assertFalse(ServerInstaller.isInstalled("v1", root))
+    }
 }

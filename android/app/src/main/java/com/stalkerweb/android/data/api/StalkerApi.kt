@@ -190,6 +190,8 @@ interface StalkerApi {
         @Query("series") series: String = "",
         @Query("seasonId") seasonId: String = "",
         @Query("episodeId") episodeId: String = "",
+        // The poster (the server's own /api/logos/render?… path): back as imageUrl, a link the TV can load.
+        @Query("image") image: String? = null,
     ): CastLink
 
     // ── What the viewer watched (per viewer and portal) ────────────────────────

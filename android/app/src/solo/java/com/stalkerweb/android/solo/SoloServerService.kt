@@ -132,7 +132,7 @@ class SoloServerService : Service() {
     }
 
     private fun applyHolds() {
-        val want = soloForeground(holds + left)
+        val want = soloForeground(holds + left)?.takeUnless { it == SoloForeground.DataSync && dataSyncSpent() }
         if (want == foreground) return
         if (want == null) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -173,12 +173,22 @@ class SoloServerService : Service() {
         super.onDestroy()
     }
 
-    // Android 15+: a data sync may run 6 hours a day. Then it's no longer in the
-    // foreground (or Android stops the app); playing or casting goes on as media.
+    // Android 15+: a data sync may run 6 hours a day. Past that Android wants
+    // the service stopped within seconds, or it counts as not stopping in time
+    // (and crashes the process — Node with it). So: out of the foreground, no
+    // data sync asked for again for a day (it would be refused), and,
+    // unless playing or casting still holds it as media, the service stops
+    // itself. Only the Service object goes: Node runs on in this process, its
+    // download carrying on without the foreground's protection, and the app's
+    // next start of the service finds it running (`started`). A media hold
+    // (not time-limited) keeps the service, back in the foreground as media.
     override fun onTimeout(startId: Int, fgsType: Int) {
-        Log.w(TAG, "the day's foreground time is used up")
+        Log.w(TAG, "the day's foreground time for downloads is used up")
+        dataSyncSpentAt = SystemClock.elapsedRealtime()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         foreground = null
+        if (soloForeground(holds + left) == SoloForeground.MediaPlayback) applyHolds()
+        else stopSelf()
     }
 
     private fun runServer() {
@@ -266,6 +276,9 @@ class SoloServerService : Service() {
         // When Node was started in this process, and whether it has answered since.
         @Volatile private var startedAt = 0L
         @Volatile private var answered = false
+        // When the data sync's daily time ran out (onTimeout): not asked for again for a day.
+        @Volatile private var dataSyncSpentAt = -1L
+        private fun dataSyncSpent() = dataSyncSpentAt >= 0 && SystemClock.elapsedRealtime() - dataSyncSpentAt < 24 * 3600_000L
         private val runtime: NodeRuntime get() = NodejsMobileRuntime
     }
 }

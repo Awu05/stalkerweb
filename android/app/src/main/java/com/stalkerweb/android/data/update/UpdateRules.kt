@@ -48,11 +48,12 @@ private val FORM = Regex("""-(tv|mobile)[-.]""", RegexOption.IGNORE_CASE)
 private val SOLO_FORM = Regex("""-solo_(tv|mobile)[-.]""", RegexOption.IGNORE_CASE)
 
 /**
- * The download URL of this build's APK among a release's assets (name to URL):
- * "stalkerweb-tv-v0.4.36.apk" for the TV build, "stalkerweb-mobile-v0.4.36.apk"
- * for the phone; the Solo app takes "stalkerweb-solo_tv-…" / "stalkerweb-solo_mobile-…"
- * and the server app's rule never matches those. Null when the release has none for it — the other form's APK
- * would install as a second app, not update this one.
+ * The download URL of this build's APK among a release's assets (name to
+ * URL): "stalkerweb-tv-v0.4.36.apk" for the TV build,
+ * "stalkerweb-mobile-v0.4.36.apk" for the phone. The Solo app takes
+ * "stalkerweb-solo_tv-…" / "stalkerweb-solo_mobile-…", which the server app's
+ * rule never matches. Null when the release has none for it — the other
+ * form's APK would install as a second app, not update this one.
  */
 fun apkFor(assets: List<Pair<String, String>>, isTv: Boolean, isSolo: Boolean = false): String? {
     val want = if (isTv) "tv" else "mobile"

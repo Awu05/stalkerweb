@@ -212,6 +212,8 @@ data class CastLink(
     val contentType: String,
     val live: Boolean = false,
     val reachable: Boolean = true,
+    // The poster, as the TV can load it (asked for with ?image=); null from an older server.
+    val imageUrl: String? = null,
 )
 
 // Live-channel stream resolution. `streamType` is the backend's engine hint

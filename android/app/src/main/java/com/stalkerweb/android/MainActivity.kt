@@ -40,6 +40,7 @@ import com.stalkerweb.android.crash.CrashReporter
 import com.stalkerweb.android.solo.DownloadPublisher
 import com.stalkerweb.android.data.api.AppEvent
 import com.stalkerweb.android.data.repo.PlayerParams
+import com.stalkerweb.android.data.repo.mayRestartForAccess
 import com.stalkerweb.android.data.update.UpdateManager
 import com.stalkerweb.android.reminders.ReminderReceiver
 import com.stalkerweb.android.ui.downloads.DownloadsScreen
@@ -104,6 +105,10 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         takeWatchExtra(intent)
     }
+
+    // Solo, Android 13+: notifications, asked once when its server is first kept
+    // running (SoloServer.notificationAsk). Whatever the answer, it isn't asked again.
+    private val notificationsLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     // Launcher for ACTION_MANAGE_UNKNOWN_APP_SOURCES. Fires install as soon as
     // the user grants permission; silently does nothing if they deny.
@@ -175,6 +180,9 @@ class MainActivity : ComponentActivity() {
                 // has; after a restart (an access problem) "Starting…" covers them.
                 var solo by remember { mutableStateOf(if (BuildConfig.IS_SOLO) SoloStart.Starting else SoloStart.Ready) }
                 var soloUp by remember { mutableStateOf(!BuildConfig.IS_SOLO) }
+                // When a refused key restarted Solo's server: more than a few in a
+                // short while and it's the Failed screen, not another restart.
+                val accessRestarts = remember { mutableListOf<Long>() }
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -322,8 +330,14 @@ class MainActivity : ComponentActivity() {
                             // started again, with "Starting…" until it answers; never Setup.
                             is AppEvent.AccessProblem -> if (BuildConfig.IS_SOLO) {
                                 if (solo == SoloStart.Ready) {
-                                    SoloServer.restart()
-                                    solo = SoloStart.Starting
+                                    val now = System.currentTimeMillis()
+                                    if (mayRestartForAccess(accessRestarts, now)) {
+                                        accessRestarts += now
+                                        SoloServer.restart()
+                                        solo = SoloStart.Starting
+                                    } else {
+                                        solo = SoloStart.Failed   // restarting didn't help: Try again
+                                    }
                                 }
                             } else if (route != Screen.Setup.route) {
                                 // Leave the shell at once: every request carries the key, and each
@@ -488,8 +502,25 @@ class MainActivity : ComponentActivity() {
                 }
                 if (solo != SoloStart.Ready) StartingScreen(
                     failed  = solo == SoloStart.Failed,
-                    onRetry = { SoloServer.restart(); solo = SoloStart.Starting },
+                    onRetry = { accessRestarts.clear(); SoloServer.restart(); solo = SoloStart.Starting },
                 )
+
+                // Solo: the one time it asks for notifications, with why. Never in the way.
+                val askNotifications by SoloServer.notificationAsk.collectAsStateWithLifecycle()
+                if (askNotifications && Build.VERSION.SDK_INT >= 33) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { SoloServer.notificationAsked() },
+                        title = { androidx.compose.material3.Text("Allow notifications?") },
+                        text = { androidx.compose.material3.Text("While it plays, casts or downloads, StalkerWeb Solo keeps its server running and shows that in a notification. It works the same without.") },
+                        confirmButton = {
+                            androidx.compose.material3.Button(onClick = {
+                                SoloServer.notificationAsked()
+                                notificationsLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }) { androidx.compose.material3.Text("Allow") }
+                        },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { SoloServer.notificationAsked() }) { androidx.compose.material3.Text("Not now") } },
+                    )
+                }
                 } // end overscan Box
             }
         }
