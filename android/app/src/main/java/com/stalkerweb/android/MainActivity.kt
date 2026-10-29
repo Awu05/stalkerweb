@@ -264,12 +264,12 @@ class MainActivity : ComponentActivity() {
                     // The key is the app's own: one refused before (a fault) isn't kept back.
                     container.guard.reset()
                     solo = if (SoloServer.awaitReady(container.httpClient)) SoloStart.Ready else SoloStart.Failed
-                    if (solo == SoloStart.Ready && soloUp) {
-                        // Back after a restart: what the screens hold came from before it.
-                        channelViewModel.load(reset = true)
-                        container.viewers.sectionsChanged()
+                    if (solo == SoloStart.Ready) {
+                        // What was asked before is read again: the channels (asked for as
+                        // the app opened, before the server was up) — and, after a restart, every section.
+                        if (soloUp) container.viewers.sectionsChanged() else channelViewModel.load(reset = true)
+                        soloUp = true
                     }
-                    if (solo == SoloStart.Ready) soloUp = true
                 }
 
                 // Startup: who's watching first (as on the web), then whether a portal is connected.
