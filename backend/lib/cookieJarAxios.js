@@ -6,10 +6,20 @@
 // Node 20 or newer — this is the little we need of it, so the server also
 // runs on the Node 18 inside the all-in-one Android app.
 
-/** The address a request's options (as a redirect hands them over) point at. */
+/**
+ * The address a request's options (as a redirect hands them over) point at.
+ * An IPv6 hostname comes bare (::1) and goes back in brackets.
+ */
 function urlOf(options) {
   const port = options.port ? `:${options.port}` : '';
-  return `${options.protocol}//${options.hostname || options.host}${port}${options.path}`;
+  const host = options.hostname || options.host;
+  const h = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${options.protocol}//${h}${port}${options.path}`;
+}
+
+/** Drops a header whatever its case (Cookie, cookie, COOKIE). */
+function dropHeader(headers, name) {
+  for (const k of Object.keys(headers)) if (k.toLowerCase() === name) delete headers[k];
 }
 
 /** A response's set-cookie headers as a list (a lone one can arrive as text). */
@@ -39,9 +49,11 @@ function withCookieJar(instance, jar) {
     config.beforeRedirect = (options, details) => {
       store(details.headers, here);
       here = urlOf(options);
+      // The cookie the last hop sent goes, in whatever case it was set; only
+      // the jar's cookies for the next address go out — none if it has none.
       const next = jar.getCookieStringSync(here);
-      if (next) options.headers.cookie = next;
-      else delete options.headers.cookie;
+      dropHeader(options.headers, 'cookie');
+      if (next) options.headers.Cookie = next;
       if (before) before(options, details);
     };
     return config;
