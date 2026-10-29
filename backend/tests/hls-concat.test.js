@@ -1,5 +1,5 @@
 /* global ReadableStream, AbortController */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -255,5 +255,58 @@ describe('hlsConcat', () => {
     const out = path.join(dir, 'o.ts');
     await hlsConcat('http://h.example/m.m3u8', out, { fetchImpl });
     expect(fs.readFileSync(out)).toEqual(Buffer.from([9]));
+  });
+
+  it('says how big the file will be: from the pieces so far, or exactly from byte ranges', async () => {
+    const fetchImpl = fakeFetch({ 'http://h.example/v.m3u8': media(['a.ts', 'b.ts', 'c.ts', 'd.ts']),
+      'http://h.example/a.ts': Buffer.alloc(10), 'http://h.example/b.ts': Buffer.alloc(30),
+      'http://h.example/c.ts': Buffer.alloc(20), 'http://h.example/d.ts': Buffer.alloc(20) });
+    const totals = [];
+    await hlsConcat('http://h.example/v.m3u8', path.join(dir, 'o.ts'), { fetchImpl, onTotal: (t) => totals.push(t) });
+    // After each piece: the average so far, times the 4 pieces; at the end, the size.
+    expect(totals).toEqual([40, 80, 80, 80]);
+
+    const ranged = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\n#EXT-X-BYTERANGE:3@0\nall.ts\n#EXTINF:4,\n#EXT-X-BYTERANGE:5\nall.ts\n#EXT-X-ENDLIST\n';
+    const t2 = [];
+    await hlsConcat('http://h.example/r.m3u8', path.join(dir, 'r.ts'), {
+      fetchImpl: fakeFetch({ 'http://h.example/r.m3u8': ranged, 'http://h.example/all.ts': Buffer.alloc(8) }), onTotal: (t) => t2.push(t) });
+    expect(t2[0]).toBe(8);   // known before a byte comes
+  });
+
+  it('writes the rest of a chunk the file took only part of', async () => {
+    const real = fs.promises.open;
+    vi.spyOn(fs.promises, 'open').mockImplementation(async (...args) => {
+      const h = await real(...args);
+      const write = h.write.bind(h);
+      // At most 2 bytes a write, as a full disk or a pipe may do.
+      h.write = (buf, off, len, pos) => write(buf, off, Math.min(len, 2), pos);
+      return h;
+    });
+    const a = Buffer.from([1, 2, 3, 4, 5]);
+    const fetchImpl = fakeFetch({ 'http://h.example/v.m3u8': media(['a.ts', 'b.ts']), 'http://h.example/a.ts': a, 'http://h.example/b.ts': Buffer.from([6, 7, 8]) });
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/v.m3u8', out, { fetchImpl });
+    vi.restoreAllMocks();
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]));
+  });
+
+  it('says so when a live window moved on past pieces it had no time to fetch', async () => {
+    let reads = 0;
+    const fetchImpl = async (url) => {
+      const name = url.split('/').pop();
+      if (name === 'live.m3u8') {
+        const from = [0, 5][reads++] ?? 5;   // s3, s4 were listed only while s0…s2 were fetched
+        const text = `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${from}\n`
+          + [0, 1, 2].map((k) => `#EXTINF:1,\ns${from + k}.ts\n`).join('') + (from === 5 ? '#EXT-X-ENDLIST\n' : '');
+        return { ok: true, status: 200, url, text: async () => text };
+      }
+      const k = Number(/^s(\d+)\.ts$/.exec(name)[1]);
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([k])); c.close(); } }) };
+    };
+    const gaps = [];
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/live.m3u8', out, { fetchImpl, pollMs: 5, onGap: (n) => gaps.push(n) });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([0, 1, 2, 5, 6, 7]));
+    expect(gaps).toEqual([2]);
   });
 });

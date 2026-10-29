@@ -63,6 +63,7 @@ class DownloadManager extends EventEmitter {
         status:          'queued', // queued | downloading | done | error | canceled
         bytesDownloaded: 0,
         totalBytes:      0,
+        missedPieces:    0,        // HLS live: pieces that left the window before they were fetched
         error:           null,
         filePath:        null,
         createdAt:       Date.now(),
@@ -151,7 +152,13 @@ class DownloadManager extends EventEmitter {
             const now = Date.now();
             if (now - lastEmit > 500) { lastEmit = now; this._emitUpdate(); }
           },
+          onTotal: (n) => { job.totalBytes = n; },
+          onGap: (n) => {
+            job.missedPieces += n;
+            log.warn(TAG, `"${job.title}": ${n} piece(s) left the live playlist before they could be fetched — the file skips them`);
+          },
         });
+        job.totalBytes = job.bytesDownloaded;
       } else {
         const http = client?.getHttpClient ? client.getHttpClient() : require('axios');
 

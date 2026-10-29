@@ -14,7 +14,14 @@
 // A playlist without #EXT-X-ENDLIST is still growing (an EVENT or live one):
 // it's read again every target duration and each new piece, by its media
 // sequence, is added in order until the end tag comes. It's given up after 6
-// hours, or once it hasn't grown for 5 minutes.
+// hours, or once it hasn't grown for 5 minutes. Pieces that left a sliding
+// window before they could be fetched are gone: the file carries on without
+// them, and onGap() says how many (the job is marked, and the log says so) —
+// better a jump in hours of recording than none of it.
+//
+// How big the file will be (onTotal): exact when every piece is a byte range,
+// else the pieces so far on average times the count, once the playlist has
+// ended; nothing while it's still growing.
 
 const fs = require('fs');
 const { request } = require('../stalker/selfStreamReader');
@@ -126,6 +133,8 @@ function pause(ms, signal) {
  * @param {object} [o]
  * @param {AbortSignal} [o.signal]
  * @param {(n: number) => void} [o.onBytes]  bytes just written (negative: a failed piece's, taken back)
+ * @param {(n: number) => void} [o.onTotal]  the file's size as far as it can be told
+ * @param {(n: number) => void} [o.onGap]    n pieces left a live window before they were fetched
  * @param {object} [o.headers]
  * @param {typeof fetch} [o.fetchImpl]
  * @param {number} [o.idleMs]           a piece's request that sends nothing this long is retried
@@ -134,7 +143,7 @@ function pause(ms, signal) {
  * @param {number} [o.maxMs]            a growing playlist is given up after this long
  * @param {number} [o.stallMs]          and once it hasn't grown in this long
  */
-async function hlsConcat(url, outPath, { signal = new AbortController().signal, onBytes = () => {}, headers = {}, fetchImpl = globalThis.fetch,
+async function hlsConcat(url, outPath, { signal = new AbortController().signal, onBytes = () => {}, onTotal = () => {}, onGap = () => {}, headers = {}, fetchImpl = globalThis.fetch,
   idleMs = IDLE_MS, retryDelaysMs = RETRY_DELAYS_MS, pollMs = null, maxMs = LIVE_MAX_MS, stallMs = LIVE_STALL_MS } = {}) {
   const o = { signal, headers, fetchImpl };
   let { text, at } = await readText(url, o);
@@ -159,10 +168,19 @@ async function hlsConcat(url, outPath, { signal = new AbortController().signal, 
   let grewAt = began;
   let last = -1;   // the media sequence of the last piece written
   let n = 0;       // pieces written
+  // The size, when it can be told: every piece a byte range, or the average so far.
+  const total = () => {
+    if (!list.ended) return;
+    const all = list.pieces;
+    if (all.length && all.every((p) => p.range)) onTotal(all.reduce((t, p) => t + p.range.length, 0));
+    else if (n) onTotal(Math.round((pos / n) * (n + all.filter((p) => p.seq > last).length)));
+  };
   try {
+    total();
     for (;;) {
       for (const piece of list.pieces) {
         if (piece.seq <= last) continue;
+        if (last >= 0 && piece.seq > last + 1) onGap(piece.seq - last - 1);
         n++;
         // "of N" once the playlist has ended and the count is known.
         const of = list.ended ? ` of ${n + list.pieces.filter((p) => p.seq > piece.seq).length}` : '';
@@ -183,6 +201,7 @@ async function hlsConcat(url, outPath, { signal = new AbortController().signal, 
         }
         last = piece.seq;
         grewAt = Date.now();
+        total();
       }
       if (list.ended) break;
       // Still growing: read again after a target duration — within limits.
@@ -251,7 +270,12 @@ async function fetchPiece({ url, range }, o, file, start, onBytes, idleMs) {
           if (chunk?.length > left) chunk = chunk.subarray(0, left);
           if (chunk?.length) {
             try {
-              await file.write(chunk, 0, chunk.byteLength, pos);
+              // All of it: a write may take only part.
+              for (let off = 0; off < chunk.byteLength;) {
+                const { bytesWritten } = await file.write(chunk, off, chunk.byteLength - off, pos + off);
+                if (!bytesWritten) throw new Error('the file took no more bytes');
+                off += bytesWritten;
+              }
             } catch (e) {
               throw Object.assign(new Error(e.message, { cause: e }), { writeError: e });
             }
