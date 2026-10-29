@@ -86,6 +86,8 @@ import com.stalkerweb.android.data.repo.filtersToSave
 import com.stalkerweb.android.data.repo.shownWith
 import com.stalkerweb.android.data.repo.titleKey
 import com.stalkerweb.android.data.repo.SettingsCard
+import com.stalkerweb.android.data.repo.SettingsField
+import com.stalkerweb.android.data.repo.shownFields
 import com.stalkerweb.android.data.repo.channelsTitle
 import com.stalkerweb.android.data.repo.filtersTitle
 import com.stalkerweb.android.data.repo.ownedTitle
@@ -114,6 +116,7 @@ import com.stalkerweb.android.ui.utils.rememberIsTV
 private val SHOWN_CARDS = shownCards(BuildConfig.IS_SOLO).toSet()
 private val SHOWN_TABS = shownSettingsTabs(BuildConfig.IS_SOLO).let { ids -> SETTINGS_TABS.filter { it.first in ids } }
 private fun shows(card: SettingsCard) = card in SHOWN_CARDS
+private val SHOWN_FIELDS = shownFields(BuildConfig.IS_SOLO)
 
 /** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos — and App (version, updates). */
 @Composable
@@ -527,9 +530,10 @@ private fun PlaybackTab(viewModel: SettingsViewModel, state: SettingsState) {
             ChoiceRow(listOf(0, 5, 10, 15, 30, 60), buffer, { if (it == 0) "Off" else "$it s" }) { buffer = it }
             Text("Disconnect when idle", color = SwColors.Text)
             ChoiceRow(listOf(0, 15, 30, 60, 120, 240), idle, { if (it == 0) "Never" else if (it < 60) "$it min" else "${it / 60} h" }) { idle = it }
-            TvTextField(dir, { dir = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
+            val folder = SettingsField.DownloadFolder in SHOWN_FIELDS
+            if (folder) TvTextField(dir, { dir = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Download folder (on the server)") }, modifier = Modifier.fillMaxWidth())
             Button(onClick = {
-                viewModel.savePlayback(SettingsUpdate(epgEnabled = epg, vodEnabled = vod, downloadDir = dir.trim().ifBlank { null },
+                viewModel.savePlayback(SettingsUpdate(epgEnabled = epg, vodEnabled = vod, downloadDir = if (folder) dir.trim().ifBlank { null } else null,
                     idleTimeoutMinutes = idle, liveBufferSeconds = buffer))
             }, enabled = !state.busy) { Text("Save") }
         }

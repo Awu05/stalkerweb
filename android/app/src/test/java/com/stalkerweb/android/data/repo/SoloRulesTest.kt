@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.DownloadJob
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -14,7 +15,26 @@ class SoloRulesTest {
     }
 
     @Test fun `Solo keeps the rest, in the same order`() {
-        assertEquals(SettingsCard.entries - setOf(SettingsCard.Viewers, SettingsCard.Activity, SettingsCard.Server), shownCards(isSolo = true))
+        assertEquals(SettingsCard.entries - setOf(SettingsCard.Viewers, SettingsCard.Links, SettingsCard.Activity, SettingsCard.Server), shownCards(isSolo = true))
+    }
+
+    @Test fun `Solo has no links for other apps, nor their tab`() {
+        assertFalse(SettingsCard.Links in shownCards(isSolo = true))
+        assertFalse("links" in shownSettingsTabs(isSolo = true))
+        assertTrue("links" in shownSettingsTabs(isSolo = false))
+    }
+
+    @Test fun `Solo has no download folder to choose`() {
+        assertFalse(SettingsField.DownloadFolder in shownFields(isSolo = true))
+        assertTrue(SettingsField.DownloadFolder in shownFields(isSolo = false))
+    }
+
+    @Test fun `a download queued or under way keeps the server busy, finished ones do not`() {
+        fun job(status: String) = DownloadJob(id = status, status = status)
+        assertTrue(anyDownloadActive(listOf(job("done"), job("queued"))))
+        assertTrue(anyDownloadActive(listOf(job("downloading"))))
+        assertFalse(anyDownloadActive(listOf(job("done"), job("error"), job("canceled"))))
+        assertFalse(anyDownloadActive(emptyList()))
     }
 
     @Test fun `a tab with nothing left to show is left out in Solo`() {

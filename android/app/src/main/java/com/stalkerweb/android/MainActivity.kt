@@ -265,6 +265,8 @@ class MainActivity : ComponentActivity() {
                     container.guard.reset()
                     solo = if (SoloServer.awaitReady(container.httpClient)) SoloStart.Ready else SoloStart.Failed
                     if (solo == SoloStart.Ready) {
+                        // Refusals from while it was starting (the old Node, a moved port) don't count.
+                        container.guard.reset()
                         // What was asked before is read again: the channels (asked for as
                         // the app opened, before the server was up) — and, after a restart, every section.
                         if (soloUp) container.viewers.sectionsChanged() else channelViewModel.load(reset = true)

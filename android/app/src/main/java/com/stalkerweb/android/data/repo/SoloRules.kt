@@ -1,5 +1,7 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.DownloadJob
+
 /**
  * Where Solo — the app with the StalkerWeb server inside — differs from the
  * remote apps on the same screens. Both flavors share every screen; these
@@ -29,12 +31,24 @@ enum class SettingsCard(val tab: String) {
 
 /**
  * The cards Settings shows. Solo has one person on one device, on a server
- * only it reaches: no viewers to manage, no activity from other devices, and
- * no server to change.
+ * only it reaches: no viewers to manage, no activity from other devices, no
+ * server to change — and no links for other apps, which would point at
+ * 127.0.0.1, where nothing else can reach it.
  */
 fun shownCards(isSolo: Boolean): List<SettingsCard> =
-    if (isSolo) SettingsCard.entries - setOf(SettingsCard.Viewers, SettingsCard.Activity, SettingsCard.Server)
+    if (isSolo) SettingsCard.entries - setOf(SettingsCard.Viewers, SettingsCard.Links, SettingsCard.Activity, SettingsCard.Server)
     else SettingsCard.entries.toList()
+
+/** Single fields inside a card that one app shows and the other doesn't. */
+enum class SettingsField { DownloadFolder }
+
+/**
+ * The fields Settings shows. Solo's downloads land in the device's Downloads
+ * folder, and the server's own folder stays in the app's private storage: no
+ * folder to choose.
+ */
+fun shownFields(isSolo: Boolean): Set<SettingsField> =
+    if (isSolo) emptySet() else SettingsField.entries.toSet()
 
 /** The Settings tabs that still have a card to show (Solo has no Activity tab). */
 fun shownSettingsTabs(isSolo: Boolean): List<String> = shownCards(isSolo).map { it.tab }.distinct()
@@ -78,6 +92,10 @@ fun castMessage(reachable: Boolean, isSolo: Boolean): String? = when {
     isSolo -> "Casting needs Wi-Fi"
     else -> "The TV can't reach this server's address — set it up by its network address (not localhost) to cast"
 }
+
+/** Whether any of [jobs] is still to finish (queued or downloading): the server is busy with it. */
+fun anyDownloadActive(jobs: List<DownloadJob>): Boolean =
+    jobs.any { it.status == "queued" || it.status == "downloading" }
 
 /** Why the app needs Solo's server kept running: SoloServer.hold / release. */
 object SoloHold {

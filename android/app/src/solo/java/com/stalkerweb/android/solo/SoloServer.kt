@@ -147,7 +147,12 @@ object SoloServer {
                 val request = Request.Builder().url("$url/api/health").build()
                 runCatching { quick.newCall(request).execute().use { it.isSuccessful } }.getOrDefault(false)
             }
-            if (ok && System.currentTimeMillis() - restartedAt > RESTART_GRACE_MS) { CastNetwork.resend(); return true }
+            if (ok && System.currentTimeMillis() - restartedAt > RESTART_GRACE_MS) {
+                // Up: tell it the Wi-Fi again, and give a restarted service the holds back.
+                CastNetwork.resend()
+                start()
+                return true
+            }
             if (System.currentTimeMillis() >= deadline) return false
             delay(200)
         }
