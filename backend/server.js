@@ -422,9 +422,13 @@ app.use('/api/xspf', xspfRoutes);
 app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
-// Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast links.
-// (They point at the cast listener, below.)
-require('./routes/solo').mount(app, config, soloCast);
+// Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast
+// links (they point at the cast listener, below), and whether a cast is on;
+// and asks what still needs the server (a download, a cast).
+require('./routes/solo').mount(app, config, soloCast, {
+  downloadsActive: () => downloadManager.hasActive(),
+  castSessions: () => appState.castHls?.size ?? 0,
+});
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
@@ -531,12 +535,9 @@ httpServer.on('error', (e) => {
 // Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast, while
 // something is cast (lib/soloCast.js). Off without an access key: no share
 // token, nothing it could safely answer.
+// It takes a free port each time it starts (CAST_PORT is no longer read).
 if (config.solo) {
-  if (config.castPort) {
-    soloCast.enable({ app, port: config.castPort, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0 });
-  } else {
-    log.warn('server', 'Solo without CAST_PORT — the cast listener is not started, so casting is off');
-  }
+  soloCast.enable({ app, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0 });
 }
 
 // Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS

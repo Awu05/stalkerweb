@@ -49,6 +49,17 @@ describe('DownloadManager HLS without ffmpeg', () => {
     expect(fs.existsSync(path.join(dir, 'Enc Movie.ts.part'))).toBe(false);
   });
 
+  it("says whether a download is queued or running (for Solo's keep-alive)", () => {
+    const m = new DownloadManager({}, () => dir);
+    expect(m.hasActive()).toBe(false);
+    const [job] = m.enqueue([{ videoId: '4', title: 'Busy' }]);
+    m._queue = [];
+    for (const [status, busy] of [['queued', true], ['downloading', true], ['done', false], ['error', false], ['canceled', false]]) {
+      job.status = status;
+      expect(m.hasActive(), status).toBe(busy);
+    }
+  });
+
   it('removes a finished download whose file was already moved away', () => {
     const m = new DownloadManager({}, () => dir);
     const [job] = m.enqueue([{ videoId: '3', title: 'Gone' }]);

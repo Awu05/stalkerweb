@@ -15,9 +15,9 @@ const config = {
   // and the server's own pulls go to 127.0.0.1, which another address breaks.
   host: solo ? SOLO_HOST : '0.0.0.0',
   // Solo: the server runs inside the StalkerWeb Solo Android app, and a second
-  // listener on CAST_PORT gives a Chromecast the cast stream only (lib/soloCast.js).
+  // listener, on a free port it picks each time, gives a Chromecast the cast
+  // stream only (lib/soloCast.js). CAST_PORT, which set that port, is ignored.
   solo,
-  castPort: solo ? parseInt(process.env.CAST_PORT || '0', 10) || 0 : 0,
   // Cast channels in memory (stalker/CastHls.js): pieces in each playlist,
   // channels at once, and a piece's size cap (past it a piece is cut by the
   // clock — a 4K channel with a long GOP gets there). A phone has less to

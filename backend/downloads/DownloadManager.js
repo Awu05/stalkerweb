@@ -39,6 +39,12 @@ class DownloadManager extends EventEmitter {
     return [...this._jobs.values()].sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /** Whether a download is queued or running (Solo's app keeps the server up for it). */
+  hasActive() {
+    for (const j of this._jobs.values()) if (j.status === 'queued' || j.status === 'downloading') return true;
+    return false;
+  }
+
   // items: [{ videoId, cmd, series, seasonId, episodeId, title, seriesTitle }]
   enqueue(items) {
     const created = [];
