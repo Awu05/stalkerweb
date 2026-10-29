@@ -239,8 +239,8 @@ describe('/api/vod/skip', () => {
 
   it("answers with the episode's parts and the viewer's auto-skip choice", async () => {
     const q = '?videoId=7&name=Breaking%20Bad&season=1&episode=2'
-    expect((await call('GET', q, null, andy)).body).toMatchObject({ imdbId: 'tt0903747', intro: { start: 314.5, end: 331 }, autoSkip: true })
-    expect((await call('GET', q)).body.autoSkip).toBe(false)
+    expect((await call('GET', q, null, andy)).body).toMatchObject({ imdbId: 'tt0903747', intro: { start: 314.5, end: 331 }, autoSkip: true, skipMode: 'auto' })
+    expect((await call('GET', q)).body).toMatchObject({ autoSkip: false, skipMode: 'button' })
   })
 
   it('sets a show\'s match by hand, and refuses what is not an IMDb id', async () => {
