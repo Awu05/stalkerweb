@@ -145,7 +145,8 @@ jobs:
             echo "$KEYSTORE_B64" | base64 -d > "$ks"
           else
             echo "no KEYSTORE_B64 secret: a throwaway key"
-            keytool -genkeypair -keystore "$ks" -storepass android -keypass android -alias androiddebugkey               -keyalg RSA -keysize 2048 -validity 1 -dname "CN=CI throwaway" -noprompt
+            keytool -genkeypair -keystore "$ks" -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 1 -dname "CN=CI throwaway" -noprompt
           fi
           echo "KEYSTORE_PATH=$ks" >> "$GITHUB_ENV"
 
