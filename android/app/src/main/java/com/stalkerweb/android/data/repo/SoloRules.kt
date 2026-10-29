@@ -226,7 +226,7 @@ data class LanNetwork(val kind: LanKind, val addresses: List<String>)
  * own hotspot (a TV joined to it) — the same answer whichever came up first.
  * Within a kind, the networks' order as given (the caller keeps it stable).
  */
-fun lanHostOf(networks: List<LanNetwork>): String? =
+fun lanHostAmong(networks: List<LanNetwork>): String? =
     networks.sortedBy { it.kind.ordinal }.firstNotNullOfOrNull { lanHostOf(it.addresses) }
 
 /**

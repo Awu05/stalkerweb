@@ -15,7 +15,7 @@ import com.stalkerweb.android.data.repo.AppContainer
 import com.stalkerweb.android.data.repo.LanKind
 import com.stalkerweb.android.data.repo.LanNetwork
 import com.stalkerweb.android.data.repo.isTetherInterface
-import com.stalkerweb.android.data.repo.lanHostOf
+import com.stalkerweb.android.data.repo.lanHostAmong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
  * links unreachable and the Cast button says "Casting needs Wi-Fi". Ethernet
  * counts too (a TV box is often wired), and so does the phone's own hotspot
  * (a TV joined to it); with more than one, Wi-Fi first, then Ethernet, then
- * the hotspot (lanHostOf), whichever came up first. The server keeps it in
+ * the hotspot (lanHostAmong), whichever came up first. The server keeps it in
  * memory only, so it's sent again whenever the server is (back) up: [resend].
  */
 object CastNetwork {
@@ -109,7 +109,7 @@ object CastNetwork {
             // Each network in a fixed order (its handle), then the hotspot's own addresses.
             val known = networks.entries.sortedBy { it.key.networkHandle }.map { (n, a) -> LanNetwork(kind(n), a) }
             val taken = known.flatMap { it.addresses }.toSet()
-            val host = lanHostOf(known + LanNetwork(LanKind.Hotspot, hotspotAddresses() - taken))
+            val host = lanHostAmong(known + LanNetwork(LanKind.Hotspot, hotspotAddresses() - taken))
             if (!force && sent == host) return@launch
             if (put(host)) sent = host
         }
@@ -127,7 +127,7 @@ object CastNetwork {
     private fun put(host: String?): Boolean {
         val c = container ?: return false
         val url = c.prefs.serverUrl ?: return false
-        // host is a plain IPv4 (lanHostOf), nothing to escape.
+        // host is a plain IPv4 (lanHostAmong), nothing to escape.
         val body = (if (host == null) """{"lanHost":null}""" else """{"lanHost":"$host"}""").toRequestBody(JSON)
         val request = Request.Builder().url("$url/api/solo/network").put(body).build()
         return runCatching { c.httpClient.newCall(request).execute().use { it.isSuccessful } }.getOrDefault(false)

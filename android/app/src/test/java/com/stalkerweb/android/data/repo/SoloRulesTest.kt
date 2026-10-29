@@ -169,12 +169,12 @@ class SoloRulesTest {
         val wifi = LanNetwork(LanKind.Wifi, listOf("192.168.1.20"))
         val wired = LanNetwork(LanKind.Ethernet, listOf("10.0.0.5"))
         val hotspot = LanNetwork(LanKind.Hotspot, listOf("192.168.43.1"))
-        assertEquals("192.168.1.20", lanHostOf(listOf(wired, wifi, hotspot)))
-        assertEquals("192.168.1.20", lanHostOf(listOf(hotspot, wifi, wired)))
-        assertEquals("10.0.0.5", lanHostOf(listOf(hotspot, wired)))
-        assertEquals("192.168.43.1", lanHostOf(listOf(hotspot)))   // a TV on the phone's own hotspot
-        assertEquals("10.0.0.5", lanHostOf(listOf(LanNetwork(LanKind.Wifi, listOf("fe80::1")), wired)))   // a Wi-Fi with no usable address
-        assertNull(lanHostOf(emptyList<LanNetwork>()))
+        assertEquals("192.168.1.20", lanHostAmong(listOf(wired, wifi, hotspot)))
+        assertEquals("192.168.1.20", lanHostAmong(listOf(hotspot, wifi, wired)))
+        assertEquals("10.0.0.5", lanHostAmong(listOf(hotspot, wired)))
+        assertEquals("192.168.43.1", lanHostAmong(listOf(hotspot)))   // a TV on the phone's own hotspot
+        assertEquals("10.0.0.5", lanHostAmong(listOf(LanNetwork(LanKind.Wifi, listOf("fe80::1")), wired)))   // a Wi-Fi with no usable address
+        assertNull(lanHostAmong(emptyList()))
     }
 
     @Test fun `a hotspot or tethering interface is told from the Wi-Fi itself`() {
