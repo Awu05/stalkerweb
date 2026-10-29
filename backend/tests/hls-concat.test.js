@@ -135,4 +135,125 @@ describe('hlsConcat', () => {
     expect(fs.readFileSync(out)).toEqual(Buffer.from([1, 4, 5]));
     expect(Date.now() - t0).toBeLessThan(5000);
   });
+
+  it('follows a playlist that is still growing until #EXT-X-ENDLIST: every piece, in order, once', async () => {
+    // An EVENT playlist: two pieces more each time it's read, then the end.
+    let reads = 0;
+    const seen = [];
+    const all = ['s0.ts', 's1.ts', 's2.ts', 's3.ts', 's4.ts', 's5.ts', 's6.ts'];
+    const fetchImpl = async (url, { signal } = {}) => {
+      seen.push(url);
+      if (signal?.aborted) throw new Error('aborted');
+      const name = url.split('/').pop();
+      if (name === 'live.m3u8') {
+        const n = Math.min(all.length, 3 + 2 * reads++);
+        const text = '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n'
+          + all.slice(0, n).map((u) => `#EXTINF:1,\n${u}\n`).join('') + (n === all.length ? '#EXT-X-ENDLIST\n' : '');
+        return { ok: true, status: 200, url, text: async () => text };
+      }
+      const i = all.indexOf(name);
+      if (i < 0) return { ok: false, status: 404, url };
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([i])); c.close(); } }) };
+    };
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/live.m3u8', out, { fetchImpl, pollMs: 5 });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([0, 1, 2, 3, 4, 5, 6]));
+    for (const u of all) expect(seen.filter((x) => x.endsWith(`/${u}`))).toHaveLength(1);
+    expect(reads).toBe(3);
+  });
+
+  it('follows a live playlist whose window slides, by its media sequence', async () => {
+    let reads = 0;
+    const fetchImpl = async (url) => {
+      const name = url.split('/').pop();
+      if (name === 'live.m3u8') {
+        const from = reads++;   // the window moves on one each read
+        const text = `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${from}\n`
+          + [0, 1, 2].map((k) => `#EXTINF:1,\ns${from + k}.ts\n`).join('') + (from === 4 ? '#EXT-X-ENDLIST\n' : '');
+        return { ok: true, status: 200, url, text: async () => text };
+      }
+      const k = Number(/^s(\d+)\.ts$/.exec(name)[1]);
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([k])); c.close(); } }) };
+    };
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/live.m3u8', out, { fetchImpl, pollMs: 5 });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([0, 1, 2, 3, 4, 5, 6]));
+  });
+
+  it('gives up on a live playlist that stops growing, and leaves no file', async () => {
+    const fetchImpl = fakeFetch({ 'http://h.example/live.m3u8': '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\na.ts\n', 'http://h.example/a.ts': Buffer.from([1]) });
+    const out = path.join(dir, 'o.ts');
+    await expect(hlsConcat('http://h.example/live.m3u8', out, { fetchImpl, pollMs: 5, stallMs: 60 })).rejects.toThrow(/stopped growing/);
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('gives up on a live playlist that never ends', async () => {
+    let reads = 0;
+    const fetchImpl = async (url) => {
+      if (url.endsWith('.m3u8')) {
+        const n = ++reads;
+        return { ok: true, status: 200, url, text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:1\n' + Array.from({ length: n }, (_, k) => `#EXTINF:1,\ns${k}.ts\n`).join('') };
+      }
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) };
+    };
+    await expect(hlsConcat('http://h.example/live.m3u8', path.join(dir, 'o.ts'), { fetchImpl, pollMs: 5, maxMs: 80 })).rejects.toThrow(/never ended/);
+  });
+
+  it('fetches #EXT-X-BYTERANGE pieces by their range', async () => {
+    const file = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const ranges = [];
+    const fetchImpl = async (url, { headers = {} } = {}) => {
+      if (url.endsWith('.m3u8')) {
+        return { ok: true, status: 200, url, text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:4\n'
+          + '#EXTINF:4,\n#EXT-X-BYTERANGE:3@2\nall.ts\n'     // bytes 2 to 4
+          + '#EXTINF:4,\n#EXT-X-BYTERANGE:4\nall.ts\n'       // on from there: 5 to 8
+          + '#EXTINF:4,\n#EXT-X-BYTERANGE:2@0\nall.ts\n'     // 0 and 1
+          + '#EXT-X-ENDLIST\n' };
+      }
+      const r = /^bytes=(\d+)-(\d+)$/.exec(headers.Range ?? '');
+      ranges.push(headers.Range);
+      const part = r ? file.subarray(Number(r[1]), Number(r[2]) + 1) : file;
+      return { ok: true, status: r ? 206 : 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(part)); c.close(); } }) };
+    };
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/v.m3u8', out, { fetchImpl });
+    expect(ranges).toEqual(['bytes=2-4', 'bytes=5-8', 'bytes=0-1']);
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([2, 3, 4, 5, 6, 7, 8, 0, 1]));
+  });
+
+  it('takes a byte range out of the whole file when the server ignores Range', async () => {
+    const file = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const fetchImpl = async (url) => {
+      if (url.endsWith('.m3u8')) return { ok: true, status: 200, url, text: async () => '#EXTM3U\n#EXTINF:4,\n#EXT-X-BYTERANGE:3@4\nall.ts\n#EXT-X-ENDLIST\n' };
+      return { ok: true, status: 200, url, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(file.subarray(0, 5))); c.enqueue(new Uint8Array(file.subarray(5))); c.close(); } }) };
+    };
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/v.m3u8', out, { fetchImpl });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([4, 5, 6]));
+  });
+
+  it('refuses a title whose sound is a separate track, rather than save it silent', async () => {
+    const seen = [];
+    const fetchImpl = fakeFetch({
+      'http://h.example/m.m3u8': '#EXTM3U\n'
+        + '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="audio/en.m3u8"\n'
+        + '#EXT-X-STREAM-INF:BANDWIDTH=9000,AUDIO="aud"\nvideo/hi.m3u8\n',
+      'http://h.example/video/hi.m3u8': media(['s.ts']), 'http://h.example/video/s.ts': Buffer.from([9]),
+    }, seen);
+    const out = path.join(dir, 'o.ts');
+    await expect(hlsConcat('http://h.example/m.m3u8', out, { fetchImpl })).rejects.toThrow(/sound is a separate track.*without FFmpeg/i);
+    expect(seen).not.toContain('http://h.example/video/s.ts');
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('saves a title whose audio group is in the video itself (no URI)', async () => {
+    const fetchImpl = fakeFetch({
+      'http://h.example/m.m3u8': '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Main",DEFAULT=YES\n'
+        + '#EXT-X-STREAM-INF:BANDWIDTH=9000,AUDIO="aud"\nhi.m3u8\n',
+      'http://h.example/hi.m3u8': media(['s.ts']), 'http://h.example/s.ts': Buffer.from([9]),
+    });
+    const out = path.join(dir, 'o.ts');
+    await hlsConcat('http://h.example/m.m3u8', out, { fetchImpl });
+    expect(fs.readFileSync(out)).toEqual(Buffer.from([9]));
+  });
 });
