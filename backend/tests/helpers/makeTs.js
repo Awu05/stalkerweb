@@ -115,19 +115,30 @@ function frame(video, key, sps, filler) {
  * @param {'nal'|'rai'} [o.mark]    how keyframes are marked: a keyframe NAL, or the random-access flag
  * @param {boolean} [o.spsEvery]    parameter sets before every frame, keyframe or not
  * @param {number} [o.frameBytes]   filler per video frame (a bigger frame, a higher bitrate)
+ * @param {number} [o.firstKeyAt]   seconds in to the first keyframe (a stream joined mid-GOP)
+ * @param {boolean} [o.bFrames]     frames in decode order with B-frames: each pair after a
+ *                                  keyframe swapped, so the PTS steps back a frame now and then
  */
-export function makeTs({ seconds, fps = 25, keyEvery = 2, pcrPid = VIDEO_PID, video = 0x1b, audio = 0x0f, startPts = 0, mark = 'nal', spsEvery = false, frameBytes = 400 }) {
+export function makeTs({ seconds, fps = 25, keyEvery = 2, pcrPid = VIDEO_PID, video = 0x1b, audio = 0x0f, startPts = 0, mark = 'nal', spsEvery = false, frameBytes = 400, firstKeyAt = 0, bFrames = false }) {
   const counters = {}
   const filler = new Array(frameBytes).fill(0x55)
   const out = []
   const step = PTS_HZ / fps
+  const gop = keyEvery * fps
+  const shown = (i) => {
+    if (!bFrames || !gop) return i
+    const j = (i - firstKeyAt * fps) % gop
+    if (j <= 0) return i
+    if (j % 2 === 1) return j + 1 < gop ? i + 1 : i
+    return i - 1
+  }
   for (let i = 0; i < seconds * fps; i++) {
-    const pts = startPts + i * step
+    const pts = startPts + shown(i) * step
     if (i % fps === 0) {
       out.push(...packetize(PAT_PID, pat(), [], counters))
       out.push(...packetize(PMT_PID, pmt({ pcrPid, video, audio }), [], counters))
     }
-    const key = keyEvery > 0 && i % (keyEvery * fps) === 0
+    const key = keyEvery > 0 && i >= firstKeyAt * fps && (i - firstKeyAt * fps) % gop === 0
     if (video != null) {
       const af = []
       if (pcrPid === VIDEO_PID) af.push(0x10, ...pcrBytes(pts))

@@ -12,7 +12,8 @@
 // copied through untouched.
 //
 // When a stream has no keyframe marks at all (no random-access flag, no
-// keyframe NAL we know), it is cut by the clock instead. A break — the caller
+// keyframe NAL we know), it is cut by the clock instead, and the playlist
+// stops calling its pieces independent. A break — the caller
 // says so with discontinuity(), or the PTS jumps ahead by more than 10 s or
 // back by more than 1 s (B-frames only step back a few frames) — closes the
 // open piece and marks the next one with #EXT-X-DISCONTINUITY.
@@ -127,9 +128,9 @@ class TsSegmenter {
     this.frameStep = null;         // the shortest step between frames seen, in seconds
     this.at = 0;                   // when the bytes being read arrived
     this.waitFrom = null;          // with no piece open: the PTS we began waiting for a keyframe at
-    this.open = null;              // { seq, buf, bytes, startPts, maxPts, startAt, lastAt, full, disc }
+    this.open = null;              // { seq, buf, bytes, startPts, maxPts, startAt, lastAt, full, disc, key }
     this.lastBytes = 0;            // the last piece's size: where the next one's buffer starts
-    this.pieces = [];              // closed, oldest first: { seq, data, dur, disc }
+    this.pieces = [];              // closed, oldest first: { seq, data, dur, disc, key (starts on a keyframe) }
     this.seq = 0;
     this.pendingDisc = false;      // the next piece starts after a break
     this.discDropped = 0;          // discontinuities that went out of the kept pieces
@@ -169,8 +170,13 @@ class TsSegmenter {
     return i;
   }
 
-  /** The source broke off (a reconnect): what comes next is a new piece, after a discontinuity. */
+  /**
+   * The source broke off (a reconnect): what comes next is a new piece, after
+   * a discontinuity. A packet the old source left cut off goes: the new
+   * source's bytes would finish it with someone else's.
+   */
   discontinuity() {
+    this.rest = Buffer.alloc(0);
     this._break();
   }
 
@@ -188,7 +194,9 @@ class TsSegmenter {
       `#EXT-X-TARGETDURATION:${target}`,
       `#EXT-X-MEDIA-SEQUENCE:${shown[0].seq}`,
       ...(dseq ? [`#EXT-X-DISCONTINUITY-SEQUENCE:${dseq}`] : []),
-      '#EXT-X-INDEPENDENT-SEGMENTS',
+      // Only a promise we keep: a piece cut by the clock or at the size cap
+      // doesn't start on a keyframe.
+      ...(shown.every((p) => p.key) ? ['#EXT-X-INDEPENDENT-SEGMENTS'] : []),
     ];
     for (const p of shown) {
       if (p.disc) lines.push('#EXT-X-DISCONTINUITY');
@@ -296,16 +304,17 @@ class TsSegmenter {
       due = this.open.full
         || (ptsSeconds(pts, this.open.startPts) >= this.targetSeconds && (key || this._keyless(pts)));
     } else {
-      // Wait for a keyframe to start on, but not longer than a piece's length.
+      // Wait for a keyframe to start on — as long as it takes to call a
+      // stream keyless, so a long GOP (5–10 s) still starts on one.
       if (this.waitFrom === null) this.waitFrom = pts;
-      due = key || ptsSeconds(pts, this.waitFrom) >= this.targetSeconds;
+      due = key || ptsSeconds(pts, this.waitFrom) >= KEYLESS_TARGETS * this.targetSeconds;
     }
     if (!due) {
       if (this.open && ptsSeconds(pts, this.open.maxPts) > 0) this.open.maxPts = pts;
       return;
     }
     if (this.open) this._close(ptsSeconds(pts, this.open.startPts));
-    this._openPiece(pts);
+    this._openPiece(pts, key);
   }
 
   // No keyframe seen yet, or none for a while: the stream has no marks we can read.
@@ -338,11 +347,11 @@ class TsSegmenter {
     this.waitFrom = null;
   }
 
-  _openPiece(pts) {
+  _openPiece(pts, key) {
     const head = [...(this.pat || []), ...(this.pmt || [])];
     this.open = {
       seq: this.seq++, buf: Buffer.allocUnsafe(Math.max(64 * 1024, this.lastBytes + (this.lastBytes >> 3))), bytes: 0,
-      startPts: pts, maxPts: pts, startAt: this.at, lastAt: this.at, full: false, disc: this.pendingDisc,
+      startPts: pts, maxPts: pts, startAt: this.at, lastAt: this.at, full: false, disc: this.pendingDisc, key,
     };
     for (const p of head) this._append(p);
     this.pendingDisc = false;
@@ -367,7 +376,7 @@ class TsSegmenter {
     // Cut to size — copied once more when much of the buffer would go unused.
     const data = o.buf.length - o.bytes > o.bytes >> 3 ? Buffer.from(o.buf.subarray(0, o.bytes)) : o.buf.subarray(0, o.bytes);
     this.lastBytes = o.bytes;
-    this.pieces.push({ seq: o.seq, data, dur, disc: o.disc });
+    this.pieces.push({ seq: o.seq, data, dur, disc: o.disc, key: o.key });
     // The target may only grow: a player may refuse a playlist whose target changed down.
     this.maxTarget = Math.max(this.maxTarget, Math.ceil(Number(dur.toFixed(3))));
     while (this.pieces.length > this.windowSize + KEEP_EXTRA) {

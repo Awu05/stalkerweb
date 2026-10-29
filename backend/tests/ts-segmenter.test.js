@@ -175,12 +175,115 @@ describe('TsSegmenter', () => {
 
   it('cuts by time when a stream has no keyframe marks at all', () => {
     const s = new TsSegmenter()
-    s.push(makeTs({ seconds: 17, keyEvery: 0 }))
+    s.push(makeTs({ seconds: 25, keyEvery: 0 }))
     const pl = s.playlist()
-    // It waits up to one piece's length for a keyframe, then cuts by the clock.
+    // It waits up to three pieces' length for a keyframe (as long as it takes
+    // to call a stream keyless), then cuts by the clock: 12–16, 16–20, 20–24 s.
     expect(listed(pl)).toEqual(['seg0.ts', 'seg1.ts', 'seg2.ts'])
     expect(durations(pl)).toEqual([4, 4, 4])
     expect(pl).toMatch(/^#EXT-X-TARGETDURATION:4$/m)
+    // Its pieces don't start on keyframes, so the playlist doesn't say they do.
+    expect(pl).not.toMatch(/#EXT-X-INDEPENDENT-SEGMENTS/)
+  })
+
+  it('waits for the first keyframe of a long GOP (8 s) rather than starting without one', () => {
+    for (const before of [false, true]) {
+      let t = 0
+      const s = new TsSegmenter({ now: () => t })
+      if (before) {   // and after a break, the same
+        s.push(makeTs({ seconds: 13, keyEvery: 2, startPts: 90000 * 100 }))
+        t = 1000
+        s.discontinuity()
+      }
+      s.push(makeTs({ seconds: 30, keyEvery: 8, firstKeyAt: 6 }))   // joined 6 s before a keyframe
+      const pl = s.playlist()
+      const after = listed(pl).slice(before ? 4 : 0)
+      expect(after.length).toBeGreaterThanOrEqual(2)
+      for (const n of after) expect(startsWithKeyframe(s.segment(n)), n).toBe(true)
+      expect(durations(pl).slice(before ? 4 : 0)).toEqual([8, 8])   // 6–14, 14–22 s
+      expect(pl).toMatch(/#EXT-X-INDEPENDENT-SEGMENTS/)
+    }
+  })
+
+  it('drops the cut-off packet of the old source at a break', () => {
+    const ts = makeTs({ seconds: 13, keyEvery: 2 })
+    const s = new TsSegmenter()
+    s.push(ts.subarray(0, ts.length - 88))   // the source broke off mid-packet
+    expect(s.rest.length).toBe(100)
+    s.discontinuity()
+    expect(s.rest.length).toBe(0)
+    // The new source's first 88 bytes would have finished the old packet.
+    const next = makeTs({ seconds: 9, keyEvery: 2 })
+    const fresh = new TsSegmenter()
+    fresh.push(next)
+    s.push(next.subarray(0, 88))
+    s.push(next.subarray(88))
+    const names = listed(s.playlist())
+    expect(s.segment(names[names.length - 1]).equals(fresh.segment('seg1.ts'))).toBe(true)
+  })
+
+  it('does not call pieces independent when the size cap cut them between keyframes', () => {
+    const s = new TsSegmenter({ maxPieceBytes: 400_000 })
+    s.push(makeTs({ seconds: 25, keyEvery: 10, frameBytes: 8000 }))
+    expect(s.playlist()).not.toMatch(/#EXT-X-INDEPENDENT-SEGMENTS/)
+    const ok = new TsSegmenter()
+    ok.push(makeTs({ seconds: 13, keyEvery: 2 }))
+    expect(ok.playlist()).toMatch(/#EXT-X-INDEPENDENT-SEGMENTS/)
+  })
+
+  it('counts a discontinuity that left the window in #EXT-X-DISCONTINUITY-SEQUENCE', () => {
+    let t = 0
+    const s = new TsSegmenter({ windowSize: 2, now: () => t })
+    s.push(makeTs({ seconds: 13, keyEvery: 2, startPts: 90000 * 100 }))
+    t = 1000
+    s.discontinuity()
+    s.push(makeTs({ seconds: 9, keyEvery: 2 }))   // seg4 starts after the break
+    let pl = s.playlist()
+    expect(listed(pl)).toEqual(['seg4.ts', 'seg5.ts'])
+    expect(pl).toMatch(/#EXT-X-DISCONTINUITY\n#EXTINF:4\.000,\nseg4\.ts/)
+    expect(pl).not.toMatch(/DISCONTINUITY-SEQUENCE/)
+    s.push(makeTs({ seconds: 10, keyEvery: 2, startPts: 90000 * 9 }))   // keyframes at 9, 11, … 17 s
+    pl = s.playlist()
+    expect(listed(pl)).toEqual(['seg6.ts', 'seg7.ts'])
+    expect(pl).toMatch(/^#EXT-X-DISCONTINUITY-SEQUENCE:1$/m)
+    expect(pl).not.toMatch(/^#EXT-X-DISCONTINUITY$/m)
+    s.push(makeTs({ seconds: 20, keyEvery: 2, startPts: 90000 * 19 }))   // and once it's out of the kept pieces too
+    expect(s.segment('seg4.ts')).toBeNull()
+    expect(s.playlist()).toMatch(/^#EXT-X-DISCONTINUITY-SEQUENCE:1$/m)
+  })
+
+  it('follows a PMT that changes mid-stream (H.264 to HEVC), without a break', () => {
+    const s = new TsSegmenter({ windowSize: 20 })
+    s.push(makeTs({ seconds: 13, keyEvery: 2 }))
+    expect(s.codecs.videoType).toBe(0x1b)
+    s.push(makeTs({ seconds: 13, keyEvery: 2, video: 0x24, startPts: 90000 * 13 }))
+    expect(s.codecs.videoType).toBe(0x24)
+    const pl = s.playlist()
+    expect(pl).not.toMatch(/DISCONTINUITY/)
+    const last = s.segment(listed(pl).at(-1))
+    // The piece starts with the new PMT, whose first stream is HEVC (0x24).
+    expect(pidOf(last, 188)).toBe(PMT_PID)
+    expect(last.subarray(188, 376).includes(Buffer.from([0x24, 0xe1, 0x00]))).toBe(true)
+    expect(startsWithKeyframe(last)).toBe(true)
+  })
+
+  it('takes B-frames (PTS a frame back now and then) as one stream', () => {
+    const s = new TsSegmenter()
+    s.push(makeTs({ seconds: 13, keyEvery: 2, bFrames: true }))
+    const pl = s.playlist()
+    expect(pl).not.toMatch(/DISCONTINUITY/)
+    expect(listed(pl)).toEqual(['seg0.ts', 'seg1.ts', 'seg2.ts'])
+    expect(durations(pl)).toEqual([4, 4, 4])
+    for (const n of listed(pl)) expect(startsWithKeyframe(s.segment(n))).toBe(true)
+  })
+
+  it('still serves the two pieces before the window, for a player a little behind', () => {
+    const s = new TsSegmenter()
+    s.push(makeTs({ seconds: 60, keyEvery: 2 }))
+    expect(listed(s.playlist())[0]).toBe('seg4.ts')
+    expect(s.segment('seg3.ts')).not.toBeNull()
+    expect(s.segment('seg2.ts')).not.toBeNull()
+    expect(s.segment('seg1.ts')).toBeNull()
   })
 
   it('takes a step back in time of more than a second as a break, a small one not', () => {
