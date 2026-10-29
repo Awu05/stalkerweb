@@ -64,7 +64,7 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-  # ── Build Android debug APKs (mobile + tv) ──────────────────────────────────
+  # ── Build Android debug APKs (mobile + tv, remote + Solo) ───────────────────
   build-apk:
     runs-on: ubuntu-latest
     steps:
@@ -77,18 +77,57 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
       - name: Restore signing keystore
         run: |
           mkdir -p ~/.android
           echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
 
+      # Solo carries Node (nodejs-mobile, checked against a pinned SHA-256) and
+      # the server itself; both are build outputs, made here before Gradle.
+      - name: Fetch Node for Solo
+        run: android/scripts/fetch-libnode.sh
+
+      - name: Pack the server for Solo
+        run: android/scripts/pack-solo-server.sh
+
       - name: Unit tests
         working-directory: android
         run: gradle :app:testMobileRemoteDebugUnitTest :app:testMobileSoloDebugUnitTest
 
-      - name: Build debug APKs (mobile + tv)
+      - name: Build debug APKs (mobile + tv, remote + Solo)
         working-directory: android
-        run: gradle :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug
+        run: gradle :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug :app:assembleMobileSoloDebug :app:assembleTvSoloDebug
+
+      # The remote apps talk to a server elsewhere: no Node, no server inside.
+      - name: Check the remote APKs carry no Node or server
+        working-directory: android/app/build/outputs/apk
+        run: |
+          for apk in mobileRemote/debug/app-mobile-remote-debug.apk tvRemote/debug/app-tv-remote-debug.apk; do
+            n=$(unzip -l "$apk" | grep -c -E 'libnode|server\.zip' || true)
+            echo "$apk: $n libnode/server.zip entries"
+            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|server\.zip'; exit 1; }
+          done
+
+      - name: Check the Solo APKs carry Node and the server, under their own app IDs
+        working-directory: android/app/build/outputs/apk
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
+          check() {
+            apk="$1"; id="$2"
+            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so assets/server.zip; do
+              unzip -l "$apk" | grep -q " $entry\$" || { echo "$apk: no $entry"; exit 1; }
+              echo "$apk: $entry"
+            done
+            got=$("$aapt2" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+            echo "$apk: application id $got"
+            [ "$got" = "$id" ] || { echo "expected $id"; exit 1; }
+          }
+          check mobileSolo/debug/app-mobile-solo-debug.apk com.stalkerweb.android.solo
+          check tvSolo/debug/app-tv-solo-debug.apk com.stalkerweb.android.tv.solo
 
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
@@ -102,6 +141,20 @@ jobs:
         with:
           name: stalkerweb-tv-debug
           path: android/app/build/outputs/apk/tvRemote/debug/app-tv-remote-debug.apk
+          retention-days: 7
+
+      - name: Upload Solo mobile APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-mobile-debug
+          path: android/app/build/outputs/apk/mobileSolo/debug/app-mobile-solo-debug.apk
+          retention-days: 7
+
+      - name: Upload Solo tv APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-tv-debug
+          path: android/app/build/outputs/apk/tvSolo/debug/app-tv-solo-debug.apk
           retention-days: 7
 
   # ── Docker build check (not published) ────────────────────────────────────

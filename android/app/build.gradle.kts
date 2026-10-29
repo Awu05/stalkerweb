@@ -47,7 +47,28 @@ android {
             applicationIdSuffix = ".solo"
             resValue("string", "app_name", "StalkerWeb Solo")
             buildConfigField("Boolean", "IS_SOLO", "true")
+            // Node runs inside Solo (nodejs-mobile): the native bridge is built
+            // for it alone, for the two ABIs Solo ships.
+            externalNativeBuild {
+                cmake { arguments += listOf("-DSTALKERWEB_SOLO=ON", "-DANDROID_STL=c++_shared") }
+            }
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
+    }
+
+    // CMake sees every variant, but builds nothing unless Solo's flag is set
+    // (src/solo/cpp/CMakeLists.txt) — the remote apps carry no native code.
+    externalNativeBuild {
+        cmake { path = file("src/solo/cpp/CMakeLists.txt") }
+    }
+
+    // libnode.so (android/scripts/fetch-libnode.sh) ships in Solo only. The bridge
+    // links against it too, so Gradle may find it twice: one copy is enough.
+    sourceSets {
+        getByName("solo") { jniLibs.srcDir("libnode/jniLibs") }
+    }
+    packaging {
+        jniLibs { pickFirsts += "lib/*/libnode.so" }
     }
 
     signingConfigs {

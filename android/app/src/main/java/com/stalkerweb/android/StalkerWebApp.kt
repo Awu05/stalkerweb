@@ -1,10 +1,13 @@
 package com.stalkerweb.android
 
 import android.app.Application
+import android.os.Build
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.stalkerweb.android.crash.CrashReporter
 import com.stalkerweb.android.data.repo.AppContainer
+import com.stalkerweb.android.solo.SoloServer
+import java.io.File
 
 /**
  * Exists so the crash handler is installed before anything else runs — a crash
@@ -20,6 +23,15 @@ class StalkerWebApp : Application(), ImageLoaderFactory {
         super.onCreate()
         CrashReporter.install(this)
         container = AppContainer(this)
+        // Solo: start the server inside the app (a no-op in the remote apps). Not
+        // from the server's own process (":node"), which runs this too.
+        if (isMainProcess()) SoloServer.boot(this, container)
+    }
+
+    private fun isMainProcess(): Boolean {
+        val name = if (Build.VERSION.SDK_INT >= 28) getProcessName()
+            else runCatching { File("/proc/self/cmdline").readText().substringBefore(Char(0)).trim() }.getOrNull()
+        return name == null || name == packageName
     }
 
     // Images (logos, posters) load through the app's own HTTP client: it sends

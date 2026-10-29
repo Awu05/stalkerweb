@@ -89,14 +89,26 @@ jobs:
       # old '8.9' pin went stale when AGP moved to 9.x (needs Gradle ≥ 9.4.1).
       - uses: gradle/actions/setup-gradle@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
       - name: Restore signing keystore
         run: |
           echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/debug.keystore
 
+      # What a Solo build needs, made before Gradle (as in ci.yml): Node, checked
+      # against its pinned SHA-256, and the server.
+      - name: Fetch Node for Solo
+        run: android/scripts/fetch-libnode.sh
+
+      - name: Pack the server for Solo
+        run: android/scripts/pack-solo-server.sh
+
       # The app's unit tests first (ci.yml no longer runs on pull requests).
       - name: Android unit tests
         working-directory: android
-        run: gradle :app:testMobileRemoteDebugUnitTest
+        run: gradle :app:testMobileRemoteDebugUnitTest :app:testMobileSoloDebugUnitTest
 
       - name: Build APKs (mobile + tv)
         working-directory: android
