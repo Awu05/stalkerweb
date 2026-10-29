@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
@@ -59,6 +60,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.repo.Reminder
 import com.stalkerweb.android.ui.components.ViewerAvatar
 import com.stalkerweb.android.ui.components.tvFocus
@@ -157,7 +159,8 @@ fun AppShell(
                 }
                 Spacer(Modifier.weight(1f))
                 RemindersBell(reminders, onCancelReminder)
-                viewer?.let { v ->
+                // Solo has one person: no "Who's watching?" to go back to.
+                if (!BuildConfig.IS_SOLO) viewer?.let { v ->
                     Box(Modifier.tvFocus(RoundedCornerShape(50)).clickable(onClick = onSwitchViewer).padding(8.dp)) {
                         ViewerAvatar(v.name, v.color, 32.dp)
                     }
@@ -191,9 +194,14 @@ fun AppShell(
                 RemindersBell(reminders, onCancelReminder)
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    TipIconButton(label = "Switch viewer (${viewer?.name ?: "none"})", onClick = { menu = true }) { ViewerAvatar(viewer?.name ?: "?", viewer?.color, 28.dp) }
+                    // Solo has one person: the menu without "Switch viewer".
+                    if (BuildConfig.IS_SOLO) {
+                        TipIconButton(label = "Menu", onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
+                    } else {
+                        TipIconButton(label = "Switch viewer (${viewer?.name ?: "none"})", onClick = { menu = true }) { ViewerAvatar(viewer?.name ?: "?", viewer?.color, 28.dp) }
+                    }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Switch viewer") }, onClick = { menu = false; onSwitchViewer() })
+                        if (!BuildConfig.IS_SOLO) DropdownMenuItem(text = { Text("Switch viewer") }, onClick = { menu = false; onSwitchViewer() })
                         DropdownMenuItem(
                             text = { Text(state.connection?.let { "Connection: ${it.name}" } ?: "IPTV connection") },
                             onClick = { menu = false; onOpenConnection() },

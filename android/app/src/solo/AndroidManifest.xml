@@ -3,15 +3,20 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- To follow the Wi-Fi, whose address goes into cast links (CastNetwork). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
         <!-- The StalkerWeb server (Node), in a process of its own: Node starts
-             only once per process, so a stopped server means a new process. -->
+             only once per process, so a stopped server means a new process.
+             In the foreground while the app needs it: as media while playing
+             or casting, as a data sync while downloading (SoloServerService). -->
         <service
             android:name=".solo.SoloServerService"
             android:process=":node"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="mediaPlayback|dataSync"
             android:exported="false" />
     </application>
 

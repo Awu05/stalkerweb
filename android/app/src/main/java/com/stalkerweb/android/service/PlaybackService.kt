@@ -10,7 +10,10 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.common.Player
 import com.stalkerweb.android.data.api.APP_USER_AGENT
+import com.stalkerweb.android.data.repo.SoloHold
+import com.stalkerweb.android.solo.SoloServer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -38,6 +41,15 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    // Solo: the server the streams come from is kept up while something plays
+    // or is about to (a no-op in the remote apps).
+    private val soloHold = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            val playing = player.playWhenReady && player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
+            if (playing) SoloServer.hold(SoloHold.PLAYING) else SoloServer.release(SoloHold.PLAYING)
+        }
+    }
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +60,7 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(SubtitleSafeDataSource.Factory(DefaultDataSource.Factory(this, http))))
             .build()
         PlaybackStats.attach(player)
+        player.addListener(soloHold)
         mediaSession = MediaSession.Builder(this, player).build()
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
     }
@@ -66,6 +79,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(appLifecycleObserver)
+        SoloServer.release(SoloHold.PLAYING)
         mediaSession?.run {
             (player as? ExoPlayer)?.let(PlaybackStats::detach)
             player.release()

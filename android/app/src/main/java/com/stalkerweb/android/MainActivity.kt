@@ -56,6 +56,8 @@ import com.stalkerweb.android.ui.channels.ChannelViewModel
 import com.stalkerweb.android.ui.crash.CrashReportDialog
 import com.stalkerweb.android.ui.player.PlayerViewModel
 import com.stalkerweb.android.ui.setup.SetupScreen
+import com.stalkerweb.android.ui.setup.StartingScreen
+import com.stalkerweb.android.solo.SoloServer
 import com.stalkerweb.android.ui.channels.ChannelScreen
 import com.stalkerweb.android.ui.player.PlayerScreen
 import com.stalkerweb.android.ui.theme.StalkerTheme
@@ -69,6 +71,9 @@ import com.stalkerweb.android.ui.vod.VodPlayerViewModel
 import com.stalkerweb.android.ui.vod.VodScreen
 import com.stalkerweb.android.ui.vod.VodViewModel
 import java.io.File
+
+/** Solo's server inside the app, as the app waits for it. Always Ready in the remote apps. */
+private enum class SoloStart { Starting, Ready, Failed }
 
 class MainActivity : ComponentActivity() {
 
@@ -158,7 +163,14 @@ class MainActivity : ComponentActivity() {
                 val overscanPadding = if (isTV && currentRoute != Screen.Player.route && currentRoute != Screen.VodPlayer.route) 24.dp else 0.dp
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(overscanPadding)) {
                 // Worked out once: recomputed, it flips to Shell after Setup and the rebuilt graph drops "Who's watching?".
-                val startDest     = remember { if (container.server.getServerUrl() != null && !container.guard.blocked) Screen.Shell.route else Screen.Setup.route }
+                // Solo has its own server, with its own key: never Setup.
+                val startDest     = remember { if (BuildConfig.IS_SOLO || (container.server.getServerUrl() != null && !container.guard.blocked)) Screen.Shell.route else Screen.Setup.route }
+
+                // Solo: nothing asks the server inside the app anything until it
+                // answers — "Starting…" until then. The screens come once it first
+                // has; after a restart (an access problem) "Starting…" covers them.
+                var solo by remember { mutableStateOf(if (BuildConfig.IS_SOLO) SoloStart.Starting else SoloStart.Ready) }
+                var soloUp by remember { mutableStateOf(!BuildConfig.IS_SOLO) }
 
                 val channelVmFactory = remember {
                     object : ViewModelProvider.Factory {
@@ -239,14 +251,32 @@ class MainActivity : ComponentActivity() {
 
                 val setupScope = rememberCoroutineScope()
                 fun toShell() = navController.navigate(Screen.Shell.route) { popUpTo(0) { inclusive = true } }
-                fun toPicker(required: Boolean) = navController.navigate(Screen.Viewers.go(required)) {
-                    if (required) popUpTo(0) { inclusive = true }
+                // Solo has one person: never "Who's watching?".
+                fun toPicker(required: Boolean) {
+                    if (BuildConfig.IS_SOLO) return
+                    navController.navigate(Screen.Viewers.go(required)) {
+                        if (required) popUpTo(0) { inclusive = true }
+                    }
+                }
+
+                LaunchedEffect(solo) {
+                    if (solo != SoloStart.Starting) return@LaunchedEffect
+                    // The key is the app's own: one refused before (a fault) isn't kept back.
+                    container.guard.reset()
+                    solo = if (SoloServer.awaitReady(container.httpClient)) SoloStart.Ready else SoloStart.Failed
+                    if (solo == SoloStart.Ready && soloUp) {
+                        // Back after a restart: what the screens hold came from before it.
+                        channelViewModel.load(reset = true)
+                        container.viewers.sectionsChanged()
+                    }
+                    if (solo == SoloStart.Ready) soloUp = true
                 }
 
                 // Startup: who's watching first (as on the web), then whether a portal is connected.
-                LaunchedEffect(Unit) {
+                LaunchedEffect(soloUp) {
+                    if (!soloUp) return@LaunchedEffect
                     if (container.server.getServerUrl() == null || container.guard.blocked) return@LaunchedEffect
-                    if (container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
+                    if (!BuildConfig.IS_SOLO && container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
                     val status = runCatching { container.server.testConnection() }.getOrNull()
                     if (status?.connected == false) navController.navigate(Screen.Portal.route)
                 }
@@ -280,9 +310,16 @@ class MainActivity : ComponentActivity() {
                         when (event) {
                             is AppEvent.ViewerGone -> if (route != Screen.Viewers.route) {
                                 container.viewers.forget()
-                                toPicker(required = true)
+                                toPicker(required = true)   // not in Solo: it goes on as the server's own viewer
                             }
-                            is AppEvent.AccessProblem -> if (route != Screen.Setup.route) {
+                            // Solo: the key is the app's own, so it's the server that's wrong —
+                            // started again, with "Starting…" until it answers; never Setup.
+                            is AppEvent.AccessProblem -> if (BuildConfig.IS_SOLO) {
+                                if (solo == SoloStart.Ready) {
+                                    SoloServer.restart()
+                                    solo = SoloStart.Starting
+                                }
+                            } else if (route != Screen.Setup.route) {
                                 // Leave the shell at once: every request carries the key, and each
                                 // wrong one counts toward the server's lockout.
                                 navController.navigate(Screen.Setup.go(event.message)) { popUpTo(0) { inclusive = true } }
@@ -315,7 +352,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                NavHost(navController = navController, startDestination = startDest) {
+                if (soloUp) NavHost(navController = navController, startDestination = startDest) {
 
                     composable(
                         Screen.Setup.route,
@@ -443,6 +480,10 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+                if (solo != SoloStart.Ready) StartingScreen(
+                    failed  = solo == SoloStart.Failed,
+                    onRetry = { SoloServer.restart(); solo = SoloStart.Starting },
+                )
                 } // end overscan Box
             }
         }

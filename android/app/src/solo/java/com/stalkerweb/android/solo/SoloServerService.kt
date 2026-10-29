@@ -1,11 +1,22 @@
 package com.stalkerweb.android.solo
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.Process
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.stalkerweb.android.BuildConfig
+import com.stalkerweb.android.data.repo.SoloForeground
+import com.stalkerweb.android.data.repo.soloForeground
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -16,16 +27,92 @@ import kotlin.concurrent.thread
  * starts the service again (START_STICKY). The ports and access key are read
  * from SoloConfig, not the Intent, so a restart without one works the same.
  * Node's own output goes to logcat, tag "stalkerweb".
+ *
+ * While the app holds it (SoloServer.hold: playing, casting, downloading) it
+ * runs in the foreground, with a quiet "StalkerWeb Solo is running"
+ * notification — shown only if notifications are allowed, it works the same
+ * without. Media playback while playing or casting, which Android doesn't
+ * time-limit; a data sync while only downloading.
  */
 class SoloServerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private val main = Handler(Looper.getMainLooper())
+    // What the app holds the server for, as it last said (SoloServer sends them whole).
+    private var holds: Set<String> = emptySet()
+    private var foreground: SoloForeground? = null
+    private var life: IBinder? = null
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Started again (the app came back to the foreground) while it runs: nothing to do.
+        if (intent?.action == ACTION_RESTART && started.get()) {
+            // A new Node, with the key and ports read afresh: this process ends, and Android starts it again.
+            Log.w(TAG, "restarting the server, as the app asked")
+            Process.killProcess(Process.myPid())
+            return START_STICKY
+        }
+        // Started again (the app came back to the foreground) while it runs: just the holds.
         if (started.compareAndSet(false, true)) {
             thread(name = "node") { runServer() }
         }
+        intent?.getStringArrayExtra(EXTRA_HOLDS)?.let { holds = it.toSet() }
+        intent?.extras?.getBinder(EXTRA_LIFE)?.let(::follow)
+        applyHolds()
         return START_STICKY
+    }
+
+    // The app's process ended (swiped away, or stopped by Android): nothing it held still needs the server.
+    private fun follow(app: IBinder) {
+        if (app == life) return
+        life = app
+        val ok = runCatching {
+            app.linkToDeath({ main.post { if (life == app) { holds = emptySet(); applyHolds() } } }, 0)
+        }.isSuccess
+        if (!ok) { holds = emptySet() }   // already gone
+    }
+
+    private fun applyHolds() {
+        val want = soloForeground(holds)
+        if (want == foreground) return
+        if (want == null) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            foreground = null
+            return
+        }
+        val type = when (want) {
+            SoloForeground.MediaPlayback -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            SoloForeground.DataSync -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        }
+        // Android may refuse (the app in the background, or the day's data-sync
+        // time used up): the server still runs, just without the foreground's protection.
+        runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), type) }
+            .onSuccess { foreground = want }
+            .onFailure { Log.w(TAG, "can't keep the server in the foreground (${it.javaClass.simpleName})") }
+    }
+
+    private fun notification(): android.app.Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "Solo server", NotificationManager.IMPORTANCE_LOW)
+                .apply { description = "Shown while the server inside the app is kept running" }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
+        val open = (packageManager.getLaunchIntentForPackage(packageName) ?: packageManager.getLeanbackLaunchIntentForPackage(packageName))
+            ?.let { PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE) }
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle("StalkerWeb Solo is running")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    // Android 15+: a data sync may run 6 hours a day. Then it's no longer in the
+    // foreground (or Android stops the app); playing or casting goes on as media.
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "the day's foreground time is used up")
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        foreground = null
     }
 
     private fun runServer() {
@@ -68,6 +155,15 @@ class SoloServerService : Service() {
     companion object {
         private const val TAG = "SoloServer"
         private const val VERSION_FILE = "server.version"
+        private const val CHANNEL_ID = "solo-server"
+        private const val NOTIFICATION_ID = 4071
+
+        /** Start Node again (SoloServer.restart). */
+        const val ACTION_RESTART = "com.stalkerweb.android.solo.RESTART"
+        /** What the app holds the server for, all of it (SoloHold). */
+        const val EXTRA_HOLDS = "holds"
+        /** A Binder of the app's main process, to see it end. */
+        const val EXTRA_LIFE = "life"
 
         // Once per process: Node can't run twice in one.
         private val started = AtomicBoolean(false)

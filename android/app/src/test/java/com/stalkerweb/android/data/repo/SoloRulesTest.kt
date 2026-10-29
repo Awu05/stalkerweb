@@ -29,6 +29,9 @@ class SoloRulesTest {
         assertEquals("Your channels", channelsTitle("Ann", isSolo = true))
         assertEquals("Ann's filters", filtersTitle("Ann", isSolo = false))
         assertEquals("Your channels", channelsTitle(null, isSolo = false))
+        assertEquals("Filters", settingsTabLabel("viewers", "Viewers", isSolo = true))
+        assertEquals("Viewers", settingsTabLabel("viewers", "Viewers", isSolo = false))
+        assertEquals("Logos", settingsTabLabel("logos", "Logos", isSolo = true))
     }
 
     @Test fun `the cast address is the Wi-Fi's private IPv4`() {

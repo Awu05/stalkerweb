@@ -85,6 +85,13 @@ import com.stalkerweb.android.data.repo.FiltersToSave
 import com.stalkerweb.android.data.repo.filtersToSave
 import com.stalkerweb.android.data.repo.shownWith
 import com.stalkerweb.android.data.repo.titleKey
+import com.stalkerweb.android.data.repo.SettingsCard
+import com.stalkerweb.android.data.repo.channelsTitle
+import com.stalkerweb.android.data.repo.filtersTitle
+import com.stalkerweb.android.data.repo.ownedTitle
+import com.stalkerweb.android.data.repo.settingsTabLabel
+import com.stalkerweb.android.data.repo.shownCards
+import com.stalkerweb.android.data.repo.shownSettingsTabs
 import com.stalkerweb.android.ui.channels.NameDialog
 import com.stalkerweb.android.ui.components.PasswordEye
 import com.stalkerweb.android.ui.components.Pill
@@ -103,6 +110,11 @@ import com.stalkerweb.android.ui.update.UpdateViewModel
 import com.stalkerweb.android.ui.utils.rememberIsTV
 
 
+// The cards and tabs this app shows: Solo leaves out viewers, activity and the server (SoloRules.kt).
+private val SHOWN_CARDS = shownCards(BuildConfig.IS_SOLO).toSet()
+private val SHOWN_TABS = shownSettingsTabs(BuildConfig.IS_SOLO).let { ids -> SETTINGS_TABS.filter { it.first in ids } }
+private fun shows(card: SettingsCard) = card in SHOWN_CARDS
+
 /** Settings, with the web's tabs: Viewers, Connection, Links, Playback, Logos — and App (version, updates). */
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, updates: UpdateViewModel, serverUrl: String?, onOpenServer: () -> Unit, onOwnViewerDeleted: () -> Unit) {
@@ -111,14 +123,17 @@ fun SettingsScreen(viewModel: SettingsViewModel, updates: UpdateViewModel, serve
     val context = LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
 
+    // A tab saved by a build that had it, and this one doesn't: the first one instead.
+    val tab = state.tab.takeIf { t -> SHOWN_TABS.any { it.first == t } } ?: SHOWN_TABS.first().first
+
     Column(Modifier.fillMaxSize()) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall, color = SwColors.Text, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(SETTINGS_TABS, key = { it.first }) { (id, label) -> Pill(label, state.tab == id, { viewModel.setTab(id) }) }
+            items(SHOWN_TABS, key = { it.first }) { (id, label) -> Pill(settingsTabLabel(id, label, BuildConfig.IS_SOLO), tab == id, { viewModel.setTab(id) }) }
         }
         HorizontalDivider(color = SwColors.Border)
         Box(Modifier.fillMaxSize().padding(16.dp)) {
-            when (state.tab) {
+            when (tab) {
                 "viewers" -> ViewersTab(viewModel, state, onOwnViewerDeleted)
                 "connection" -> ConnectionTab(viewModel, state, serverUrl, onOpenServer)
                 "links" -> LinksTab(state, serverUrl, viewModel.viewers.savedViewerId(), viewer?.name)
@@ -164,7 +179,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
+        if (shows(SettingsCard.Viewers)) item {
             Card("Viewers", "Everyone who watches here. Each viewer has their own favorites, history, My List and filters.") {
                 state.viewers.forEach { v ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -183,13 +198,13 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
             }
         }
         // Save first: the checklists below can run to hundreds of rows.
-        item {
-            Card("${me?.name ?: "Your"}'s filters", "What this viewer sees. Change the lists below, then save.") {
-                Button(onClick = save, enabled = !state.busy && me != null) { Text("Save ${me?.name ?: "viewer"}'s filters") }
+        if (shows(SettingsCard.Filters)) item {
+            Card(filtersTitle(me?.name, BuildConfig.IS_SOLO), "What this viewer sees. Change the lists below, then save.") {
+                Button(onClick = save, enabled = !state.busy && me != null) { Text(if (BuildConfig.IS_SOLO) "Save your filters" else "Save ${me?.name ?: "viewer"}'s filters") }
             }
         }
         // The older filter hid whole languages; each can be shown again here, as on the web.
-        if (oldLanguages.isNotEmpty()) item {
+        if (oldLanguages.isNotEmpty() && shows(SettingsCard.HiddenLanguages)) item {
             Card("Hidden languages", "An older filter hides everything in these languages, including categories the portal adds later.") {
                 oldLanguages.sorted().forEach { lang ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -202,15 +217,15 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                 }
             }
         }
-        item {
-            Card("${me?.name ?: "Your"}'s channels", if (state.genres.isEmpty()) "Connect to a portal to choose genres." else "Live TV genres shown to this viewer.") {
+        if (shows(SettingsCard.Channels)) item {
+            Card(channelsTitle(me?.name, BuildConfig.IS_SOLO), if (state.genres.isEmpty()) "Connect to a portal to choose genres." else "Live TV genres shown to this viewer.") {
                 Row { TextButton(onClick = { shownGenres = state.genres.toSet() }) { Text("All") }; TextButton(onClick = { shownGenres = emptySet() }) { Text("None") } }
             }
         }
         items(state.genres, key = { "g-$it" }) { g ->
             CheckRow(g, g in shownGenres) { on -> shownGenres = if (on) shownGenres + g else shownGenres - g }
         }
-        item {
+        if (shows(SettingsCard.MoviesSeries)) item {
             Card("Movies & Series", if (allCats.isEmpty()) "Connect to a portal to choose categories." else "Portal categories shown to this viewer.") {
                 Row { TextButton(onClick = { shownCats = allCats.toSet() }) { Text("All") }; TextButton(onClick = { shownCats = emptySet() }) { Text("None") } }
             }
@@ -218,8 +233,8 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
         items(allCats, key = { "c-$it" }) { c ->
             CheckRow(c, c in shownCats) { on -> shownCats = if (on) shownCats + c else shownCats - c }
         }
-        item {
-            Card(me?.name?.let { "$it's playback" } ?: "Your playback", "Skip intros and recaps without asking, where their times are known (from IntroDB, a community database). Otherwise a Skip button shows while they play; credits are never skipped by themselves.") {
+        if (shows(SettingsCard.ViewerPlayback)) item {
+            Card(ownedTitle("playback", me?.name, BuildConfig.IS_SOLO), "Skip intros and recaps without asking, where their times are known (from IntroDB, a community database). Otherwise a Skip button shows while they play; credits are never skipped by themselves.") {
                 Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable(enabled = me != null && !state.busy) { viewModel.setAutoSkip(me?.autoSkip != true) }.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Skip intros & recaps automatically", color = SwColors.Text, modifier = Modifier.weight(1f))
@@ -227,14 +242,14 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                 }
             }
         }
-        item {
+        if (shows(SettingsCard.AdultContent)) item {
             Card("Adult content") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Show adult channels and categories", color = SwColors.Text, modifier = Modifier.weight(1f))
                     Switch(checked = showAdult, onCheckedChange = { showAdult = it })
                 }
                 Button(onClick = save, enabled = !state.busy && me != null) {
-                    Text("Save ${me?.name ?: "viewer"}'s filters")
+                    Text(if (BuildConfig.IS_SOLO) "Save your filters" else "Save ${me?.name ?: "viewer"}'s filters")
                 }
             }
         }
@@ -284,7 +299,7 @@ private fun ActivityTab(viewModel: SettingsViewModel, state: SettingsState) {
     }
     val a = state.activity
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card("Activity", "Everything playing through this server right now — who's watching, what, and on which device: the website and the apps, TVs being cast to, and IPTV players using your Xtream, M3U or Stremio links.") {
+        if (shows(SettingsCard.Activity)) Card("Activity", "Everything playing through this server right now — who's watching, what, and on which device: the website and the apps, TVs being cast to, and IPTV players using your Xtream, M3U or Stremio links.") {
             state.activityError?.let { Text(it, color = SwColors.Live, style = MaterialTheme.typography.bodySmall) }
             if (a == null) {
                 if (state.activityError == null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -335,7 +350,7 @@ private fun AppTab(updates: UpdateViewModel) {
     val status by updates.checkStatus.collectAsStateWithLifecycle()
     val checking by updates.checking.collectAsStateWithLifecycle()
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card(
+        if (shows(SettingsCard.AppUpdates)) Card(
             "App updates",
             "StalkerWeb ${if (BuildConfig.IS_TV) "TV" else "mobile"} · version ${BuildConfig.VERSION_NAME}. New releases come from github.com/${BuildConfig.GITHUB_REPO}; the app also checks each time it starts.",
         ) {
@@ -350,10 +365,10 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
     var editing by remember { mutableStateOf<Profile?>(null) }
     var deleting by remember { mutableStateOf<Profile?>(null) }
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card("StalkerWeb server", serverUrl ?: "Not set up") {
+        if (shows(SettingsCard.Server)) Card("StalkerWeb server", serverUrl ?: "Not set up") {
             OutlinedButton(onClick = onOpenServer) { Icon(Icons.Default.Dns, null); Text(" Change server or access key") }
         }
-        Card("IPTV connections", if (state.status?.connected == true) "Connected to ${state.status.portal}" else "Not connected") {
+        if (shows(SettingsCard.IptvConnections)) Card("IPTV connections", if (state.status?.connected == true) "Connected to ${state.status.portal}" else "Not connected") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = viewModel::reconnect, enabled = !state.busy) { Text("Reconnect") }
                 OutlinedButton(onClick = viewModel::disconnect, enabled = !state.busy && state.status?.connected == true) { Text("Disconnect") }
@@ -372,7 +387,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
                 }
             }
         }
-        Card("Device profile", "The STB identity sent to the portal — change it on the web.") {
+        if (shows(SettingsCard.DeviceProfile)) Card("Device profile", "The STB identity sent to the portal — change it on the web.") {
             Text("Model: ${state.settings?.stbModel.orEmpty().ifBlank { "MAG250" }}", color = SwColors.Text)
             Text("Firmware: ${state.settings?.firmware.orEmpty().ifBlank { "default" }}", color = SwColors.Text)
         }
@@ -475,7 +490,7 @@ private fun LinksTab(state: SettingsState, serverUrl: String?, viewerId: String?
     val links = linksFor(serverUrl, s?.accessShareToken?.takeIf { s.accessEnabled }, viewerId, s?.httpsPort, viewerName)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Add StalkerWeb to Jellyfin, Plex, Emby, Stremio or any IPTV app with these links. They're this viewer's.", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }
-        items(links, key = { it.label }) { link ->
+        if (shows(SettingsCard.Links)) items(links, key = { it.label }) { link ->
             Card(link.label, link.hint.ifBlank { null }) {
                 Text(link.url, color = SwColors.Text, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -505,7 +520,7 @@ private fun PlaybackTab(viewModel: SettingsViewModel, state: SettingsState) {
     var idle by remember(s) { mutableStateOf(s.idleTimeoutMinutes ?: 0) }
     var dir by remember(s) { mutableStateOf(s.downloadDir) }
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card("Playback & Guide", "Shared by every viewer.") {
+        if (shows(SettingsCard.PlaybackGuide)) Card("Playback & Guide", "Shared by every viewer.") {
             SwitchRow("VOD (movies & series)", vod) { vod = it }
             SwitchRow("Programme guide", epg) { epg = it }
             Text("Live buffer", color = SwColors.Text)
@@ -544,7 +559,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
     var url by remember { mutableStateOf("") }
     var word by remember { mutableStateOf("") }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
+        if (shows(SettingsCard.ChannelLogos)) item {
             Card("Channel logos", "From your portal, filled in from the iptv-org database when it has none.") {
                 state.logos?.stats?.let { st ->
                     Text("${st.dbSize} logos in the database · ${st.matchedChannels} of ${st.totalChannels} channels matched · ${st.overridesCount} overrides", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
@@ -552,7 +567,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
                 OutlinedButton(onClick = viewModel::refreshLogos, enabled = !state.busy) { Text("Refresh logo database") }
             }
         }
-        item {
+        if (shows(SettingsCard.LogoOverrides)) item {
             Card("Logo overrides", "A logo for a channel name, used before anything else.") {
                 TvTextField(name, { name = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Channel name") }, modifier = Modifier.fillMaxWidth())
                 TvTextField(url, { url = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Logo URL") }, modifier = Modifier.fillMaxWidth())
@@ -568,7 +583,7 @@ private fun LogosTab(viewModel: SettingsViewModel, state: SettingsState) {
                 TipIconButton(label = "Remove override for $n", onClick = { viewModel.removeOverride(n) }) { Icon(Icons.Default.Close, "Remove override for $n") }
             }
         }
-        item {
+        if (shows(SettingsCard.LogoStripWords)) item {
             Card("Logo strip words", "Removed from channel names before logo matching (e.g. CANADA, so BBC CANADA matches BBC).") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TvTextField(word, { word = it }, singleLine = true, keyboardOptions = tvKeyboardOptions(), label = { Text("Word") }, modifier = Modifier.weight(1f))

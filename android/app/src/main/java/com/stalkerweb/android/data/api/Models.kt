@@ -205,7 +205,7 @@ data class VodStreamResponse(
     val isHls: Boolean = true,
 )
 
-/** A link a cast device opens itself (backend lib/castLink.js). reachable: false when the server was reached as localhost. */
+/** A link a cast device opens itself (backend lib/castLink.js). reachable: false when the server was reached as localhost (Solo: no Wi-Fi address, or no cast listener). */
 @JsonClass(generateAdapter = false)
 data class CastLink(
     val url: String,
