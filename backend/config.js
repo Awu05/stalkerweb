@@ -2,8 +2,32 @@
 
 const path = require('path');
 
+const solo = process.env.SOLO === '1';
+const SOLO_HOST = '127.0.0.1';
+if (solo && (process.env.HOST || '').trim() && process.env.HOST.trim() !== SOLO_HOST) {
+  require('./logger').warn('config', `HOST=${process.env.HOST.trim()} is ignored in Solo — listening on ${SOLO_HOST} only`);
+}
+
 const config = {
   port: parseInt(process.env.PORT || '8983', 10),
+  // The address to listen on: every address (IPv6 too, see server.js) — in
+  // Solo only 127.0.0.1, so only the app reaches it. HOST isn't read: cast
+  // and the server's own pulls go to 127.0.0.1, which another address breaks.
+  host: solo ? SOLO_HOST : '0.0.0.0',
+  // Solo: the server runs inside the StalkerWeb Solo Android app, and a second
+  // listener, on a free port it picks each time, gives a Chromecast the cast
+  // stream only (lib/soloCast.js). CAST_PORT, which set that port, is ignored.
+  solo,
+  // Cast channels in memory (stalker/CastHls.js): pieces in each playlist,
+  // channels at once, and a piece's size cap (past it a piece is cut by the
+  // clock — a 4K channel with a long GOP gets there). A phone has less to
+  // spare: 6, 1 and 12 MB there; 10, 3 and 32 MB elsewhere.
+  castWindow: solo ? 6 : 10,
+  castMaxSessions: solo ? 1 : 3,
+  castMaxPieceBytes: (solo ? 12 : 32) * 1024 * 1024,
+  // Solo's cast listener stops after this long with nothing asked of it
+  // (CAST_IDLE_MS, for tests; else 10 minutes).
+  castIdleMs: parseInt(process.env.CAST_IDLE_MS || '', 10) > 0 ? parseInt(process.env.CAST_IDLE_MS, 10) : 10 * 60 * 1000,
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   nodeEnv: process.env.NODE_ENV || 'development',
   // Optional HTTPS listener (see server.js): port plus PEM certificate and key.

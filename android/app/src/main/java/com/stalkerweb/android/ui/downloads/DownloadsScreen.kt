@@ -32,8 +32,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.DownloadJob
+import com.stalkerweb.android.data.repo.doneLabel
+import com.stalkerweb.android.data.repo.downloadsEmptyHint
 import com.stalkerweb.android.data.repo.formatBytes
+import com.stalkerweb.android.solo.DownloadPublisher
 import com.stalkerweb.android.ui.components.EmptyState
 import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
@@ -42,6 +46,7 @@ import com.stalkerweb.android.ui.theme.SwColors
 @Composable
 fun DownloadsScreen(viewModel: DownloadsViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val published by viewModel.published.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { viewModel.follow() } }
@@ -49,18 +54,22 @@ fun DownloadsScreen(viewModel: DownloadsViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         Text("Downloads", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.padding(16.dp))
+        // Solo on Android 8-9, storage refused: why nothing lands in Downloads.
+        val storageDenied by DownloadPublisher.storageDenied.collectAsStateWithLifecycle()
+        if (storageDenied) Text("Allow storage to save to Downloads", style = MaterialTheme.typography.labelMedium,
+            color = SwColors.Muted, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
         when {
             state.loading -> CircularProgressIndicator(Modifier.padding(32.dp))
-            state.jobs.isEmpty() -> EmptyState(Icons.Default.Download, "No downloads", state.error ?: "Download a movie or episode from VOD to save it on the server.")
+            state.jobs.isEmpty() -> EmptyState(Icons.Default.Download, "No downloads", state.error ?: downloadsEmptyHint(BuildConfig.IS_SOLO))
             else -> LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.jobs, key = { it.id }) { job -> JobRow(job) { viewModel.remove(job) } }
+                items(state.jobs, key = { it.id }) { job -> JobRow(job, published) { viewModel.remove(job) } }
             }
         }
     }
 }
 
 @Composable
-private fun JobRow(job: DownloadJob, onRemove: () -> Unit) {
+private fun JobRow(job: DownloadJob, published: Set<String>, onRemove: () -> Unit) {
     val active = job.status == "queued" || job.status == "downloading"
     Surface(color = SwColors.Surface, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -72,7 +81,7 @@ private fun JobRow(job: DownloadJob, onRemove: () -> Unit) {
                         when (job.status) {
                             "queued" -> "Queued"
                             "downloading" -> "Downloading · ${formatBytes(job.bytesDownloaded)}${if (job.totalBytes > 0) " of ${formatBytes(job.totalBytes)}" else ""}"
-                            "done" -> "Done · ${formatBytes(job.totalBytes.coerceAtLeast(job.bytesDownloaded))}"
+                            "done" -> doneLabel(job, BuildConfig.IS_SOLO, published, formatBytes(job.totalBytes.coerceAtLeast(job.bytesDownloaded)))
                             "canceled" -> "Canceled"
                             else -> "Failed${job.error?.let { " — $it" } ?: ""}"
                         },

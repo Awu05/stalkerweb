@@ -6,6 +6,7 @@ import com.stalkerweb.android.data.api.AccessStore
 import com.stalkerweb.android.data.api.ApiClient
 import com.stalkerweb.android.data.api.AppEvents
 import com.stalkerweb.android.data.prefs.AppPrefs
+import com.stalkerweb.android.solo.SoloServer
 import okhttp3.OkHttpClient
 
 /** Builds the app's data layer once (StalkerWebApp); screens take what they need from it. */
@@ -31,6 +32,10 @@ class AppContainer(context: Context) {
         viewerId = { prefs.viewerId },
         guard = guard,
         events = events,
+        // Solo: the server may have moved to other ports; a no-op in the remote apps.
+        onConnectFailed = SoloServer::onConnectionFailed,
+        // Solo: the key only to a server that proved it holds it; always, in the remote apps.
+        keyAllowed = SoloServer::keyAllowed,
     )
 
     val apis = ApiProvider(prefs, httpClient)

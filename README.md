@@ -95,6 +95,36 @@ side by side on the same device.
 **Phone and tablet only:** Google Cast and picture-in-picture.
 **TV only:** leanback launcher entry, D-pad focus handling and overscan-safe padding.
 
+## StalkerWeb Solo
+
+Solo is the all-in-one Android app, for phone and TV. It runs its own copy of
+the StalkerWeb server on the device, so there is no server to host: install it,
+add your portal, and watch.
+
+It is for one person. There are no viewers, nothing is synced between devices,
+and the data stays on the device; uninstalling the app erases it.
+
+- **Installation** — download `stalkerweb-solo_mobile-<version>.apk` (phone and
+  tablet) or `stalkerweb-solo_tv-<version>.apk` (TV) from the
+  [Releases](https://github.com/rangoDJ/stalkerweb/releases) page. It installs
+  next to the regular app (`com.stalkerweb.android.solo` and
+  `com.stalkerweb.android.tv.solo`) and keeps its own data.
+- **Setup** — add your portal in the app, the same details the web UI asks for.
+- **Subtitles** — Wyzie needs your own key, which the app shows masked.
+  OpenSubtitles needs your own login.
+- **Casting** — needs Wi-Fi. A channel a Chromecast can't decode, such as
+  MPEG-2, can't be cast.
+- **Downloads** — saved to `Downloads/StalkerWeb`. A title that comes as HLS is
+  saved as one `.ts` file.
+
+Known limits:
+
+- The server runs on Node 18, which no longer gets Node security fixes.
+- It listens only on the device itself; on Wi-Fi, only the cast stream is
+  reachable.
+- It may not run on devices with 16 KB memory pages.
+- The APK is about 38 MB larger than the regular app.
+
 ## Live buffer
 
 Some providers' live streams stall or restart every minute or so: the

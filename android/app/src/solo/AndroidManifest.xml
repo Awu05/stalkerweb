@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- To follow the Wi-Fi, whose address goes into cast links (CastNetwork). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 8-9 only: to save finished downloads into the Downloads folder (DownloadPublisher). -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+
+    <application>
+        <!-- The StalkerWeb server (Node), in a process of its own: Node starts
+             only once per process, so a stopped server means a new process.
+             In the foreground while the app needs it: as media while playing
+             or casting, as a data sync while downloading (SoloServerService). -->
+        <service
+            android:name=".solo.SoloServerService"
+            android:process=":node"
+            android:foregroundServiceType="mediaPlayback|dataSync"
+            android:exported="false" />
+    </application>
+
+</manifest>

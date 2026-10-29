@@ -89,8 +89,8 @@ class VodRepository(private val apis: ApiProvider, private val links: MediaLinks
     }
 
     /** The link a cast device opens for this movie or episode. */
-    suspend fun castLink(videoId: String, cmd: String = "", series: String = "", seasonId: String = "", episodeId: String = "") =
-        apis.get().getVodCastLink(videoId, cmd, series, seasonId, episodeId)
+    suspend fun castLink(videoId: String, cmd: String = "", series: String = "", seasonId: String = "", episodeId: String = "", image: String? = null) =
+        apis.get().getVodCastLink(videoId, cmd, series, seasonId, episodeId, image)
 }
 
 /**

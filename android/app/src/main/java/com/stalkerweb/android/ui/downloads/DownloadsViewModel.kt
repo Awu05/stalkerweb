@@ -2,9 +2,12 @@ package com.stalkerweb.android.ui.downloads
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.repo.DownloadsRepository
+import com.stalkerweb.android.data.repo.anyDownloadActive
+import com.stalkerweb.android.data.repo.followsDownloads
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +23,15 @@ data class DownloadsState(val jobs: List<DownloadJob> = emptyList(), val loading
 class DownloadsViewModel(private val downloads: DownloadsRepository) : ViewModel() {
     private val _state = MutableStateFlow(DownloadsState())
     val state: StateFlow<DownloadsState> = _state.asStateFlow()
+    val published: StateFlow<Set<String>> = downloads.published
+
+    init {
+        // Ones still going that the app didn't queue this run (from before a
+        // restart) are followed too, so Solo's server is kept up for them.
+        if (followsDownloads(BuildConfig.IS_SOLO)) viewModelScope.launch {
+            _state.collect { s -> if (anyDownloadActive(s.jobs)) downloads.watch() }
+        }
+    }
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 

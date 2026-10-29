@@ -8,8 +8,8 @@
 
 const axios = require('axios');
 const crypto = require('crypto');
-const { wrapper } = require('axios-cookiejar-support');
 const { CookieJar, Cookie } = require('tough-cookie');
+const { withCookieJar } = require('../lib/cookieJarAxios');
 const { STB_VERSION_STRING } = require('./identity');
 const log = require('../logger');
 const TAG = 'StalkerClient';
@@ -39,11 +39,10 @@ class StalkerClient {
     this.timeout  = 10000; // ms
     this._tokenChangedCb = null; // (newToken, prevToken) => void — fired on any rotation
     this.jar = new CookieJar();
-    this.http = wrapper(axios.create({
-      jar: this.jar,
+    this.http = withCookieJar(axios.create({
       withCredentials: true,
       maxRedirects: 10
-    }));
+    }), this.jar);
   }
 
   setIdentity(identity) {
@@ -88,7 +87,7 @@ class StalkerClient {
 
     // Fresh jar + client for each auth attempt (mirrors C# creating a new HttpClient)
     this.jar = new CookieJar();
-    this.http = wrapper(axios.create({ jar: this.jar, withCredentials: true, maxRedirects: 10 }));
+    this.http = withCookieJar(axios.create({ withCredentials: true, maxRedirects: 10 }), this.jar);
 
     // Seed the identity cookies into the jar. STBemu sends ONLY these four on
     // every portal call — mac, stb_lang, timezone, adid — with mac and timezone
@@ -297,7 +296,7 @@ class StalkerClient {
   // Reproduces the exact header set STBemu sends on every load.php call
   // (captured from a live session). Cookies are NOT set here — they live in the
   // cookie jar (seeded in initialize() with mac/stb_lang/timezone/adid, the only
-  // cookies STBemu sends) and are injected by axios-cookiejar-support. The token
+  // cookies STBemu sends) and are injected by lib/cookieJarAxios. The token
   // rides solely in the Authorization header, never in a cookie.
   //
   // Notable STBemu quirks reproduced: a misspelled `Referrer` header sent IN

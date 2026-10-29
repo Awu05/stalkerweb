@@ -73,7 +73,7 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-  # ── Build Android APKs (mobile + tv) ────────────────────────────────────────
+  # ── Build Android APKs (mobile + tv, remote + Solo) ───────────────────────
   build-apk:
     needs: [version, check]
     runs-on: ubuntu-latest
@@ -89,34 +89,70 @@ jobs:
       # old '8.9' pin went stale when AGP moved to 9.x (needs Gradle ≥ 9.4.1).
       - uses: gradle/actions/setup-gradle@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
       - name: Restore signing keystore
         run: |
           echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/debug.keystore
 
+      # What a Solo build needs, made before Gradle (as in ci.yml): Node, checked
+      # against its pinned SHA-256, and the server.
+      - name: Which nodejs-mobile Solo pins
+        id: libnode
+        run: echo "key=libnode-$(grep -E '^(VERSION|SHA256)=' android/scripts/fetch-libnode.sh | tr -d '"' | cut -d= -f2 | paste -sd- -)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the nodejs-mobile download
+        uses: actions/cache@v5
+        with:
+          path: android/app/libnode-cache
+          key: ${{ steps.libnode.outputs.key }}
+
+      - name: Fetch Node for Solo
+        run: android/scripts/fetch-libnode.sh
+
+      - name: Pack the server for Solo
+        run: android/scripts/pack-solo-server.sh
+
       # The app's unit tests first (ci.yml no longer runs on pull requests).
       - name: Android unit tests
         working-directory: android
-        run: gradle :app:testMobileDebugUnitTest
+        run: gradle :app:testMobileRemoteDebugUnitTest :app:testMobileSoloDebugUnitTest
 
-      - name: Build APKs (mobile + tv)
+      - name: Build APKs (mobile + tv, remote + Solo)
         working-directory: android
         run: |
           VERSION="${{ needs.version.outputs.tag }}"
           VERSION_CLEAN="${VERSION#v}"
-          gradle :app:assembleMobileRelease :app:assembleTvRelease -PversionName="$VERSION_CLEAN"
+          gradle :app:assembleMobileRemoteRelease :app:assembleTvRemoteRelease :app:assembleMobileSoloRelease :app:assembleTvSoloRelease -PversionName="$VERSION_CLEAN"
 
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-mobile-apk
-          path: android/app/build/outputs/apk/mobile/release/app-mobile-release.apk
+          path: android/app/build/outputs/apk/mobileRemote/release/app-mobile-remote-release.apk
           retention-days: 30
 
       - name: Upload tv APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: stalkerweb-tv-apk
-          path: android/app/build/outputs/apk/tv/release/app-tv-release.apk
+          path: android/app/build/outputs/apk/tvRemote/release/app-tv-remote-release.apk
+          retention-days: 30
+
+      - name: Upload Solo mobile APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-mobile-apk
+          path: android/app/build/outputs/apk/mobileSolo/release/app-mobile-solo-release.apk
+          retention-days: 30
+
+      - name: Upload Solo tv APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-tv-apk
+          path: android/app/build/outputs/apk/tvSolo/release/app-tv-solo-release.apk
           retention-days: 30
 
   # ── Build & push Docker image ────────────────────────────────────────────
@@ -194,7 +230,9 @@ jobs:
 
   # The two platform images as one, under the release's tags.
   docker-manifest:
-    needs: [version, build-docker]
+    # build-apk too: a failed APK build stops the release before the
+    # multi-arch tag is pushed, so no image goes out without its release.
+    needs: [version, build-docker, build-apk]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -272,10 +310,22 @@ jobs:
         with:
           name: stalkerweb-tv-apk
 
+      - name: Download Solo mobile APK
+        uses: actions/download-artifact@v8
+        with:
+          name: stalkerweb-solo-mobile-apk
+
+      - name: Download Solo tv APK
+        uses: actions/download-artifact@v8
+        with:
+          name: stalkerweb-solo-tv-apk
+
       - name: Rename artifacts to include version
         run: |
-          mv app-mobile-release.apk stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
-          mv app-tv-release.apk     stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+          mv app-mobile-remote-release.apk stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
+          mv app-tv-remote-release.apk stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+          mv app-mobile-solo-release.apk stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk
+          mv app-tv-solo-release.apk stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -287,6 +337,8 @@ jobs:
           files: |
             stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
             stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+            stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk
+            stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk
           body: |
             ## Docker image
 
@@ -300,5 +352,7 @@ jobs:
             |-----|--------|
             | `stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk` | Phone / tablet (Android 8.0+) |
             | `stalkerweb-tv-${{ needs.version.outputs.tag }}.apk` | FireTV / Android TV / Google TV |
+            | `stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk` | Phone / tablet, all-in-one (no server) |
+            | `stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk` | TV, all-in-one (no server) |
 
             Enable **Install from unknown sources** before sideloading.

@@ -24,7 +24,7 @@ android {
         buildConfigField("String", "GITHUB_REPO", "\"Awu05/stalkerweb\"")
     }
 
-    flavorDimensions += "form"
+    flavorDimensions += listOf("form", "backend")
 
     productFlavors {
         create("mobile") {
@@ -35,6 +35,36 @@ android {
             dimension = "form"
             applicationIdSuffix = ".tv"
             buildConfigField("Boolean", "IS_TV", "true")
+        }
+        // Remote talks to a StalkerWeb server; Solo carries its own (the app's name and id differ so both can be installed).
+        create("remote") {
+            dimension = "backend"
+            resValue("string", "app_name", "stalkerweb")
+            buildConfigField("Boolean", "IS_SOLO", "false")
+        }
+        create("solo") {
+            dimension = "backend"
+            applicationIdSuffix = ".solo"
+            resValue("string", "app_name", "StalkerWeb Solo")
+            buildConfigField("Boolean", "IS_SOLO", "true")
+            // Node runs inside Solo (nodejs-mobile), for the two ABIs Solo ships;
+            // its native bridge is the :solonative module, a Solo dependency only.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        }
+    }
+
+    // libnode.so (android/scripts/fetch-libnode.sh) ships in Solo only. The bridge
+    // links against it too, so Gradle may find it twice: one copy is enough.
+    sourceSets {
+        getByName("solo") { jniLibs.srcDir("libnode/jniLibs") }
+    }
+    // Native libs compressed in the APK (and unpacked at install): libnode.so is
+    // ~50 MB per ABI. Only Solo has any of its own; for the remote apps this
+    // changes next to nothing.
+    packaging {
+        jniLibs {
+            pickFirsts += "lib/*/libnode.so"
+            useLegacyPackaging = true
         }
     }
 
@@ -72,6 +102,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        resValues = true
     }
 
     lint {
@@ -111,6 +142,9 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+
+    // Solo's native bridge (CMake, the NDK): the remote apps don't build it at all.
+    add("soloImplementation", project(":solonative"))
 }
 
 // Name every unit test in the build output, so CI logs show what ran.

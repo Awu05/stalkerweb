@@ -4,8 +4,12 @@
 // itself, without the browser's sign-in, so a link carries the playback-only
 // share token (/k/<token>, lib/access.js) — never the access key — and the
 // address the app was opened on, which the device must be able to reach too.
+// In Solo the app is on 127.0.0.1, so links go to the cast listener on the
+// device's Wi-Fi address instead, each under a cast token of its own that
+// opens only that stream (lib/soloCast.js) — asking for one starts it.
 
 const { origin } = require('./publicUrl');
+const soloCast = require('./soloCast');
 
 /** Scheme, host and (with an access key) the share-token prefix. */
 function castBase(req, shareToken) {
@@ -25,14 +29,23 @@ function vodContentType(ext) {
   return VOD_TYPES[String(ext || '').replace(/^\./, '').toLowerCase()] || 'video/mp4';
 }
 
-/** What a cast-link request answers: the URL, its type, and whether a device can reach it. */
-function castLink(req, shareToken, pathAndQuery, contentType, live) {
-  return {
-    url: `${castBase(req, shareToken)}${pathAndQuery}`,
-    contentType,
-    live,
-    reachable: !isLocalHost(req.get('host')),
-  };
+/**
+ * What a cast-link request answers: the URL, its type, and whether a device
+ * can reach it — and `imageUrl`, the poster the TV shows, when `image` is one
+ * this server renders (/api/logos/render?…): under the same token, so the TV
+ * can load it (in Solo, on the cast listener, opened for that token only).
+ */
+async function castLink(req, shareToken, pathAndQuery, contentType, live, image = null) {
+  const poster = soloCast.isCastImage(image) ? image : null;
+  if (soloCast.active()) {
+    // Reachable once the cast listener is up on the Wi-Fi address; without
+    // one the link stays on 127.0.0.1 and the app says casting needs Wi-Fi.
+    const lan = await soloCast.ensureListener(pathAndQuery, { image: poster });
+    const at = lan || castBase(req, shareToken);
+    return { url: `${at}${pathAndQuery}`, contentType, live, reachable: !!lan, ...(poster ? { imageUrl: `${at}${poster}` } : {}) };
+  }
+  const at = castBase(req, shareToken);
+  return { url: `${at}${pathAndQuery}`, contentType, live, reachable: !isLocalHost(req.get('host')), ...(poster ? { imageUrl: `${at}${poster}` } : {}) };
 }
 
 module.exports = { castBase, isLocalHost, vodContentType, castLink };

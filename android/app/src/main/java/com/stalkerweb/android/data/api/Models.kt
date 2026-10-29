@@ -205,13 +205,15 @@ data class VodStreamResponse(
     val isHls: Boolean = true,
 )
 
-/** A link a cast device opens itself (backend lib/castLink.js). reachable: false when the server was reached as localhost. */
+/** A link a cast device opens itself (backend lib/castLink.js). reachable: false when the server was reached as localhost (Solo: no Wi-Fi address, or no cast listener). */
 @JsonClass(generateAdapter = false)
 data class CastLink(
     val url: String,
     val contentType: String,
     val live: Boolean = false,
     val reachable: Boolean = true,
+    // The poster, as the TV can load it (asked for with ?image=); null from an older server.
+    val imageUrl: String? = null,
 )
 
 // Live-channel stream resolution. `streamType` is the backend's engine hint

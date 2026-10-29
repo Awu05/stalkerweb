@@ -317,11 +317,13 @@ module.exports = function vodRoutes(appState, config, { watchStore = null, skipS
 
   // GET /api/vod/cast?videoId=… (as /stream): the link a cast device opens —
   // the same stream, under the playback-only share token (lib/castLink.js).
+  // &image=/api/logos/render?… adds the poster as imageUrl, a link the TV can load.
   router.get('/cast', guard, async (req, res) => {
     try {
       const link = await vodStreamLink(req.query);
       claimVod(req, { cast: true });
-      res.json(castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
+      res.json(await castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false,
+        typeof req.query.image === 'string' ? req.query.image : null));
     } catch (e) {
       res.status(e.status || 502).json({ error: e.message });
     }

@@ -2,12 +2,14 @@ package com.stalkerweb.android.data.api
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import java.net.ConnectException
 import java.util.concurrent.TimeUnit
 
 /** The headers every request carries: the access key and the chosen viewer, when set. */
@@ -25,7 +27,12 @@ object ApiClient {
      * read on every request, so a viewer switch applies to the next one — and
      * passes answers through [guard], which reports access and deleted-viewer
      * problems on [events]. Other hosts (channel logos on the internet) get
-     * none of that.
+     * none of that. [onConnectFailed] hears of each request the server itself
+     * refused to connect (nothing listening on its port): Solo's server may
+     * have moved to another one (SoloServer.onConnectionFailed). [keyAllowed]
+     * says whether the server at a URL may be sent the key (Solo: only one
+     * that proved it holds it); one that may not is taken for nothing being
+     * there — the request isn't sent at all.
      */
     fun httpClient(
         serverUrl: () -> String?,
@@ -33,16 +40,27 @@ object ApiClient {
         viewerId: () -> String?,
         guard: AccessGuard?,
         events: AppEvents?,
+        onConnectFailed: (() -> Unit)? = null,
+        keyAllowed: (HttpUrl) -> Boolean = { true },
     ): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(Interceptor { chain ->
             val request = chain.request()
             if (!sameServer(request.url, serverUrl())) return@Interceptor chain.proceed(request)
             if (guard?.blocked == true) return@Interceptor refusedResponse(request, guard.message)
+            if (!keyAllowed(request.url)) {
+                onConnectFailed?.invoke()
+                throw ConnectException("the server at ${request.url.host}:${request.url.port} isn't known to be this app's")
+            }
             val builder = request.newBuilder()
             requestHeaders(accessKey(), viewerId()).forEach { (k, v) -> builder.header(k, v) }
             builder.header("User-Agent", APP_USER_AGENT)   // as the player's streams (Settings → Activity)
             val send = {
-                val response: Response = chain.proceed(builder.build())
+                val response: Response = try {
+                    chain.proceed(builder.build())
+                } catch (e: ConnectException) {
+                    onConnectFailed?.invoke()
+                    throw e
+                }
                 if (guard != null) {
                     val body = if (response.code in CHECKED_CODES) response.peekBody(64 * 1024).string() else null
                     guard.onResponse(response.code, body)?.let { events?.emit(it) }

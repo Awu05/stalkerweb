@@ -288,8 +288,12 @@ class VodPlayerViewModel(
                 releasedAt?.first == params.key -> releasedAt!!.second
                 else -> ((watch.progressFor(params.key)?.position ?: 0.0) * 1000).toLong()
             }
-            val link = vod.castLink(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId)
-            castMediaOf(link, params.title, params.episodeTitle.ifBlank { null }, links.absoluteImage(params.screenshotUrl), here)
+            // The poster goes to the TV by the link the server makes for it (in Solo,
+            // on the cast listener: the TV can't load 127.0.0.1); an older server's
+            // answer has none, and the app's own link is sent as before.
+            val poster = links.relativeImage(params.screenshotUrl).takeIf { it.startsWith("/api/logos/render?") }
+            val link = vod.castLink(params.videoId, params.cmd, params.series, params.seasonId, params.episodeId, poster)
+            castMediaOf(link, params.title, params.episodeTitle.ifBlank { null }, link.imageUrl ?: links.absoluteImage(params.screenshotUrl), here)
         }
     }
 

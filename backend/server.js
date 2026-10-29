@@ -62,11 +62,15 @@ const appState = {
 };
 
 // ── Health check ───────────────────────────────────────────────────────────
-app.get('/api/health', (_req, res) => {
+// In Solo a ?nonce= gets a proof that this server holds the access key
+// (routes/solo.js), for the app to check before it sends the key here.
+app.get('/api/health', (req, res) => {
+  const proof = config.solo ? require('./routes/solo').healthProof(config.accessKey, req.query.nonce) : null;
   res.json({
     status: 'ok',
     connected: !!(appState.sessionManager?.isAuthenticated()),
     version: config.version || require('./package.json').version,
+    ...(proof ? { proof } : {}),
   });
 });
 
@@ -170,6 +174,10 @@ app.use((req, res, next) => {
 });
 
 app.use(access.stripPrefix);
+// Solo: what comes in on the cast listener hands out links under its cast
+// token, not the share token (lib/soloCast.js).
+const soloCast = require('./lib/soloCast');
+app.use(soloCast.lanLinks);
 // Which viewer each request is for — after the access prefix (links look like
 // /k/<token>/v/<viewer>/…) and before the gate, which checks the stripped path.
 app.use(viewerContext.middleware);
@@ -351,22 +359,24 @@ function selfStreamUrl(id) {
 }
 
 // Cast devices: links under the playback-only share token, and live channels
-// re-wrapped as HLS while they're cast (FFmpeg reading this server's own
-// /proxy/stream, under the same token).
+// cut into HLS while they're cast (the segmenter reading this server's own
+// /proxy/stream, under the same token — no FFmpeg needed).
 appState.shareToken = access.shareToken;
 {
   const { CastHls } = require('./stalker/CastHls');
-  appState.castHls = new CastHls({
-    inputUrlFor: selfStreamUrl,
-    userAgent: appState.internalUA,
-    available: () => require('./stalker/FfmpegService').isAvailable(),   // checked when first needed
-  });
+  appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA,
+    windowSize: config.castWindow, maxSessions: config.castMaxSessions, maxPieceBytes: config.castMaxPieceBytes });
 }
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).
+// Without FFmpeg: the stream types the cast packager read, if it's being cast.
 appState.describeChannel = async (id) => {
   const ffmpegSvc = require('./stalker/FfmpegService');
-  if (!ffmpegSvc.isAvailable()) return null;
+  if (!ffmpegSvc.isAvailable()) {
+    const c = appState.castHls.codecsOf(id);
+    const hex = (t) => (t == null ? 'none' : `0x${t.toString(16).padStart(2, '0')}`);
+    return c && (c.videoType != null || c.audioType != null) ? `stream types video ${hex(c.videoType)} audio ${hex(c.audioType)}` : null;
+  }
   const probe = await ffmpegSvc.probeCodecs(selfStreamUrl(id), { 'User-Agent': appState.internalUA });
   return probe?.describe ?? null;
 };
@@ -416,6 +426,13 @@ app.use('/api/xspf', xspfRoutes);
 app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
+// Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast
+// links (they point at the cast listener, below), and whether a cast is on;
+// and asks what still needs the server (a download, a cast).
+require('./routes/solo').mount(app, config, soloCast, {
+  downloadsActive: () => downloadManager.hasActive(),
+  castSessions: () => appState.castHls?.size ?? 0,
+});
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
 app.use('/proxy', proxyRoutes);
@@ -499,14 +516,33 @@ async function tryAutoConnect() {
 }
 
 // ── Start server ───────────────────────────────────────────────────────────
-const httpServer = app.listen(config.port, () => {
-  log.info('server', `stalkerweb running on http://0.0.0.0:${config.port}`);
+// HOST: 0.0.0.0 (the default) is every address — left to Node, which takes
+// IPv6 as well; anything else (Solo: 127.0.0.1) is that address only.
+const listenOn = (server, port, cb) =>
+  (config.host === '0.0.0.0' ? server.listen(port, cb) : server.listen(port, config.host, cb));
+const httpServer = listenOn(app, config.port, () => {
+  log.info('server', `stalkerweb running on http://${config.host}:${config.port}`);
   log.info('server', `dataDir: ${config.dataDir}`);
   log.info('server', access.enabled
     ? 'access key set — sign-in required for the web UI, links carry a token'
     : 'no ACCESS_KEY — anyone who can reach this server can use it (fine on a home network; set one before exposing it to the internet)');
   tryAutoConnect();
 });
+// The port taken (EADDRINUSE) or not allowed: say so, and stop with an error —
+// a server that can't listen is no use, and Solo's app picks other ports
+// when it starts the server again.
+httpServer.on('error', (e) => {
+  log.error('server', `can't listen on ${config.host}:${config.port} (${e.code || e.message}) — stopping`);
+  process.exit(1);
+});
+
+// Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast, while
+// something is cast (lib/soloCast.js). Off without an access key: no share
+// token, nothing it could safely answer.
+// It takes a free port each time it starts (CAST_PORT is no longer read).
+if (config.solo) {
+  soloCast.enable({ app, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0, idleMs: config.castIdleMs });
+}
 
 // Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS
 // (except from 127.0.0.1), so this lets a TV or phone use the Stremio addon
@@ -523,8 +559,8 @@ if (config.httpsPort) {
     httpsServer.on('error', (e) => {
       log.error('server', `HTTPS listener on port ${config.httpsPort} failed (${e.code || e.message}) — HTTP is still up on ${config.port}`);
     });
-    httpsServer.listen(config.httpsPort, () => {
-      log.info('server', `stalkerweb also on https://0.0.0.0:${config.httpsPort}`);
+    listenOn(httpsServer, config.httpsPort, () => {
+      log.info('server', `stalkerweb also on https://${config.host}:${config.httpsPort}`);
     });
     const reload = (curr, prev) => {
       if (curr.mtimeMs === prev.mtimeMs) return;
@@ -550,12 +586,13 @@ function shutdown(signal) {
   xtreamIdStore.flush();   // Xtream episode ids handed out in the last second
   watchStore.flush();      // positions from the last few seconds
   skipSegments.flush();    // shows matched in the last second
-  appState.castHls?.stopAll();   // FFmpeg for channels being cast
+  appState.castHls?.stopAll();   // channels being cast
   if (appState.sessionManager) {
     log.info('server', 'destroying portal session…');
     appState.sessionManager.destroy();
   }
   httpsServer?.close();
+  soloCast.disable();   // the cast listener
   httpServer.close(() => {
     log.info('server', 'HTTP server closed');
     process.exit(0);

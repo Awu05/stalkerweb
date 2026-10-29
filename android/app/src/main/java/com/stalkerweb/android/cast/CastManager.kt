@@ -15,6 +15,8 @@ import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.gms.cast.CastStatusCodes
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.images.WebImage
+import com.stalkerweb.android.data.repo.SoloHold
+import com.stalkerweb.android.solo.SoloServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -199,6 +201,8 @@ class CastManager private constructor(private val context: Context) {
     }
 
     private fun started(session: CastSession) {
+        // Solo: the TV streams from the server in the app, so it's kept up while casting.
+        SoloServer.hold(SoloHold.CASTING)
         _isCasting.value = true
         _deviceName.value = session.castDevice?.friendlyName
         _error.value = null
@@ -211,6 +215,7 @@ class CastManager private constructor(private val context: Context) {
         lastGood = RemoteState()
         _isCasting.value = false
         _deviceName.value = null
+        SoloServer.release(SoloHold.CASTING)
     }
 
     // ── The device picker ────────────────────────────────────────────────────

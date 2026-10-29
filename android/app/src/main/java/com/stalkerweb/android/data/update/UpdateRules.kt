@@ -45,17 +45,21 @@ private fun comparePre(a: String, b: String): Int {
 }
 
 private val FORM = Regex("""-(tv|mobile)[-.]""", RegexOption.IGNORE_CASE)
+private val SOLO_FORM = Regex("""-solo_(tv|mobile)[-.]""", RegexOption.IGNORE_CASE)
 
 /**
- * The download URL of this build's APK among a release's assets (name to URL):
- * "stalkerweb-tv-v0.4.36.apk" for the TV build, "stalkerweb-mobile-v0.4.36.apk"
- * for the phone. Null when the release has none for it — the other form's APK
- * would install as a second app, not update this one.
+ * The download URL of this build's APK among a release's assets (name to
+ * URL): "stalkerweb-tv-v0.4.36.apk" for the TV build,
+ * "stalkerweb-mobile-v0.4.36.apk" for the phone. The Solo app takes
+ * "stalkerweb-solo_tv-…" / "stalkerweb-solo_mobile-…", which the server app's
+ * rule never matches. Null when the release has none for it — the other
+ * form's APK would install as a second app, not update this one.
  */
-fun apkFor(assets: List<Pair<String, String>>, isTv: Boolean): String? {
+fun apkFor(assets: List<Pair<String, String>>, isTv: Boolean, isSolo: Boolean = false): String? {
     val want = if (isTv) "tv" else "mobile"
+    val form = if (isSolo) SOLO_FORM else FORM
     return assets.firstOrNull { (name, _) ->
-        name.endsWith(".apk", ignoreCase = true) && FORM.find(name)?.groupValues?.get(1)?.lowercase() == want
+        name.endsWith(".apk", ignoreCase = true) && form.find(name)?.groupValues?.get(1)?.lowercase() == want
     }?.second
 }
 

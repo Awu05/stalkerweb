@@ -32,9 +32,10 @@ const TAG = 'proxy';
 // keep-alive connection. Captured STBemu traffic shows it serves a whole movie
 // (master playlist → media playlist → every segment) over a SINGLE TCP
 // connection; these VOD CDNs allow one connection per token and hang any extra
-// one. The portal's cookie-jar client (axios-cookiejar-support) creates a fresh
-// agent — i.e. a new connection — per request, so the master succeeded but the
-// very next fetch opened a second connection that the CDN stalled until timeout.
+// one. The portal's cookie-jar client (lib/cookieJarAxios.js; before it,
+// axios-cookiejar-support, which made a fresh agent per request) keeps no
+// connection of its own between requests, so the master succeeded but the very
+// next fetch opened a second connection that the CDN stalled until timeout.
 // maxSockets:1 funnels each stream's fetches through one reused socket, like a STB.
 // No cookie jar: stream CDNs are IP hosts and authenticate via the URL token, so
 // the jar never sent cookies to them anyway.
@@ -1014,28 +1015,47 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
 
   // ── GET /proxy/cast/live/:channelId/index.m3u8 (+ its segments) ───────────
   // A live channel as HLS for a cast device (stalker/CastHls.js). Its links
-  // come from /api/stream/:id/cast.
+  // come from /api/stream/:id/cast. A channel the segmenter can't cut
+  // (encrypted or fMP4 HLS) goes to its own HLS here, under the same token.
   router.get('/cast/live/:channelId/index.m3u8', async (req, res) => {
     const id = String(req.params.channelId);
     if (!/^\d+$/.test(id)) return res.status(400).send('Invalid channel ID');
-    if (!appState.castHls?.available()) return res.status(415).send('Casting live TV needs FFmpeg, which this server does not have');
+    if (!appState.castHls) return res.status(404).send('Not found');
     try {
-      const file = await appState.castHls.playlist(id);
+      const text = await appState.castHls.playlist(id);
       appState.touchActivity?.();
+      if (text === null) return res.redirect(302, `${baseUrl(req)}/proxy/stream/${id}`);
       res.set('Cache-Control', 'no-cache, no-store');
-      res.type('application/vnd.apple.mpegurl').sendFile(file);
+      res.type('application/vnd.apple.mpegurl').send(text);
     } catch (e) {
       log.warn(TAG, `cast ch ${id}: ${e.message}`);
-      res.status(502).send(e.message);
+      // Gone (its source stopped answering): a 404 ends the TV's tries.
+      res.status(e.gone ? 404 : 502).send(e.message);
     }
   });
 
   router.get('/cast/live/:channelId/:segment', (req, res) => {
-    const file = appState.castHls?.segment(req.params.channelId, req.params.segment);
-    if (!file) return res.status(404).send('Not found');
+    const buf = appState.castHls?.segment(req.params.channelId, req.params.segment);
+    if (!buf) return res.status(404).send('Not found');
     appState.touchActivity?.();
-    res.set('Cache-Control', 'no-cache');
-    res.type('video/mp2t').sendFile(file);
+    // Sent as it is: send() would hash every piece (megabytes, every few
+    // seconds) for an ETag — and a piece's name comes round again in a new
+    // session, so it would be no use anyway.
+    res.set({ 'Cache-Control': 'no-cache', 'Content-Type': 'video/mp2t', 'Accept-Ranges': 'bytes' });
+    // A byte range when one is asked for (some players fetch a piece in
+    // parts); a malformed or many-part Range gets the whole piece.
+    const ranges = req.headers.range ? req.range(buf.length) : null;
+    if (ranges === -1) {
+      res.set('Content-Range', `bytes */${buf.length}`);
+      return res.status(416).end();
+    }
+    if (Array.isArray(ranges) && ranges.length === 1 && ranges.type === 'bytes') {
+      const { start, end } = ranges[0];
+      res.status(206).set({ 'Content-Range': `bytes ${start}-${end}/${buf.length}`, 'Content-Length': String(end - start + 1) });
+      return res.end(buf.subarray(start, end + 1));
+    }
+    res.set('Content-Length', String(buf.length));
+    res.end(buf);
   });
 
   // ── GET /proxy/hls?url=<encoded> — sub-playlist proxy ────────────────────

@@ -6,3 +6,10 @@ data/config.json
 data/profiles.json
 *.log
 .claude/
+# Solo app build outputs (android/scripts/fetch-libnode.sh, pack-solo-server.sh)
+android/app/libnode/
+android/app/libnode-cache/
+android/app/.cxx/
+android/solonative/.cxx/
+android/app/src/solo/assets/server.zip
+android/app/src/solo/assets/server.version

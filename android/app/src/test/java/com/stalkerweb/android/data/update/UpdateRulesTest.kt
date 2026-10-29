@@ -26,6 +26,22 @@ class UpdateRulesTest {
         assertNull(apkFor(emptyList(), isTv = false))
     }
 
+    private val bothApps = listOf(
+        "stalkerweb-solo_tv-v0.5.0.apk" to "st", "stalkerweb-solo_mobile-v0.5.0.apk" to "sm",
+        "stalkerweb-tv-v0.5.0.apk" to "t", "stalkerweb-mobile-v0.5.0.apk" to "m",
+    )
+
+    @Test fun `each app picks only its own APK, whichever order they're listed in`() {
+        for (list in listOf(bothApps, bothApps.reversed())) {
+            assertEquals("t", apkFor(list, isTv = true)); assertEquals("m", apkFor(list, isTv = false))
+            assertEquals("st", apkFor(list, isTv = true, isSolo = true)); assertEquals("sm", apkFor(list, isTv = false, isSolo = true))
+        }
+    }
+
+    @Test fun `an older release without Solo APKs has none for Solo`() {
+        assertNull(apkFor(bothApps.drop(2), isTv = true, isSolo = true))
+    }
+
     @Test fun `a later version is newer, the same or an older one is not`() {
         assertTrue(isNewerVersion("0.4.36", "0.4.35"))
         assertTrue(isNewerVersion("v0.5.0", "0.4.99"))

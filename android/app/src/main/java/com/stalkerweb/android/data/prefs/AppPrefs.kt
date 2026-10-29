@@ -59,6 +59,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_FAVORITES_OPEN, true)
         set(value) = prefs.edit().putBoolean(KEY_FAVORITES_OPEN, value).apply()
 
+    // Solo: the downloads already copied to the Downloads folder (by job id), so each is saved once.
+    var publishedDownloads: Set<String>
+        get() = prefs.getStringSet(KEY_PUBLISHED_DOWNLOADS, null)?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_PUBLISHED_DOWNLOADS, value).apply()
+
     // Guide reminders on this device (the web keeps its own).
     var reminders: List<com.stalkerweb.android.data.repo.Reminder>
         get() = runCatching {
@@ -276,6 +281,7 @@ class AppPrefs(context: Context) {
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
         private const val KEY_VOD_SORT        = "vod_sort"
         private const val KEY_FAVORITES_OPEN  = "favorites_open"
+        private const val KEY_PUBLISHED_DOWNLOADS = "published_downloads"
         private const val KEY_REMINDERS = "guide_reminders"
         private const val KEY_SETTINGS_TAB = "settings_tab"
         private const val KEY_SUBTITLE_CHOICE = "subtitle_choice"

@@ -1,9 +1,14 @@
 package com.stalkerweb.android.cast
 
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.CastLink
+import com.stalkerweb.android.data.repo.castMessage
 
-/** The server was reached as localhost: a TV can't open that. */
-class UnreachableCastLink : Exception("The TV can't reach this server's address — set it up by its network address (not localhost) to cast")
+/**
+ * The TV can't open the link: the server was reached as localhost — or, in
+ * Solo, the device isn't on Wi-Fi. The message says which (castMessage).
+ */
+class UnreachableCastLink(isSolo: Boolean = BuildConfig.IS_SOLO) : Exception(castMessage(reachable = false, isSolo = isSolo))
 
 /** What the TV is sent for a cast link from the server. */
 fun castMediaOf(link: CastLink, title: String?, subtitle: String? = null, imageUrl: String? = null, startMs: Long = 0): CastMedia {
