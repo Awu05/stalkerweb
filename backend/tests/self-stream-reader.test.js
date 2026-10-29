@@ -86,7 +86,8 @@ describe('readSelfStream', () => {
       onBreak: () => events.push('break'),
       signal: ctrl.signal, fetchImpl,
     })
-    expect(events).toEqual(['first', 'break', 'break', 'second'])
+    // One break for the gap, however many tries it took to close it.
+    expect(events).toEqual(['first', 'break', 'second'])
     expect(calls).toBe(3)
     // 250 ms after the first break, 500 after the second.
     expect(Date.now() - t0).toBeGreaterThanOrEqual(700)
@@ -208,10 +209,137 @@ describe('readSelfStream', () => {
     }
     await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
       onData: (b) => { events.push(b.toString()); if (restarted && b.toString() === 's3') ctrl.abort() },
-      onBreak: () => { restarted = true; if (events.at(-1) !== 'break') events.push('break') },
+      onBreak: () => { restarted = true; events.push('break') },
       signal: ctrl.signal, fetchImpl, pollMs: 10,
     })
+    // One break: the reconnect that found the numbers back isn't a second gap.
     expect(events).toEqual(['s11', 's12', 's13', 's14', 'break', 's1', 's2', 's3'])
+  })
+
+  it('calls onBreak for a gap in the numbers, and for a discontinuity at the source', async () => {
+    const ctrl = new AbortController()
+    const events = []
+    let polls = 0
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (name) return ts([name])
+      const k = polls++
+      if (k === 0) return media(0)                                  // s1 s2 s3 from the edge
+      if (k === 1) return media(5)                                  // s4 never listed: a gap
+      return m3u8(['#EXTM3U', '#EXT-X-TARGETDURATION:1', '#EXT-X-MEDIA-SEQUENCE:8',
+        '#EXTINF:1.0,', '/seg/s8.ts', '#EXT-X-DISCONTINUITY', '#EXTINF:1.0,', '/seg/s9.ts', ''].join('\n'))
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { events.push(b.toString()); if (b.toString() === 's9') ctrl.abort() },
+      onBreak: () => events.push('break'),
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(events).toEqual(['s1', 's2', 's3', 'break', 's5', 's6', 's7', 's8', 'break', 's9'])
+  })
+
+  it('follows a live playlist without #EXT-X-MEDIA-SEQUENCE by its URIs', async () => {
+    const ctrl = new AbortController()
+    const got = []
+    const hits = {}
+    let polls = 0
+    // A sliding window of 4, never numbered.
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (name) { hits[name] = (hits[name] ?? 0) + 1; return ts([name]) }
+      const k = polls++
+      return m3u8(['#EXTM3U', '#EXT-X-TARGETDURATION:1', ...[0, 1, 2, 3].flatMap((i) => ['#EXTINF:1.0,', `/seg/s${k + i}.ts`]), ''].join('\n'))
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { got.push(b.toString()); if (got.length === 6) ctrl.abort() },
+      onBreak: () => { throw new Error('no break expected') },
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(got).toEqual(['s1', 's2', 's3', 's4', 's5', 's6'])
+    for (const n of [1, 2, 3, 4, 5, 6]) expect(hits[`s${n}`]).toBe(1)
+  })
+
+  it('tries a segment that failed once again after it came through and its number came round again', async () => {
+    const ctrl = new AbortController()
+    const hits = {}
+    let polls = 0
+    const list = (tag, k) => m3u8(['#EXTM3U', '#EXT-X-TARGETDURATION:1', `#EXT-X-MEDIA-SEQUENCE:${k}`,
+      ...[0, 1, 2, 3].flatMap((i) => ['#EXTINF:1.0,', `/seg/${tag}${k + i}.ts`]), ''].join('\n'))
+    const fetchImpl = async (url) => {
+      const name = /\/seg\/(\w+)\.ts$/.exec(new URL(url).pathname)?.[1]
+      if (name) {
+        hits[name] = (hits[name] ?? 0) + 1
+        if ((name === 'a4' || name === 'b4') && hits[name] === 1) return new Response('gone', { status: 404 })
+        if (name === 'b4') ctrl.abort()
+        return ts([name])
+      }
+      const k = polls++
+      if (k > 12) ctrl.abort()
+      // a1…a4 (a4 fails once, then comes), then the source restarts at 0: b0…b3, then b1…b4.
+      return k < 2 ? list('a', 1) : k < 4 ? list('b', 0) : list('b', 1)
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: () => {}, onBreak: () => {}, signal: ctrl.signal, fetchImpl, pollMs: 5, backoffMs: () => 0,
+    })
+    expect(hits.a4).toBe(2)
+    expect(hits.b4).toBe(2)   // failed once: tried again, not skipped for a4's old mark
+  })
+
+  it('breaks before fetching again a segment whose body failed midway', async () => {
+    const ctrl = new AbortController()
+    const events = []
+    let polls = 0
+    let s2 = 0
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (!name) return media(polls++ ? 1 : 0)
+      if (name === 's2' && ++s2 === 1) {
+        return new Response(new ReadableStream({
+          start(c) { c.enqueue(new Uint8Array(Buffer.from('half'))) },
+          pull(c) { c.error(new Error('ECONNRESET')) },
+        }), { headers: { 'Content-Type': 'video/mp2t' } })
+      }
+      return ts([name])
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { events.push(b.toString()); if (b.toString() === 's3') ctrl.abort() },
+      onBreak: () => events.push('break'),
+      signal: ctrl.signal, fetchImpl, pollMs: 10, backoffMs: () => 0,
+    })
+    // The TV gets the whole segment again, after a discontinuity, not glued to its first half.
+    expect(events).toEqual(['s1', 'half', 'break', 's2', 's3'])
+  })
+
+  it('opens the source again when it goes quiet (the stall watchdog)', async () => {
+    const ctrl = new AbortController()
+    const events = []
+    let calls = 0
+    const fetchImpl = async () => (++calls === 1 ? ts(['x'], { hold: true }) : ts(['y'], { hold: true }))
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/9', {
+      onData: (b) => { events.push(b.toString()); if (b.toString() === 'y') ctrl.abort() },
+      onBreak: () => events.push('break'),
+      signal: ctrl.signal, fetchImpl, stallMs: 50, backoffMs: () => 0,
+    })
+    expect(events).toEqual(['x', 'break', 'y'])
+  })
+
+  it('reads a body without a Content-Type as a playlist when it starts with #EXTM3U', async () => {
+    const ctrl = new AbortController()
+    const got = []
+    let polls = 0
+    const fetchImpl = async (url) => {
+      const name = segName(url)
+      if (name) return ts([name])
+      const k = polls++
+      const text = ['#EXTM3U', '#EXT-X-TARGETDURATION:1', `#EXT-X-MEDIA-SEQUENCE:${k}`,
+        ...[0, 1, 2, 3].flatMap((i) => ['#EXTINF:1.0,', `/seg/s${k + i}.ts`]), ''].join('\n')
+      return new Response(body(['  ' + text.slice(0, 5), text.slice(5)]))   // no headers; split, with a little space first
+    }
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/7', {
+      onData: (b) => { got.push(b.toString()); if (got.length === 4) ctrl.abort() },
+      onBreak: () => { throw new Error('no break expected') },
+      signal: ctrl.signal, fetchImpl, pollMs: 10,
+    })
+    expect(got).toEqual(['s1', 's2', 's3', 's4'])
   })
 
   for (const [kind, tag, reason] of [

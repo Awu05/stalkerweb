@@ -15,9 +15,15 @@
 //
 // When the source ends, fails, or sends nothing for a while, onBreak() says so
 // (the segmenter marks a discontinuity) and it's opened again after
-// min(2^n × 250 ms, 5 s), n the breaks since bytes last came. An HLS channel
-// carries on from the segment after the last one sent, when the playlist still
-// lists it, so the TV isn't shown again what it played. It ends when `signal`
+// min(2^n × 250 ms, 5 s), n the breaks since bytes last came. onBreak() comes
+// once per gap: not again until bytes have flowed, however many tries the
+// outage takes. An HLS channel carries on from the segment after the last one
+// sent, when the playlist still lists it, so the TV isn't shown again what it
+// played — numbered by #EXT-X-MEDIA-SEQUENCE, or by the segments' URIs when a
+// playlist has none. A segment that breaks off midway is fetched again whole,
+// after the break: the segmenter starts a new piece at its keyframe. Skipping
+// the bytes already sent instead would bet on the second copy matching the
+// first byte for byte, and a mismatch is a broken picture. It ends when `signal`
 // aborts — or gives up on a channel that stopped answering: 8 tries in a row
 // with nothing, or 2 minutes without a byte. Then it rejects (`gaveUp`), and
 // the cast session ends rather than knock at the portal for as long as the
@@ -60,9 +66,12 @@ async function readSelfStream(url, { onData, onBreak, onUnsupported = () => {}, 
   const headers = userAgent ? { 'User-Agent': userAgent } : {};
   // Across reconnects: where an HLS channel got to (the restart smoother keeps
   // its numbers steady), and a segment that failed once already.
-  const state = { last: null, failed: null };
+  const state = { last: null, failed: null, uris: null };
   let breaks = 0;
   let lastData = now();
+  // One onBreak per gap: none again until a byte has come.
+  let quiet = false;
+  const brk = () => { if (!quiet) { quiet = true; onBreak(); } };
   while (!signal.aborted) {
     // One go at the source, with its own abort: for the caller's, and for a stall.
     const attempt = new AbortController();
@@ -77,8 +86,8 @@ async function readSelfStream(url, { onData, onBreak, onUnsupported = () => {}, 
     let got = false;
     let unsupported = null;
     const o = {
-      headers, fetchImpl, pollMs, onBreak, state, signal: attempt.signal,
-      data: (buf) => { got = true; alive(); onData(buf); },
+      headers, fetchImpl, pollMs, onBreak: brk, state, signal: attempt.signal,
+      data: (buf) => { got = true; quiet = false; alive(); onData(buf); },
     };
     try {
       alive();
@@ -94,7 +103,7 @@ async function readSelfStream(url, { onData, onBreak, onUnsupported = () => {}, 
     else if (breaks + 1 >= GIVE_UP_TRIES || now() - lastData >= GIVE_UP_MS) {
       throw Object.assign(new Error('the channel stopped answering'), { gaveUp: true });
     }
-    onBreak();
+    brk();
     await sleep(backoffMs(breaks++), signal);
   }
 }
@@ -168,11 +177,19 @@ async function readOnce(url, o) {
   const got = await request(url, o, async (res) => {
     if (/mpegurl/i.test(res.headers.get('content-type') || '')) return { text: await res.text(), at: res.url || url };
     // No playlist type: a raw stream, unless its first bytes say otherwise.
+    // Enough of it to tell: a first chunk of a few bytes may yet be "#EXTM3U".
     const reader = res.body.getReader();
-    const { done, value } = await reader.read();
-    if (done) return null;
-    const first = Buffer.from(value);
-    if (!first.subarray(0, 16).toString('latin1').trimStart().startsWith('#EXTM3U')) {
+    const head = () => first.subarray(0, 16).toString('latin1').trimStart();
+    let first = Buffer.alloc(0);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      first = Buffer.concat([first, Buffer.from(value)]);
+      const h = head();
+      if (first.length >= 16 || h.length >= 7 || !'#EXTM3U'.startsWith(h)) break;
+    }
+    if (!first.length) return null;
+    if (!head().startsWith('#EXTM3U')) {
       reader.releaseLock();
       await pipeBody(res, o, first);
       return null;
@@ -191,6 +208,25 @@ async function readOnce(url, o) {
   return followPlaylist(at, text, o);
 }
 
+/**
+ * A media playlist with no #EXT-X-MEDIA-SEQUENCE, numbered by its URIs: a
+ * segment the last read listed keeps its number, the rest follow on from it.
+ * Nothing in common with the last read means the playlist moved on past it.
+ */
+function numberByUri(text, st) {
+  const list = parsePlaylist(text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0'));
+  if (!list) return null;
+  let base = null;
+  for (let i = 0; i < list.segments.length && st.uris; i++) {
+    const seq = st.uris.get(list.segments[i].uri);
+    if (seq !== undefined) { base = seq - i; break; }
+  }
+  if (base === null) base = st.last === null ? 0 : st.last + 2;   // after a gap
+  list.segments.forEach((seg, i) => { seg.seq = base + i; });
+  st.uris = new Map(list.segments.map((seg) => [seg.uri, seg.seq]));
+  return list;
+}
+
 // A live media playlist: each new segment once, in order, until it ends. Goes
 // on from where the last attempt got to when the playlist still lists it.
 async function followPlaylist(at, text, o) {
@@ -198,7 +234,7 @@ async function followPlaylist(at, text, o) {
   for (let first = true; ; first = false) {
     const why = unsupportedWhy(text);
     if (why) throw Object.assign(new Error(why), { unsupported: why });
-    const list = parsePlaylist(text.includes('#EXT-X-MEDIA-SEQUENCE:') ? text : text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0'));
+    const list = /^#EXT-X-MEDIA-SEQUENCE:/m.test(text) ? parsePlaylist(text) : numberByUri(text, st);
     if (!list) throw new Error('not a media playlist');
     const segs = list.segments;
     if (st.last !== null && segs.length && segs.at(-1).seq < st.last) {
@@ -216,6 +252,7 @@ async function followPlaylist(at, text, o) {
       if (st.last !== null && (s.disc || s.seq !== st.last + 1)) o.onBreak();
       try {
         await request(new URL(s.uri, at).href, o, (r) => pipeBody(r, o));
+        if (st.failed === s.seq && !o.signal.aborted) st.failed = null;   // it came through after all
       } catch (e) {
         if (o.signal.aborted) return;
         // Tried again once, after a reconnect; failed twice, it's skipped.

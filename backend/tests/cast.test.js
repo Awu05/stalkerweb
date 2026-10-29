@@ -263,12 +263,42 @@ describe('CastHls', () => {
     fail(Object.assign(new Error('the channel stopped answering'), { gaveUp: true }))
     await expect(p).rejects.toThrow('stopped')
     expect(hls.size).toBe(0)
-    await expect(hls.playlist('8')).rejects.toThrow('stopped answering')   // the TV's next ask: a 502
+    // The TV's next ask: gone (a 404, so it stops), not a 502 it retries.
+    await expect(hls.playlist('8')).rejects.toMatchObject({ message: expect.stringMatching(/stopped answering/), gone: true })
     expect(hls.segment('8', 'seg0.ts')).toBeNull()                         // a piece: a 404
     expect(readers).toHaveLength(1)                                        // not opened again
     hls.retry('8')   // the app asked for a cast link again
     hls.playlist('8').catch(() => {})
     expect(readers).toHaveLength(2)
+  })
+
+  it('tells an ask waiting on a channel that gave up that it is gone', async () => {
+    let fail
+    hls = make({ reader: (url, o) => { readers.push({ url, ...o }); return new Promise((_, reject) => { fail = reject }) } })
+    const p = hls.playlist('8')
+    fail(Object.assign(new Error('the channel stopped answering'), { gaveUp: true }))
+    await expect(p).rejects.toMatchObject({ gone: true })
+  })
+
+  it('keeps serving what it cut of a channel that turns encrypted mid-cast, to its end', async () => {
+    hls = make()
+    const p = hls.playlist('5')
+    readers[0].onData(makeTs({ seconds: 12 }))
+    const before = pieces(await p)
+    readers[0].onUnsupported('encrypted segments (AES-128)')
+    const after = await hls.playlist('5')
+    expect(after).not.toBeNull()   // not a 302 the TV's reload may not follow
+    expect(after.trimEnd().endsWith('#EXT-X-ENDLIST')).toBe(true)
+    const names = pieces(after)
+    expect(names.length).toBe(before.length + 1)   // the piece that was open is listed too
+    for (const n of names) expect(hls.segment('5', n)).not.toBeNull()
+    expect(readers).toHaveLength(1)
+    // A new cast link: a new session, which finds the channel encrypted and passes it through.
+    hls.retry('5')
+    const next = hls.playlist('5')
+    expect(readers).toHaveLength(2)
+    readers[1].onUnsupported('encrypted segments (AES-128)')
+    expect(await next).toBeNull()
   })
 
   it('forgets a channel that stopped answering once the TV stops asking', async () => {
@@ -401,6 +431,43 @@ describe('the cast playlist route', () => {
     const r = await get('/k/tok/proxy/cast/live/43/index.m3u8')
     expect(r.status).toBe(302)
     expect(r.headers.location).toBe(`${base}/k/tok/proxy/stream/43`)
+  })
+
+  it('serves a byte range of a piece (206), and refuses one past its end (416)', async () => {
+    const r = await get('/k/tok/proxy/cast/live/44/index.m3u8')
+    const name = pieces(r.body.toString())[0]
+    const whole = (await get(`/k/tok/proxy/cast/live/44/${name}`)).body
+    const ranged = (range) => new Promise((resolve, reject) => {
+      http.get(`${base}/k/tok/proxy/cast/live/44/${name}`, { headers: { Range: range } }, (x) => {
+        const parts = []
+        x.on('data', (c) => parts.push(c))
+        x.on('end', () => resolve({ status: x.statusCode, headers: x.headers, body: Buffer.concat(parts) }))
+      }).on('error', reject)
+    })
+    const a = await ranged('bytes=188-375')
+    expect(a.status).toBe(206)
+    expect(a.headers['content-range']).toBe(`bytes 188-375/${whole.length}`)
+    expect(a.body.equals(whole.subarray(188, 376))).toBe(true)
+    const tail = await ranged('bytes=-188')
+    expect(tail.status).toBe(206)
+    expect(tail.body.equals(whole.subarray(whole.length - 188))).toBe(true)
+    const open = await ranged(`bytes=${whole.length - 10}-`)
+    expect(open.headers['content-range']).toBe(`bytes ${whole.length - 10}-${whole.length - 1}/${whole.length}`)
+    const past = await ranged(`bytes=${whole.length}-`)
+    expect(past.status).toBe(416)
+    expect(past.headers['content-range']).toBe(`bytes */${whole.length}`)
+    expect((await ranged('nonsense')).status).toBe(200)
+  })
+
+  it('answers 404 for a channel that stopped answering, so the TV stops asking', async () => {
+    const gone = { playlist: async () => { throw Object.assign(new Error('The channel stopped answering'), { gone: true }) } }
+    const app = express()
+    app.use('/proxy', proxyModule({ castHls: gone }))
+    const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)) })
+    try {
+      const r = await fetch(`http://127.0.0.1:${s.address().port}/proxy/cast/live/9/index.m3u8`)
+      expect(r.status).toBe(404)
+    } finally { s.closeAllConnections(); s.close() }
   })
 
   it('still cuts a plain TS channel into pieces', async () => {

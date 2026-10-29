@@ -11,14 +11,18 @@
 // and the playlist carries on after an #EXT-X-DISCONTINUITY, so the TV keeps
 // playing. A session ends once the device stops asking for it; the next
 // request starts it again. One whose source stopped answering (the reader gave
-// up) isn't started again for the TV: its asks fail until it stops asking, or
-// the app asks for a new cast link (retry()). Each holds a dozen pieces in memory — for 4K that's
+// up) isn't started again for the TV: its asks are answered "gone" (a 404, so
+// the TV stops rather than retry) until it stops asking, or the app asks for a
+// new cast link (retry()). Each holds a dozen pieces in memory — for 4K that's
 // a lot — so there are at most a few (in Solo, on a phone, one channel and
 // fewer, smaller pieces: config.js), and a stopped one lets go at once.
 //
 // An HLS channel whose segments the segmenter can't cut (encrypted, or fMP4)
 // is passed through: playlist() answers null, and the route sends the TV to
-// the channel's own HLS on this server, which it plays itself.
+// the channel's own HLS on this server, which it plays itself. One that turns
+// so mid-cast keeps its playlist — what was cut, closed at the break, then
+// #EXT-X-ENDLIST — as a TV reloading a playlist may not follow a redirect; a
+// new cast link (retry()) starts over and gets the passthrough.
 
 const log = require('../logger');
 const { TsSegmenter } = require('./TsSegmenter');
@@ -27,6 +31,9 @@ const TAG = 'cast';
 
 // seg + its number, as the segmenter names its pieces.
 const SEGMENT = /^seg\d{1,20}\.ts$/;
+
+// A channel the TV should stop asking for (the route answers 404).
+const gone = (message) => Object.assign(new Error(message), { gone: true });
 
 class CastHls {
   /**
@@ -67,10 +74,11 @@ class CastHls {
     const id = String(channelId);
     if (!this._sessions.has(id) && this._gaveUp.has(id)) {
       this._gaveUp.set(id, this._now());
-      return Promise.reject(new Error('The channel stopped answering'));
+      return Promise.reject(gone('The channel stopped answering'));
     }
     const s = this._sessions.get(id) ?? this._start(id);
     s.lastUsed = this._now();
+    if (s.ended) return Promise.resolve(`${s.seg.playlist()}#EXT-X-ENDLIST\n`);
     if (s.passthrough) return Promise.resolve(null);
     const text = s.seg.playlist();
     if (text) return Promise.resolve(text);
@@ -107,8 +115,15 @@ class CastHls {
     this._stop(String(channelId), why);
   }
 
-  /** A new cast of the channel: one that stopped answering is tried again on the TV's next ask. */
-  retry(channelId) { this._gaveUp.delete(String(channelId)); }
+  /**
+   * A new cast of the channel: one that stopped answering is tried again on
+   * the TV's next ask, and one whose cast ended (it turned encrypted) starts over.
+   */
+  retry(channelId) {
+    const id = String(channelId);
+    this._gaveUp.delete(id);
+    if (this._sessions.get(id)?.ended) this._stop(id, 'a new cast link');
+  }
 
   /** Every session ended (on shutdown). */
   stopAll() {
@@ -148,32 +163,40 @@ class CastHls {
       // the TV's next ask is answered at once.
       onUnsupported: (why) => {
         if (!current()) return;
+        if (s.seg?.playlist()) {
+          // Mid-cast: the TV keeps what it has, to its end.
+          log.info(TAG, `ch ${id}: ${why} now — its cast ends with what was cut`);
+          s.seg.discontinuity();
+          s.ended = why;
+          return;
+        }
         log.info(TAG, `ch ${id}: ${why} — the TV plays the channel's own HLS`);
         s.passthrough = why;
         s.seg = null;
         for (const w of s.waiters.splice(0)) { clearTimeout(w.timer); w.resolve(null); }
       },
     }).then(
-      () => { if (current() && !s.passthrough) this._stop(id, 'its source ended'); },
+      () => { if (current() && !s.passthrough && !s.ended) this._stop(id, 'its source ended'); },
       (e) => {
         if (!current()) return;
         if (e.gaveUp) this._gaveUp.set(id, this._now());
-        this._stop(id, `its source failed: ${e.message}`);
+        this._stop(id, `its source failed: ${e.message}`, e.gaveUp);
       },
     );
     return s;
   }
 
-  _stop(id, why) {
+  _stop(id, why, isGone = false) {
     const s = this._sessions.get(id);
     if (!s) return;
     this._sessions.delete(id);
     log.info(TAG, `ch ${id}: cast stream stopped — ${why}`);
     s.ctrl.abort();
     s.seg = null;   // its pieces go now, not when the reader lets go
+    const msg = `The channel stopped before it could be cast (${why})`;
     for (const w of s.waiters.splice(0)) {
       clearTimeout(w.timer);
-      w.reject(new Error(`The channel stopped before it could be cast (${why})`));
+      w.reject(isGone ? gone(msg) : new Error(msg));
     }
   }
 
