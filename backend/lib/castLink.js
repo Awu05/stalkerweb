@@ -29,15 +29,23 @@ function vodContentType(ext) {
   return VOD_TYPES[String(ext || '').replace(/^\./, '').toLowerCase()] || 'video/mp4';
 }
 
-/** What a cast-link request answers: the URL, its type, and whether a device can reach it. */
-async function castLink(req, shareToken, pathAndQuery, contentType, live) {
+/**
+ * What a cast-link request answers: the URL, its type, and whether a device
+ * can reach it — and `imageUrl`, the poster the TV shows, when `image` is one
+ * this server renders (/api/logos/render?…): under the same token, so the TV
+ * can load it (in Solo, on the cast listener, opened for that token only).
+ */
+async function castLink(req, shareToken, pathAndQuery, contentType, live, image = null) {
+  const poster = soloCast.isCastImage(image) ? image : null;
   if (soloCast.active()) {
     // Reachable once the cast listener is up on the Wi-Fi address; without
     // one the link stays on 127.0.0.1 and the app says casting needs Wi-Fi.
-    const lan = await soloCast.ensureListener(pathAndQuery);
-    return { url: `${lan || castBase(req, shareToken)}${pathAndQuery}`, contentType, live, reachable: !!lan };
+    const lan = await soloCast.ensureListener(pathAndQuery, { image: poster });
+    const at = lan || castBase(req, shareToken);
+    return { url: `${at}${pathAndQuery}`, contentType, live, reachable: !!lan, ...(poster ? { imageUrl: `${at}${poster}` } : {}) };
   }
-  return { url: `${castBase(req, shareToken)}${pathAndQuery}`, contentType, live, reachable: !isLocalHost(req.get('host')) };
+  const at = castBase(req, shareToken);
+  return { url: `${at}${pathAndQuery}`, contentType, live, reachable: !isLocalHost(req.get('host')), ...(poster ? { imageUrl: `${at}${poster}` } : {}) };
 }
 
 module.exports = { castBase, isLocalHost, vodContentType, castLink };

@@ -62,11 +62,15 @@ const appState = {
 };
 
 // ── Health check ───────────────────────────────────────────────────────────
-app.get('/api/health', (_req, res) => {
+// In Solo a ?nonce= gets a proof that this server holds the access key
+// (routes/solo.js), for the app to check before it sends the key here.
+app.get('/api/health', (req, res) => {
+  const proof = config.solo ? require('./routes/solo').healthProof(config.accessKey, req.query.nonce) : null;
   res.json({
     status: 'ok',
     connected: !!(appState.sessionManager?.isAuthenticated()),
     version: config.version || require('./package.json').version,
+    ...(proof ? { proof } : {}),
   });
 });
 
@@ -537,7 +541,7 @@ httpServer.on('error', (e) => {
 // token, nothing it could safely answer.
 // It takes a free port each time it starts (CAST_PORT is no longer read).
 if (config.solo) {
-  soloCast.enable({ app, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0 });
+  soloCast.enable({ app, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0, idleMs: config.castIdleMs });
 }
 
 // Optional HTTPS, alongside HTTP. Stremio only installs addons over HTTPS

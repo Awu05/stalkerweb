@@ -16,9 +16,24 @@
 //
 // Behind the access gate like the rest of /api: the app's own key, not the
 // share token.
+//
+// And on the open GET /api/health, in Solo: ?nonce=<16–128 of A-Z a-z 0-9 _ ->
+// adds `proof`, HMAC-SHA256 of "solo-health:<nonce>" keyed with the access
+// key (hex). The app starts each server on a port it picked; until the one
+// there has proved it holds the key, the app doesn't send it the key — so a
+// stranger who took the old port gets nothing.
 
+const crypto = require('crypto');
 const express = require('express');
 const log = require('../logger');
+
+const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
+
+/** The proof /api/health gives for a nonce in Solo, or null (no key, or not a nonce). */
+function healthProof(key, nonce) {
+  if (!key || typeof nonce !== 'string' || !NONCE.test(nonce)) return null;
+  return crypto.createHmac('sha256', key).update(`solo-health:${nonce}`).digest('hex');
+}
 
 /**
  * @param {object} soloCast  lib/soloCast.js
@@ -63,4 +78,4 @@ function mount(app, config, soloCast, deps) {
   if (config.solo) app.use('/api/solo', soloRoutes(soloCast, deps));
 }
 
-module.exports = { soloRoutes, mount };
+module.exports = { soloRoutes, mount, healthProof };

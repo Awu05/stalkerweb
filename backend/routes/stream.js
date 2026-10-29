@@ -57,7 +57,8 @@ module.exports = function streamRoutes(appState) {
 
   // A cast device's link for a live channel: the channel as HLS (CastHls),
   // under the playback-only share token. Nothing is resolved here — the
-  // device's first request starts it.
+  // device's first request starts it. ?image=/api/logos/render?… (its logo)
+  // comes back as imageUrl, a link the TV can load.
   router.get('/:channelId/cast', async (req, res) => {
     const rawId = req.params.channelId;
     if (!/^\d+$/.test(rawId)) return res.status(400).json({ error: 'Invalid channel ID' });
@@ -65,7 +66,8 @@ module.exports = function streamRoutes(appState) {
     appState.activity?.claim({ kind: 'live', id: rawId, viewerId: req.viewer?.id, cast: true,
       title: appState.channelManager?.getChannel?.(rawId)?.name });
     appState.castHls?.retry?.(rawId);   // a channel that stopped answering last time gets another go
-    res.json(await castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
+    res.json(await castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true,
+      typeof req.query.image === 'string' ? req.query.image : null));
   });
 
   // The sender stopped casting the channel, or moved the TV to another: its

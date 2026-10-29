@@ -5,6 +5,7 @@ import { createRequire } from 'module'
 import express from 'express'
 import cors from 'cors'
 import net from 'net'
+import { setInterval, clearInterval } from 'timers'
 import { createAccess } from '../lib/access.js'
 
 // Through require, as the server loads them: castLink reads the same soloCast
@@ -218,6 +219,26 @@ describe('the LAN listener', () => {
     expect((await request(origin, `${prefix}${CH1}`)).status).toBe(200)
   })
 
+  it("stops on time though strangers keep knocking: a refused request isn't the TV asking", async () => {
+    const { origin } = await castOn({ idleMs: 100 })
+    const knock = setInterval(() => { request(origin, '/api/settings').catch(() => {}) }, 20)
+    try {
+      await wait(400)
+      expect(soloCast.listenerAddress()).toBe(null)
+    } finally { clearInterval(knock) }
+  })
+
+  it.skipIf(!ipv6)('gives a cast link asked for while the Wi-Fi address changes the new listener, not none', async () => {
+    soloCast.enable({ app: appLikeServer(), shareToken: T, logger: quiet })
+    soloCast.setLanHost('127.0.0.1')
+    const asked = soloCast.ensureListener(CH1)   // the listener is starting…
+    soloCast.setLanHost('::1')                   // …and moves before it's up
+    const l = await asked
+    expect(l).toMatch(/^http:\/\/\[::1\]:\d+\/k\//)
+    const { origin, prefix } = splitBase(l)
+    expect((await request(origin, `${prefix}${CH1}`)).status).toBe(200)
+  })
+
   it('stays up while a channel is cast, or a request is still being answered', async () => {
     let cast = 1
     let release
@@ -330,6 +351,33 @@ describe('what a cast token opens', () => {
     expect((await request(origin, `${C42}/proxy/cast/live/1/seg0.ts`)).status).toBe(404)
   })
 
+  it('refuses a path with a double slash in it', async () => {
+    const { origin, prefix: C } = await castOn({ extra })
+    for (const p of ['/proxy//cast/live/1/index.m3u8', '/proxy/cast//live/1/index.m3u8', '//proxy/cast/live/1/index.m3u8']) {
+      expect((await request(origin, `${C}${p}`)).status, p).toBe(404)
+    }
+    expect((await request(origin, `${C}${CH1}`)).status).toBe(200)
+  })
+
+  it('opens the poster its cast link was made with, and no other image', async () => {
+    const poster = '/api/logos/render?url=http%3A%2F%2Fportal.example%2Fp%2F1.jpg'
+    const { origin, prefix: C } = await castOn({ extra: (app) => app.get('/api/logos/render', (req, res) => res.type('image/png').send(`png ${req.query.url}`)) })
+    expect((await request(origin, `${C}${poster}`)).status).toBe(404)   // channel 1's token: no poster
+    const l = await castLink(fakeReq('127.0.0.1:8983'), T, '/proxy/vod/stream.mkv?videoId=7&cmd=x', 'video/x-matroska', false, poster)
+    const { origin: o2, prefix: V } = splitBase(l.url.slice(0, l.url.indexOf('/proxy/')))
+    expect(l.imageUrl).toBe(`${o2}${V}${poster}`)
+    const img = await request(o2, `${V}${poster}`)
+    expect(img.status).toBe(200)
+    expect(img.body).toBe('png http://portal.example/p/1.jpg')
+    expect((await request(o2, `${V}/api/logos/render?url=http%3A%2F%2Fportal.example%2Fp%2F2.jpg`)).status).toBe(404)
+    expect((await request(o2, `${V}/api/logos/map`)).status).toBe(404)
+    // Only a poster this server renders is taken; anything else is left out.
+    for (const bad of ['/api/settings', '/proxy/stream/1', 'http://portal.example/p.jpg', '/api/logos/../settings?x', '/api/logos/render/../../settings?x', 42]) {
+      const x = await castLink(fakeReq('127.0.0.1:8983'), T, CH1, 'application/x-mpegURL', true, bad)
+      expect(x.imageUrl, String(bad)).toBeUndefined()
+    }
+  })
+
   it('takes a free port each time it starts, whatever port it was given, and links use it', async () => {
     const holder = await busyPort()
     try {
@@ -420,6 +468,20 @@ describe('cast links follow the cast listener', () => {
     const l = await castLink(fakeReq('192.168.1.5:8983'), 'tok', '/proxy/stream/1', 'video/mp2t', true)
     expect(l).toEqual({ url: 'http://192.168.1.5:8983/k/tok/proxy/stream/1', contentType: 'video/mp2t', live: true, reachable: true })
     expect(soloCast.listenerAddress()).toBe(null)
+    // A poster comes back under the share token, which opens /api/logos.
+    const p = await castLink(fakeReq('192.168.1.5:8983'), 'tok', '/proxy/stream/1', 'video/mp2t', true, '/api/logos/render?url=x')
+    expect(p.imageUrl).toBe('http://192.168.1.5:8983/k/tok/api/logos/render?url=x')
+  })
+
+  it('give a proof for /api/health only with a key and a real nonce', () => {
+    const nonce = 'abcdefghijklmnop0123'
+    const want = require('crypto').createHmac('sha256', KEY).update(`solo-health:${nonce}`).digest('hex')
+    expect(solo.healthProof(KEY, nonce)).toBe(want)
+    expect(solo.healthProof(KEY, 'short')).toBe(null)
+    expect(solo.healthProof(KEY, 'x'.repeat(129))).toBe(null)
+    expect(solo.healthProof(KEY, 'abcdefghijklmnop/../')).toBe(null)
+    expect(solo.healthProof('', nonce)).toBe(null)
+    expect(solo.healthProof(KEY, ['abcdefghijklmnop0123'])).toBe(null)
   })
 })
 

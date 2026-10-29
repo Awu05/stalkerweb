@@ -11,14 +11,20 @@
 // a token opens only what it was made for: the link's own path, and the links
 // the server hands out while answering under it — the pieces in a playlist it
 // sends (rewritten HLS, the cast channel's seg<n>.ts) and where a redirect
-// sends the TV (a channel passed through to its own HLS). Anything else under
+// sends the TV (a channel passed through to its own HLS) — and the poster the
+// cast link was made with (/api/logos/render?…), which the TV shows while it
+// plays. Those are all the ways this server hands the TV a link: the cast
+// routes answer with playlists and redirects, a movie (/proxy/vod/stream) is
+// its own link or an HLS playlist; nothing hands one out in JSON or HTML to
+// the TV. Anything else under
 // it is a 404, like everything else on the listener; so a link for one
 // channel opens neither another channel nor a movie. The tokens are good only
 // on the listener that made them: not the share token, which works on
 // 127.0.0.1 too and never changes.
 //
 // The listener starts when the app asks for a cast link, and stops once
-// nothing has been asked of it for 10 minutes and no channel is being cast;
+// nothing has been asked of it for 10 minutes and no channel is being cast
+// (a stranger's refused request doesn't count as asking);
 // the next cast link starts it again, with new tokens. While the app says a
 // cast is on (PUT /api/solo/casting — a paused movie asks for nothing for
 // as long as it's paused), it doesn't stop for that, for up to 6 hours without
@@ -139,23 +145,37 @@ function normalPath(pathAndQuery) {
   } catch { return null; }
 }
 
+/** Whether a path is a poster the server renders (/api/logos/render?…), the only image a cast token may open. */
+function isCastImage(pathAndQuery) {
+  return typeof pathAndQuery === 'string' && pathAndQuery.length <= 4096
+    && pathAndQuery.startsWith('/api/logos/render?') && normalPath(pathAndQuery) === pathAndQuery;
+}
+
 /**
  * The cast listener, started if it isn't up (on the Wi-Fi address), and a new
- * cast token on it that opens `pathAndQuery` (/proxy/…): resolves to
+ * cast token on it that opens `pathAndQuery` (/proxy/…) — and `image`, a
+ * poster (isCastImage), when given: resolves to
  * http://<lanHost>:<port>/k/<castToken>, or null without Wi-Fi or when it
- * couldn't start. Asking again while it's up keeps it up a while longer.
+ * couldn't start. Asking again while it's up keeps it up a while longer. A
+ * listener that moves meanwhile (the Wi-Fi address changed) is waited for.
  */
-async function ensureListener(pathAndQuery) {
-  if (!setup || !lanHost) return null;
-  if (!listener) start();
-  else armIdle(listener);
-  const l = listener;
-  await l.ready;
+async function ensureListener(pathAndQuery, { image = null } = {}) {
+  let l = null;
+  for (let tries = 0; tries < 3; tries++) {
+    if (!setup || !lanHost) return null;
+    if (!listener) start();
+    else armIdle(listener);
+    l = listener;
+    await l.ready;
+    if (listener === l && l.up) break;
+    if (!listener) return null;   // it couldn't start, or there's no Wi-Fi now
+  }
   if (listener !== l || !l.up) return null;
   const token = crypto.randomBytes(24).toString('base64url');
   const grant = new Map();
   const link = normalPath(pathAndQuery);
   if (link) grant.set(link, true);   // true: kept however many pieces come after
+  if (isCastImage(image)) grant.set(image, true);
   l.tokens.set(token, grant);
   while (l.tokens.size > MAX_TOKENS) l.tokens.delete(l.tokens.keys().next().value);
   return `${castOrigin()}/k/${token}`;
@@ -174,9 +194,12 @@ function start() {
   };
   const gate = lanGate(l, shareToken);
   l.server = http.createServer((req, res) => {
-    l.inflight++;
-    res.once('close', () => { l.inflight--; armIdle(l); });
-    gate(req, res, () => app(req, res));
+    // Only what's let through counts as the TV asking (keeps it up).
+    gate(req, res, () => {
+      l.inflight++;
+      res.once('close', () => { l.inflight--; armIdle(l); });
+      app(req, res);
+    });
   });
   l.ready = new Promise((resolve) => {
     l.settle = resolve;   // stopped before it was up: whoever waits gets null
@@ -325,7 +348,7 @@ function lanGate(l, shareToken) {
   return function soloLanGate(req, res, next) {
     const url = String(req.url || '');
     const p = url.split('?')[0];
-    const m = /^\/k\/([^/]+)\/proxy\//.exec(p);
+    const m = /^\/k\/([^/]+)\/(?:proxy|api\/logos)\//.exec(p);
     const grant = m && shareToken ? grantFor(l, m[1]) : null;
     const rest = m ? url.slice(3 + m[1].length) : '';
     const ok = !!grant
@@ -359,5 +382,5 @@ function lanLinks(req, _res, next) {
 
 module.exports = {
   enable, disable, active, isLanHost, setLanHost, getLanHost, setCasting, castingActive,
-  castOrigin, ensureListener, listenerAddress, lanLinks, IDLE_MS, CASTING_MAX_MS,
+  castOrigin, ensureListener, isCastImage, listenerAddress, lanLinks, IDLE_MS, CASTING_MAX_MS,
 };

@@ -25,6 +25,9 @@ const config = {
   castWindow: solo ? 6 : 10,
   castMaxSessions: solo ? 1 : 3,
   castMaxPieceBytes: (solo ? 12 : 32) * 1024 * 1024,
+  // Solo's cast listener stops after this long with nothing asked of it
+  // (CAST_IDLE_MS, for tests; else 10 minutes).
+  castIdleMs: parseInt(process.env.CAST_IDLE_MS || '', 10) > 0 ? parseInt(process.env.CAST_IDLE_MS, 10) : 10 * 60 * 1000,
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   nodeEnv: process.env.NODE_ENV || 'development',
   // Optional HTTPS listener (see server.js): port plus PEM certificate and key.
