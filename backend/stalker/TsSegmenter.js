@@ -13,8 +13,9 @@
 //
 // When a stream has no keyframe marks at all (no random-access flag, no
 // keyframe NAL we know), it is cut by the clock instead. A break — the caller
-// says so with discontinuity(), or the PTS jumps by more than 10 s — closes
-// the open piece and marks the next one with #EXT-X-DISCONTINUITY.
+// says so with discontinuity(), or the PTS jumps ahead by more than 10 s or
+// back by more than 1 s (B-frames only step back a few frames) — closes the
+// open piece and marks the next one with #EXT-X-DISCONTINUITY.
 //
 // No I/O here: the caller feeds the bytes and serves the playlist and pieces.
 
@@ -23,6 +24,7 @@ const SYNC = 0x47;
 const PTS_HZ = 90000;
 const WRAP = 2 ** 33;                    // PTS is 33 bits and wraps about every 26.5 hours
 const JUMP_SECONDS = 10;                 // a PTS jump bigger than this is a break
+const BACK_SECONDS = 1;                  // and so is a step back bigger than this
 const KEYLESS_TARGETS = 3;               // no keyframe for this many pieces' length: cut by the clock
 const KEEP_EXTRA = 2;                    // pieces kept past the window, for players a little behind
 const MAX_PIECE_BYTES = 32 * 1024 * 1024; // past this a piece is cut at the next frame, keyframe or not
@@ -130,6 +132,7 @@ class TsSegmenter {
     this.seq = 0;
     this.pendingDisc = false;      // the next piece starts after a break
     this.discDropped = 0;          // discontinuities that went out of the kept pieces
+    this.maxTarget = Math.ceil(targetSeconds);   // #EXT-X-TARGETDURATION: never shrinks, so it never changes back
   }
 
   /** Bytes of the stream, in any split. */
@@ -159,7 +162,7 @@ class TsSegmenter {
     const hidden = this.pieces.length - shown.length;
     const dseq = this.discDropped + this.pieces.slice(0, hidden).filter((p) => p.disc).length;
     const extinf = (p) => p.dur.toFixed(3);
-    const target = Math.max(1, ...shown.map((p) => Math.ceil(Number(extinf(p)))));
+    const target = Math.max(1, this.maxTarget);
     const lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
@@ -261,7 +264,7 @@ class TsSegmenter {
     if (pts == null) return;
     if (this.lastPts !== null) {
       const step = ptsSeconds(pts, this.lastPts);
-      if (Math.abs(step) > JUMP_SECONDS) this._break();
+      if (step > JUMP_SECONDS || step < -BACK_SECONDS) this._break();
       else if (step > 0 && step <= 1 && (this.frameStep === null || step < this.frameStep)) this.frameStep = step;
     }
     this.lastPts = pts;
@@ -331,6 +334,8 @@ class TsSegmenter {
     const o = this.open;
     this.open = null;
     this.pieces.push({ seq: o.seq, data: Buffer.concat(o.packets), dur, disc: o.disc });
+    // The target may only grow: a player may refuse a playlist whose target changed down.
+    this.maxTarget = Math.max(this.maxTarget, Math.ceil(Number(dur.toFixed(3))));
     while (this.pieces.length > this.windowSize + KEEP_EXTRA) {
       if (this.pieces.shift().disc) this.discDropped++;
     }

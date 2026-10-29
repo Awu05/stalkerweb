@@ -181,4 +181,26 @@ describe('TsSegmenter', () => {
     expect(durations(pl)).toEqual([4, 4, 4])
     expect(pl).toMatch(/^#EXT-X-TARGETDURATION:4$/m)
   })
+
+  it('takes a step back in time of more than a second as a break, a small one not', () => {
+    const at = (sec) => 90000 * (100 + sec)
+    const back = new TsSegmenter()
+    back.push(makeTs({ seconds: 13, keyEvery: 2, startPts: at(0) }))
+    back.push(makeTs({ seconds: 9, keyEvery: 2, startPts: at(13 - 2) }))   // 2 s back: a restart, not B-frames
+    expect(back.playlist()).toMatch(/#EXT-X-DISCONTINUITY\n/)
+    const small = new TsSegmenter()
+    small.push(makeTs({ seconds: 13, keyEvery: 2, startPts: at(0) }))
+    small.push(makeTs({ seconds: 9, keyEvery: 2, startPts: at(13 - 0.5) }))
+    expect(small.playlist()).not.toMatch(/#EXT-X-DISCONTINUITY/)
+  })
+
+  it('never lowers #EXT-X-TARGETDURATION once a longer piece was listed', () => {
+    const s = new TsSegmenter({ windowSize: 2 })
+    s.push(makeTs({ seconds: 13, keyEvery: 6 }))
+    expect(s.playlist()).toMatch(/^#EXT-X-TARGETDURATION:6$/m)
+    s.push(makeTs({ seconds: 20, keyEvery: 2, startPts: 90000 * 13 }))
+    const pl = s.playlist()
+    expect(durations(pl)).toEqual([4, 4])   // the 6 s pieces are gone from the list…
+    expect(pl).toMatch(/^#EXT-X-TARGETDURATION:6$/m)   // …and the target stays
+  })
 })
