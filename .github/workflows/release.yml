@@ -73,7 +73,7 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-  # ── Build Android APKs (mobile + tv) ────────────────────────────────────────
+  # ── Build Android APKs (mobile + tv, remote + Solo) ────────────────────────────────────────
   build-apk:
     needs: [version, check]
     runs-on: ubuntu-latest
@@ -110,12 +110,12 @@ jobs:
         working-directory: android
         run: gradle :app:testMobileRemoteDebugUnitTest :app:testMobileSoloDebugUnitTest
 
-      - name: Build APKs (mobile + tv)
+      - name: Build APKs (mobile + tv, remote + Solo)
         working-directory: android
         run: |
           VERSION="${{ needs.version.outputs.tag }}"
           VERSION_CLEAN="${VERSION#v}"
-          gradle :app:assembleMobileRemoteRelease :app:assembleTvRemoteRelease -PversionName="$VERSION_CLEAN"
+          gradle :app:assembleMobileRemoteRelease :app:assembleTvRemoteRelease :app:assembleMobileSoloRelease :app:assembleTvSoloRelease -PversionName="$VERSION_CLEAN"
 
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
@@ -129,6 +129,20 @@ jobs:
         with:
           name: stalkerweb-tv-apk
           path: android/app/build/outputs/apk/tvRemote/release/app-tv-remote-release.apk
+          retention-days: 30
+
+      - name: Upload Solo mobile APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-mobile-apk
+          path: android/app/build/outputs/apk/mobileSolo/release/app-mobile-solo-release.apk
+          retention-days: 30
+
+      - name: Upload Solo tv APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stalkerweb-solo-tv-apk
+          path: android/app/build/outputs/apk/tvSolo/release/app-tv-solo-release.apk
           retention-days: 30
 
   # ── Build & push Docker image ────────────────────────────────────────────
@@ -284,10 +298,22 @@ jobs:
         with:
           name: stalkerweb-tv-apk
 
+      - name: Download Solo mobile APK
+        uses: actions/download-artifact@v8
+        with:
+          name: stalkerweb-solo-mobile-apk
+
+      - name: Download Solo tv APK
+        uses: actions/download-artifact@v8
+        with:
+          name: stalkerweb-solo-tv-apk
+
       - name: Rename artifacts to include version
         run: |
           mv app-mobile-remote-release.apk stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
           mv app-tv-remote-release.apk stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+          mv app-mobile-solo-release.apk stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk
+          mv app-tv-solo-release.apk stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -299,6 +325,8 @@ jobs:
           files: |
             stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk
             stalkerweb-tv-${{ needs.version.outputs.tag }}.apk
+            stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk
+            stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk
           body: |
             ## Docker image
 
@@ -312,5 +340,7 @@ jobs:
             |-----|--------|
             | `stalkerweb-mobile-${{ needs.version.outputs.tag }}.apk` | Phone / tablet (Android 8.0+) |
             | `stalkerweb-tv-${{ needs.version.outputs.tag }}.apk` | FireTV / Android TV / Google TV |
+            | `stalkerweb-solo_mobile-${{ needs.version.outputs.tag }}.apk` | Phone / tablet, all-in-one (no server) |
+            | `stalkerweb-solo_tv-${{ needs.version.outputs.tag }}.apk` | TV, all-in-one (no server) |
 
             Enable **Install from unknown sources** before sideloading.
