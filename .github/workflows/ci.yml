@@ -112,24 +112,25 @@ jobs:
         working-directory: android
         run: |
           set -o pipefail
-          gradle --console=plain :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug :app:assembleMobileSoloDebug :app:assembleTvSoloDebug | tee build.log
-          # The remote variants never run CMake (so they need no NDK).
-          ran=$(grep -E '^> Task :app:[A-Za-z]*(CMake|NativeBuild|JsonModel)[A-Za-z]*Remote' build.log | grep -v -E 'SKIPPED|NO-SOURCE' || true)
-          [ -z "$ran" ] || { echo "CMake ran for a remote variant:"; echo "$ran"; exit 1; }
+          # The remote apps first, on their own: no CMake (Solo's :solonative) may run for them.
+          gradle --console=plain :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug | tee remote.log
+          ran=$(grep -E '^> Task :solonative:|CMake' remote.log || true)
+          [ -z "$ran" ] || { echo "native build ran for a remote app:"; echo "$ran"; exit 1; }
+          gradle --console=plain :app:assembleMobileSoloDebug :app:assembleTvSoloDebug
 
       - name: APK sizes
         working-directory: android/app/build/outputs/apk
         run: ls -l */debug/*.apk
 
       # The remote apps talk to a server elsewhere: no Node, no server, no native
-      # code at all inside (their CMake tasks don't run: app/build.gradle.kts).
+      # bridge inside (they don't depend on :solonative).
       - name: Check the remote APKs carry no Node or server
         working-directory: android/app/build/outputs/apk
         run: |
           for apk in mobileRemote/debug/app-mobile-remote-debug.apk tvRemote/debug/app-tv-remote-debug.apk; do
-            n=$(unzip -l "$apk" | grep -c -E 'libnode|server\.zip|\.so$' || true)
-            echo "$apk: $n native lib/server.zip entries"
-            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|server\.zip|\.so$'; exit 1; }
+            n=$(unzip -l "$apk" | grep -c -E 'libnode|node-bridge|c\+\+_shared|server\.zip' || true)
+            echo "$apk: $n Node/bridge/server.zip entries"
+            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|node-bridge|c\+\+_shared|server\.zip'; exit 1; }
           done
 
       - name: Check the Solo APKs carry Node and the server, under their own app IDs
@@ -138,7 +139,7 @@ jobs:
           aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
           check() {
             apk="$1"; id="$2"
-            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so assets/server.zip; do
+            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so lib/arm64-v8a/libnode-bridge.so lib/armeabi-v7a/libnode-bridge.so assets/server.zip; do
               unzip -l "$apk" | grep -q " $entry\$" || { echo "$apk: no $entry"; exit 1; }
               echo "$apk: $entry"
             done
@@ -178,12 +179,12 @@ jobs:
         working-directory: android/app/build/outputs/apk
         run: |
           for apk in mobileRemote/release/app-mobile-remote-release.apk tvRemote/release/app-tv-remote-release.apk; do
-            n=$(unzip -l "$apk" | grep -c -E 'libnode|server\.zip|\.so$' || true)
-            echo "$apk: $n native lib/server.zip entries"
-            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|server\.zip|\.so$'; exit 1; }
+            n=$(unzip -l "$apk" | grep -c -E 'libnode|node-bridge|c\+\+_shared|server\.zip' || true)
+            echo "$apk: $n Node/bridge/server.zip entries"
+            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|node-bridge|c\+\+_shared|server\.zip'; exit 1; }
           done
           for apk in mobileSolo/release/app-mobile-solo-release.apk tvSolo/release/app-tv-solo-release.apk; do
-            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so assets/server.zip; do
+            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so lib/arm64-v8a/libnode-bridge.so lib/armeabi-v7a/libnode-bridge.so assets/server.zip; do
               unzip -l "$apk" | grep -q " $entry\$" || { echo "$apk: no $entry"; exit 1; }
               echo "$apk: $entry"
             done

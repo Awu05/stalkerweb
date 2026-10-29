@@ -6,8 +6,8 @@ project(stalkerweb-solo CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Gradle runs CMake for every variant; only Solo passes this. The remote apps
-# build no native code at all.
+# Built by the :solonative module (android/solonative), which only the Solo
+# variants depend on; it passes this. The remote apps build no native code.
 if(NOT STALKERWEB_SOLO)
   return()
 endif()

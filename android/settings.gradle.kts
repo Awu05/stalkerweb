@@ -15,3 +15,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "stalkerweb"
 include(":app")
+// Solo's native bridge: only the Solo variants of :app use it.
+include(":solonative")

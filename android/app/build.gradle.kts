@@ -47,20 +47,10 @@ android {
             applicationIdSuffix = ".solo"
             resValue("string", "app_name", "StalkerWeb Solo")
             buildConfigField("Boolean", "IS_SOLO", "true")
-            // Node runs inside Solo (nodejs-mobile): the native bridge is built
-            // for it alone, for the two ABIs Solo ships.
-            externalNativeBuild {
-                cmake { arguments += listOf("-DSTALKERWEB_SOLO=ON", "-DANDROID_STL=c++_shared") }
-            }
+            // Node runs inside Solo (nodejs-mobile), for the two ABIs Solo ships;
+            // its native bridge is the :solonative module, a Solo dependency only.
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
-    }
-
-    // CMake sees every variant, but its tasks don't run for the remote apps
-    // (below), and it builds nothing unless Solo's flag is set
-    // (src/solo/cpp/CMakeLists.txt) — the remote apps carry no native code.
-    externalNativeBuild {
-        cmake { path = file("src/solo/cpp/CMakeLists.txt") }
     }
 
     // libnode.so (android/scripts/fetch-libnode.sh) ships in Solo only. The bridge
@@ -152,16 +142,9 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
-}
 
-// The remote apps carry no native code: the CMake tasks Gradle makes for them
-// (the bridge's path is set for every variant — AGP has no per-flavor one)
-// don't run at all, so they need no NDK. CI checks none ran, and that the
-// remote APKs hold no .so.
-tasks.configureEach {
-    val native = name.startsWith("configureCMake") || name.startsWith("buildCMake") ||
-        name.startsWith("externalNativeBuild") || name.startsWith("generateJsonModel")
-    if (native && name.contains("Remote")) enabled = false
+    // Solo's native bridge (CMake, the NDK): the remote apps don't build it at all.
+    add("soloImplementation", project(":solonative"))
 }
 
 // Name every unit test in the build output, so CI logs show what ran.
