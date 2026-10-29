@@ -19,7 +19,6 @@ import com.stalkerweb.android.data.repo.SoloForeground
 import com.stalkerweb.android.data.repo.soloForeground
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.concurrent.thread
 
 /**
  * Runs the StalkerWeb server (Node) in its own process, ":node". Node can start
@@ -52,7 +51,8 @@ class SoloServerService : Service() {
         }
         // Started again (the app came back to the foreground) while it runs: just the holds.
         if (started.compareAndSet(false, true)) {
-            thread(name = "node") { runServer() }
+            // An 8 MB stack: V8 takes it to have about 1 MB, more than Android gives a thread by default.
+            Thread(null, { runServer() }, "node", NODE_STACK_BYTES).start()
         }
         intent?.getStringArrayExtra(EXTRA_HOLDS)?.let { holds = it.toSet() }
         intent?.extras?.getBinder(EXTRA_LIFE)?.let(::follow)
@@ -157,6 +157,7 @@ class SoloServerService : Service() {
         private const val VERSION_FILE = "server.version"
         private const val CHANNEL_ID = "solo-server"
         private const val NOTIFICATION_ID = 4071
+        private const val NODE_STACK_BYTES = 8L shl 20
 
         /** Start Node again (SoloServer.restart). */
         const val ACTION_RESTART = "com.stalkerweb.android.solo.RESTART"
