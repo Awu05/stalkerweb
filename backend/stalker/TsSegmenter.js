@@ -114,7 +114,7 @@ class TsSegmenter {
     this.maxPieceBytes = maxPieceBytes;
     this.windowSize = windowSize;
     this.now = now;
-    this.rest = Buffer.alloc(0);   // bytes of a packet not yet complete
+    this.rest = Buffer.alloc(0);   // bytes of a packet not yet complete (a copy)
     this.pat = null;               // the latest PAT's packets, put first in every piece
     this.pmt = null;               // and the latest PMT's
     this.pmtPid = null;
@@ -127,7 +127,8 @@ class TsSegmenter {
     this.frameStep = null;         // the shortest step between frames seen, in seconds
     this.at = 0;                   // when the bytes being read arrived
     this.waitFrom = null;          // with no piece open: the PTS we began waiting for a keyframe at
-    this.open = null;              // { seq, packets, bytes, startPts, maxPts, startAt, lastAt, full, disc }
+    this.open = null;              // { seq, buf, bytes, startPts, maxPts, startAt, lastAt, full, disc }
+    this.lastBytes = 0;            // the last piece's size: where the next one's buffer starts
     this.pieces = [];              // closed, oldest first: { seq, data, dur, disc }
     this.seq = 0;
     this.pendingDisc = false;      // the next piece starts after a break
@@ -135,19 +136,37 @@ class TsSegmenter {
     this.maxTarget = Math.ceil(targetSeconds);   // #EXT-X-TARGETDURATION: never shrinks, so it never changes back
   }
 
-  /** Bytes of the stream, in any split. */
+  /**
+   * Bytes of the stream, in any split. Packets are read where they are and
+   * copied once, into the open piece's buffer; only a packet cut off at the
+   * end of a chunk is kept (copied) until the next one comes.
+   */
   push(chunk) {
     this.at = this.now();
-    const buf = this.rest.length ? Buffer.concat([this.rest, chunk]) : chunk;
-    let i = 0;
-    while (buf.length - i >= PACKET) {
+    let j = 0;   // where reading goes on in `chunk`
+    if (this.rest.length) {
+      // The packet cut off last time, with enough of this chunk to finish it
+      // and see the sync byte after it.
+      const n = this.rest.length;
+      const head = Buffer.concat([this.rest, chunk.subarray(0, 2 * PACKET)]);
+      let i = this._scan(head, 0, n);
+      if (i < n) { this.rest = Buffer.from(head.subarray(i)); return; }   // still not a whole packet
+      j = i - n;
+    }
+    j = this._scan(chunk, j, chunk.length);
+    this.rest = Buffer.from(chunk.subarray(j));
+  }
+
+  // Reads the whole packets in `buf` that start before `end`, from `i`; returns where it stopped.
+  _scan(buf, i, end) {
+    while (i < end && buf.length - i >= PACKET) {
       // Out of step (junk, or a lost byte): move on to the next sync byte that
       // is followed by another one a packet later.
       if (buf[i] !== SYNC || (i + PACKET < buf.length && buf[i + PACKET] !== SYNC)) { i++; continue; }
       this._packet(buf.subarray(i, i + PACKET));
       i += PACKET;
     }
-    this.rest = Buffer.from(buf.subarray(i));
+    return i;
   }
 
   /** The source broke off (a reconnect): what comes next is a new piece, after a discontinuity. */
@@ -197,8 +216,7 @@ class TsSegmenter {
     else if (pid === this.pmtPid) this._psi(p, 'pmt');
     else if (pid === this._clockPid() && startsUnit(p)) this._frameStart(p);
     if (!this.open) return;   // before the first cut point (or after a break): dropped
-    this.open.packets.push(p);
-    this.open.bytes += PACKET;
+    this._append(p);
     this.open.lastAt = this.at;
     // Too big (a high bitrate with a long GOP): cut at the next frame. Twice
     // too big means no frame starts come at all, so it's dropped.
@@ -323,17 +341,33 @@ class TsSegmenter {
   _openPiece(pts) {
     const head = [...(this.pat || []), ...(this.pmt || [])];
     this.open = {
-      seq: this.seq++, packets: head, bytes: head.length * PACKET,
+      seq: this.seq++, buf: Buffer.allocUnsafe(Math.max(64 * 1024, this.lastBytes + (this.lastBytes >> 3))), bytes: 0,
       startPts: pts, maxPts: pts, startAt: this.at, lastAt: this.at, full: false, disc: this.pendingDisc,
     };
+    for (const p of head) this._append(p);
     this.pendingDisc = false;
     this.waitFrom = null;
+  }
+
+  // A packet into the open piece's buffer, which doubles when it's full.
+  _append(p) {
+    const o = this.open;
+    if (o.bytes + PACKET > o.buf.length) {
+      const grown = Buffer.allocUnsafe(o.buf.length * 2);
+      o.buf.copy(grown, 0, 0, o.bytes);
+      o.buf = grown;
+    }
+    p.copy(o.buf, o.bytes);
+    o.bytes += PACKET;
   }
 
   _close(dur) {
     const o = this.open;
     this.open = null;
-    this.pieces.push({ seq: o.seq, data: Buffer.concat(o.packets), dur, disc: o.disc });
+    // Cut to size — copied once more when much of the buffer would go unused.
+    const data = o.buf.length - o.bytes > o.bytes >> 3 ? Buffer.from(o.buf.subarray(0, o.bytes)) : o.buf.subarray(0, o.bytes);
+    this.lastBytes = o.bytes;
+    this.pieces.push({ seq: o.seq, data, dur, disc: o.disc });
     // The target may only grow: a player may refuse a playlist whose target changed down.
     this.maxTarget = Math.max(this.maxTarget, Math.ceil(Number(dur.toFixed(3))));
     while (this.pieces.length > this.windowSize + KEEP_EXTRA) {

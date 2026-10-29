@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import crypto from 'crypto'
 import { TsSegmenter } from '../stalker/TsSegmenter.js'
 import { makeTs, pidOf, PMT_PID, AUDIO_PID, startsWithKeyframe } from './helpers/makeTs.js'
 
@@ -202,5 +203,37 @@ describe('TsSegmenter', () => {
     const pl = s.playlist()
     expect(durations(pl)).toEqual([4, 4])   // the 6 s pieces are gone from the list…
     expect(pl).toMatch(/^#EXT-X-TARGETDURATION:6$/m)   // …and the target stays
+  })
+  it('cuts the same bytes as before, pushed in any sizes', () => {
+    // Pieces' sha256 (first 16 hex digits) from the segmenter as it was before
+    // it kept its pieces in one growing buffer: the bytes mustn't change.
+    const ts = Buffer.concat([Buffer.from([0x00, 0x47, 0x12]), makeTs({ seconds: 30, keyEvery: 2 }), Buffer.from([0x47, 0x00]),
+      makeTs({ seconds: 9, keyEvery: 3, startPts: 90000 * 30 })])
+    const s = new TsSegmenter({ windowSize: 20 })
+    const sizes = [1, 187, 188, 189, 376, 1000, 4096, 65536]
+    for (let i = 0, k = 0; i < ts.length; k++) { const n = sizes[k % sizes.length]; s.push(ts.subarray(i, i + n)); i += n }
+    const names = listed(s.playlist())
+    expect(names.map((n) => crypto.createHash('sha256').update(s.segment(n)).digest('hex').slice(0, 16))).toEqual([
+      'fb5f3e1086e4435a', 'de9a64d526872602', 'ab7015caf721a360', '66caa8ca27ffc4ef',
+      'd960e715c5473e8a', 'a42b71f9195ecad4', '88e75f5934b6bc8a', '8eb32d197c107ff6',
+    ])
+    expect(durations(s.playlist())).toEqual([4, 4, 4, 4, 4, 4, 4, 5])
+  })
+
+  it('keeps copies of the bytes, not views of the chunks it was given', () => {
+    // A caller may reuse its buffer; a piece must not change with it (and
+    // mustn't hold a whole chunk alive for a packet of it either).
+    const ts = makeTs({ seconds: 13, keyEvery: 2 })
+    const ref = new TsSegmenter()
+    ref.push(Buffer.from(ts))
+    const s = new TsSegmenter()
+    const scratch = Buffer.alloc(4096)
+    for (let i = 0; i < ts.length; i += scratch.length) {
+      const n = ts.copy(scratch, 0, i, i + scratch.length)
+      s.push(scratch.subarray(0, n))
+      scratch.fill(0xaa)
+    }
+    expect(s.rest.length).toBeLessThan(188)
+    for (const n of listed(ref.playlist())) expect(s.segment(n).equals(ref.segment(n)), n).toBe(true)
   })
 })
