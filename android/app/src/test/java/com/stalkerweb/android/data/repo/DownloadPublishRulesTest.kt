@@ -44,4 +44,40 @@ class DownloadPublishRulesTest {
         assertEquals("Done · 1 MB · not saved to Downloads yet", doneLabel(j, true, emptySet(), "1 MB"))
         assertEquals("Done · 1 MB", doneLabel(j, false, setOf("a"), "1 MB"))
     }
+
+    private val now = 10L * 24 * 60 * 60_000
+    private fun file(name: String, ageMs: Long = 60 * 60_000, isFile: Boolean = true, isLink: Boolean = false) =
+        FolderFile(name, isFile, isLink, now - ageMs)
+
+    @Test fun `saves the finished files no job lists, not ones in use`() {
+        val files = listOf(
+            file("Heat (1995).ts"),                 // left from before the server restarted
+            file("Listed.mp4"),                     // a job's: saved through the job
+            file("Going.ts.part"),                  // still being written, or cut short
+            file("Just done.mp4", ageMs = 30_000),  // finished a moment ago: maybe not in the list read yet
+            file("link.ts", isLink = true),
+            file("folder", isFile = false),
+        )
+        val jobs = listOf(job("a", "done", "/data/user/0/app/files/downloads/Listed.mp4"), job("b", "downloading", null))
+        assertEquals(listOf("Heat (1995).ts"), orphansToPublish(files, jobs, now).map { it.name })
+        assertEquals(listOf("Heat (1995).ts", "Listed.mp4"), orphansToPublish(files.take(2), emptyList(), now).map { it.name })
+    }
+
+    @Test fun `deletes part files older than a day, only while nothing downloads`() {
+        val files = listOf(
+            file("Old.ts.part", ageMs = STALE_PART_MS + 1),
+            file("New.ts.part", ageMs = STALE_PART_MS - 1),
+            file("Old.ts", ageMs = STALE_PART_MS + 1),
+            file("Linked.ts.part", ageMs = STALE_PART_MS + 1, isLink = true),
+        )
+        assertEquals(listOf("Old.ts.part"), stalePartsToDelete(files, listOf(job("a", "done", "/d/x.ts")), now).map { it.name })
+        assertEquals(emptyList<FolderFile>(), stalePartsToDelete(files, listOf(job("b", "queued", null)), now))
+        assertEquals(emptyList<FolderFile>(), stalePartsToDelete(files, listOf(job("b", "downloading", null)), now))
+    }
+
+    @Test fun `an orphan's name in the Downloads folder is its own, cleaned`() {
+        assertEquals("Heat (1995).ts", publicFileName("Heat (1995).ts"))
+        assertEquals("A_B.mp4", publicFileName("A:B.mp4"))
+        assertEquals("download", publicFileName("  "))
+    }
 }

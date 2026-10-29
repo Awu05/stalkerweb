@@ -30,10 +30,39 @@ fun isInside(dir: File, file: File): Boolean {
 private val refused = Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]")
 
 /** The file's name in the Downloads folder: the server's own, without what MediaStore refuses. */
-fun publicName(job: DownloadJob): String {
-    val name = job.filePath.orEmpty().substringAfterLast('/').substringAfterLast('\\')
-    return refused.replace(name, "_").trim().ifEmpty { "download" }
+fun publicName(job: DownloadJob): String = publicFileName(fileNameOf(job.filePath.orEmpty()))
+
+/** [name] as it can be in the Downloads folder: without what MediaStore refuses. */
+fun publicFileName(name: String): String = refused.replace(name, "_").trim().ifEmpty { "download" }
+
+private fun fileNameOf(path: String): String = path.substringAfterLast('/').substringAfterLast('\\')
+
+/** A file in Solo's private download folder, as it was when the folder was looked over. */
+data class FolderFile(val name: String, val isFile: Boolean, val isLink: Boolean, val modifiedMs: Long)
+
+/** A file written to this recently may still be in use (a download just finished, not yet in the job list read). */
+const val IN_USE_MS = 2 * 60_000L
+
+/** A `.part` file left this long, with nothing downloading, was cut short (the app was stopped mid-download). */
+const val STALE_PART_MS = 24 * 60 * 60_000L
+
+/**
+ * The finished files in the download folder that no job lists — left from
+ * before the server was started again, which forgets its jobs — to be saved
+ * to the Downloads folder too. Not a `.part` (one still being written, or cut
+ * short), not a link, not one written to just now.
+ */
+fun orphansToPublish(files: List<FolderFile>, jobs: List<DownloadJob>, nowMs: Long): List<FolderFile> {
+    val listed = jobs.mapNotNull { it.filePath?.let(::fileNameOf) }.toSet()
+    return files.filter {
+        it.isFile && !it.isLink && !it.name.endsWith(".part") && it.name !in listed && nowMs - it.modifiedMs >= IN_USE_MS
+    }
 }
+
+/** The `.part` files older than a day, to be deleted — none while a download is going. */
+fun stalePartsToDelete(files: List<FolderFile>, jobs: List<DownloadJob>, nowMs: Long): List<FolderFile> =
+    if (anyDownloadActive(jobs)) emptyList()
+    else files.filter { it.isFile && !it.isLink && it.name.endsWith(".part") && nowMs - it.modifiedMs > STALE_PART_MS }
 
 fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
     "ts" -> "video/mp2t"

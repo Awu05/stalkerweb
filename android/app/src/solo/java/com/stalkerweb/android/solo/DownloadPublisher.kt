@@ -14,10 +14,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.repo.AppContainer
+import com.stalkerweb.android.data.repo.FolderFile
 import com.stalkerweb.android.data.repo.goneKey
 import com.stalkerweb.android.data.repo.isInside
 import com.stalkerweb.android.data.repo.mimeOf
+import com.stalkerweb.android.data.repo.orphansToPublish
+import com.stalkerweb.android.data.repo.publicFileName
 import com.stalkerweb.android.data.repo.publicName
+import com.stalkerweb.android.data.repo.stalePartsToDelete
 import com.stalkerweb.android.data.repo.toPublish
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +40,10 @@ import java.nio.file.Files
  * it was, to be tried again the next time the jobs are seen.
  *
  * It rides on the job lists the app reads anyway (DownloadsRepository.onJobs),
- * and looks once at start-up for jobs that finished while the app was closed.
+ * and looks once at start-up for jobs that finished while the app was closed —
+ * and for files no job lists any more (the server forgets its jobs when it's
+ * started again), which are saved too, and `.part` files a day old, left by a
+ * download cut short, which are deleted.
  */
 object DownloadPublisher {
     private const val TAG = "DownloadPublisher"
@@ -59,7 +66,9 @@ object DownloadPublisher {
         container.downloads.onJobs = { jobs -> publish(jobs) }
         // Finished while the app was closed: look once the server answers.
         scope.launch {
-            if (SoloServer.awaitReady(container.httpClient)) runCatching { container.downloads.list() }
+            if (!SoloServer.awaitReady(container.httpClient)) return@launch
+            val jobs = runCatching { container.downloads.list() }.getOrNull() ?: return@launch
+            sweep(jobs)
         }
     }
 
@@ -67,7 +76,7 @@ object DownloadPublisher {
     fun attach(activity: ComponentActivity) {
         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return
         val launcher = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) publish(lastJobs)
+            if (granted) { publish(lastJobs); scope?.launch { sweep(lastJobs) } }
         }
         activity.lifecycleScope.launch {
             needsPermission.first { it }
@@ -95,14 +104,46 @@ object DownloadPublisher {
     }
 
     /**
+     * The download folder's files no job lists, saved to the Downloads folder;
+     * `.part` files a day old deleted (orphansToPublish, stalePartsToDelete).
+     * Each kept to the folder as the jobs' files are ([confined]).
+     */
+    private suspend fun sweep(jobs: List<DownloadJob>) {
+        val context = app ?: return
+        lock.withLock {
+            val dir = SoloEnv.downloadDir(context.filesDir)
+            val now = System.currentTimeMillis()
+            val files = dir.listFiles().orEmpty().map {
+                FolderFile(it.name, it.isFile, Files.isSymbolicLink(it.toPath()), it.lastModified())
+            }
+            for (f in orphansToPublish(files, jobs, now)) {
+                val file = File(dir, f.name)
+                if (!confined(file)) continue
+                runCatching { copyOut(file, publicFileName(f.name)) }
+                    .onFailure { Log.w(TAG, "saving a download left from before failed (${it.javaClass.simpleName})") }
+            }
+            for (f in stalePartsToDelete(files, jobs, now)) {
+                val file = File(dir, f.name)
+                if (confined(file) && !file.delete()) Log.w(TAG, "couldn't delete a download cut short")
+            }
+        }
+    }
+
+    /**
      * Whether the job's file is still there to save: the file is the server's
      * word, so it must be a plain file in the download folder (not a link, not
      * somewhere else in the app's storage). One that isn't is let go, not retried.
      */
     private fun usable(job: DownloadJob): Boolean {
-        val context = app ?: return true
+        if (app == null) return true
         val file = File(job.filePath ?: return false)
         if (!file.exists() && !Files.isSymbolicLink(file.toPath())) return false
+        return confined(file)
+    }
+
+    /** [file] is a plain file in the download folder: not a link, not somewhere else in the app's storage. */
+    private fun confined(file: File): Boolean {
+        val context = app ?: return false
         if (Files.isSymbolicLink(file.toPath()) || !isInside(SoloEnv.downloadDir(context.filesDir), file)) {
             Log.w(TAG, "a download's file is outside the download folder; not saved")
             return false
@@ -112,10 +153,13 @@ object DownloadPublisher {
 
     /** Copies the job's file to the Downloads folder, then deletes it here. False if it couldn't (yet). */
     private fun copyOut(job: DownloadJob): Boolean {
-        val context = app ?: return false
         if (!usable(job)) return false
-        val source = File(job.filePath ?: return false)
-        val name = publicName(job)
+        return copyOut(File(job.filePath ?: return false), publicName(job))
+    }
+
+    /** Copies [source] to the Downloads folder as [name], then deletes it here. False if it couldn't (yet). */
+    private fun copyOut(source: File, name: String): Boolean {
+        val context = app ?: return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
