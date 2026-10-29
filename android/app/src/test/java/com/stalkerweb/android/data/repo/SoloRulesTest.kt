@@ -84,4 +84,17 @@ class SoloRulesTest {
         // A reason the app doesn't know (a newer one, say) still keeps it up.
         assertEquals(SoloForeground.DataSync, soloForeground(setOf("something else")))
     }
+
+    @Test fun `the App updates card names Solo as Solo, on a phone or a TV`() {
+        assertEquals("StalkerWeb Solo (phone)", appName(isTv = false, isSolo = true))
+        assertEquals("StalkerWeb Solo (TV)", appName(isTv = true, isSolo = true))
+        assertEquals("StalkerWeb mobile", appName(isTv = false, isSolo = false))
+        assertEquals("StalkerWeb TV", appName(isTv = true, isSolo = false))
+    }
+
+    @Test fun `Solo's empty Downloads says the files go to Downloads, not a server`() {
+        assertTrue(downloadsEmptyHint(isSolo = true).contains("Downloads/StalkerWeb"))
+        assertFalse(downloadsEmptyHint(isSolo = true).contains("server"))
+        assertEquals("Download a movie or episode from VOD to save it on the server.", downloadsEmptyHint(isSolo = false))
+    }
 }

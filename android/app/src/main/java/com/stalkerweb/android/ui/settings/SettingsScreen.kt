@@ -76,6 +76,7 @@ import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.SettingsUpdate
 import com.stalkerweb.android.data.api.ViewerSummary
+import com.stalkerweb.android.data.repo.appName
 import com.stalkerweb.android.data.repo.linksFor
 import com.stalkerweb.android.data.repo.kindLabel
 import com.stalkerweb.android.data.repo.playingFor
@@ -355,7 +356,7 @@ private fun AppTab(updates: UpdateViewModel) {
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (shows(SettingsCard.AppUpdates)) Card(
             "App updates",
-            "StalkerWeb ${if (BuildConfig.IS_TV) "TV" else "mobile"} · version ${BuildConfig.VERSION_NAME}. New releases come from github.com/${BuildConfig.GITHUB_REPO}; the app also checks each time it starts.",
+            "${appName(BuildConfig.IS_TV, BuildConfig.IS_SOLO)} · version ${BuildConfig.VERSION_NAME}. New releases come from github.com/${BuildConfig.GITHUB_REPO}; the app also checks each time it starts.",
         ) {
             OutlinedButton(onClick = updates::checkNow, enabled = !checking) { Icon(Icons.Default.SystemUpdate, null); Text(" Check for updates") }
             status?.let { Text(it, color = SwColors.Muted, style = MaterialTheme.typography.bodySmall) }

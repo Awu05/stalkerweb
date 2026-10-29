@@ -35,6 +35,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.repo.doneLabel
+import com.stalkerweb.android.data.repo.downloadsEmptyHint
 import com.stalkerweb.android.data.repo.formatBytes
 import com.stalkerweb.android.ui.components.EmptyState
 import com.stalkerweb.android.ui.components.tvFocus
@@ -54,7 +55,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel) {
         Text("Downloads", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.padding(16.dp))
         when {
             state.loading -> CircularProgressIndicator(Modifier.padding(32.dp))
-            state.jobs.isEmpty() -> EmptyState(Icons.Default.Download, "No downloads", state.error ?: "Download a movie or episode from VOD to save it on the server.")
+            state.jobs.isEmpty() -> EmptyState(Icons.Default.Download, "No downloads", state.error ?: downloadsEmptyHint(BuildConfig.IS_SOLO))
             else -> LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.jobs, key = { it.id }) { job -> JobRow(job, published) { viewModel.remove(job) } }
             }

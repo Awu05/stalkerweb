@@ -93,6 +93,18 @@ fun castMessage(reachable: Boolean, isSolo: Boolean): String? = when {
     else -> "The TV can't reach this server's address — set it up by its network address (not localhost) to cast"
 }
 
+/** The app's name on the App updates card: Solo is its own app, on a phone or a TV. */
+fun appName(isTv: Boolean, isSolo: Boolean): String = when {
+    isSolo -> "StalkerWeb Solo (${if (isTv) "TV" else "phone"})"
+    isTv -> "StalkerWeb TV"
+    else -> "StalkerWeb mobile"
+}
+
+/** What the empty Downloads screen says: Solo saves to this device's Downloads folder, not to a server. */
+fun downloadsEmptyHint(isSolo: Boolean): String =
+    if (isSolo) "Download a movie or episode from VOD to save it to Downloads/StalkerWeb on this device."
+    else "Download a movie or episode from VOD to save it on the server."
+
 /** Whether any of [jobs] is still to finish (queued or downloading): the server is busy with it. */
 fun anyDownloadActive(jobs: List<DownloadJob>): Boolean =
     jobs.any { it.status == "queued" || it.status == "downloading" }
