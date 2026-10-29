@@ -84,7 +84,7 @@ jobs:
 
       - name: Unit tests
         working-directory: android
-        run: gradle :app:testMobileRemoteDebugUnitTest
+        run: gradle :app:testMobileRemoteDebugUnitTest :app:testMobileSoloDebugUnitTest
 
       - name: Build debug APKs (mobile + tv)
         working-directory: android
