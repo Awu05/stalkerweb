@@ -97,4 +97,49 @@ class SoloRulesTest {
         assertFalse(downloadsEmptyHint(isSolo = true).contains("server"))
         assertEquals("Download a movie or episode from VOD to save it on the server.", downloadsEmptyHint(isSolo = false))
     }
+
+    @Test fun `only Solo follows its downloads to keep a server up`() {
+        assertTrue(followsDownloads(isSolo = true))
+        assertFalse(followsDownloads(isSolo = false))
+    }
+
+    @Test fun `when the app's process ends, a download or a cast still holds the server, playing doesn't`() {
+        assertEquals(setOf(SoloHold.DOWNLOADING, SoloHold.CASTING), holdsLeftByApp(setOf(SoloHold.PLAYING, SoloHold.DOWNLOADING, SoloHold.CASTING)))
+        assertEquals(emptySet<String>(), holdsLeftByApp(setOf(SoloHold.PLAYING)))
+        assertEquals(setOf(SoloHold.CASTING), holdsLeftByApp(setOf(SoloHold.CASTING)))
+    }
+
+    @Test fun `each hold left behind goes once the server says it's over`() {
+        val left = setOf(SoloHold.DOWNLOADING, SoloHold.CASTING)
+        assertEquals(left, holdsAfterStatus(left, SoloStatus(downloadsActive = true, castActive = true)))
+        assertEquals(setOf(SoloHold.CASTING), holdsAfterStatus(left, SoloStatus(downloadsActive = false, castActive = true)))
+        assertEquals(setOf(SoloHold.DOWNLOADING), holdsAfterStatus(left, SoloStatus(downloadsActive = true, castActive = false)))
+        assertEquals(emptySet<String>(), holdsAfterStatus(left, SoloStatus(downloadsActive = false, castActive = false)))
+        // A download the server has going doesn't bring back a hold the app never left.
+        assertEquals(setOf(SoloHold.CASTING), holdsAfterStatus(setOf(SoloHold.CASTING), SoloStatus(downloadsActive = true, castActive = true)))
+        // One the server can't speak for isn't kept.
+        assertEquals(emptySet<String>(), holdsAfterStatus(setOf("something else"), SoloStatus(downloadsActive = true, castActive = true)))
+    }
+
+    @Test fun `reads the server's status, and nothing else as one`() {
+        assertEquals(SoloStatus(downloadsActive = true, castActive = false), parseSoloStatus("""{"downloadsActive":true,"castActive":false}"""))
+        assertEquals(SoloStatus(downloadsActive = false, castActive = true), parseSoloStatus("""{ "castActive" : true, "downloadsActive" : false }"""))
+        assertNull(parseSoloStatus("""{"downloadsActive":true}"""))
+        assertNull(parseSoloStatus("""{"downloadsActive":"yes","castActive":false}"""))
+        assertNull(parseSoloStatus("""{"error":"Unauthorized"}"""))
+        assertNull(parseSoloStatus(""))
+    }
+
+    @Test fun `a restart doesn't stop a server that's still starting, unless it's stuck`() {
+        assertTrue(restartsNode(answered = true, startingForMs = 1_000))
+        assertFalse(restartsNode(answered = false, startingForMs = 25_000))
+        assertFalse(restartsNode(answered = false, startingForMs = SOLO_STUCK_START_MS - 1))
+        assertTrue(restartsNode(answered = false, startingForMs = SOLO_STUCK_START_MS))
+    }
+
+    @Test fun `the first start of a server version is waited for longer`() {
+        assertEquals(20_000L, startWaitMs(20_000, installed = true))
+        assertEquals(60_000L, startWaitMs(20_000, installed = false))
+        assertEquals(90_000L, startWaitMs(90_000, installed = false))
+    }
 }

@@ -144,6 +144,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         createNotificationChannel()
         DownloadPublisher.attach(this)
+        // Solo: the server in the app is bound while this is on screen (a no-op in the remote apps).
+        SoloServer.attach(this)
 
         val container     = (application as StalkerWebApp).container
         val updateManager = UpdateManager(this)

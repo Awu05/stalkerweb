@@ -3,6 +3,7 @@ package com.stalkerweb.android.data.repo
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.DownloadItem
 import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.api.DownloadRequest
@@ -48,13 +49,13 @@ class DownloadsRepository(private val apis: ApiProvider, private val prefs: AppP
 
     // Solo: the server does the downloading, so it's kept up (SoloServer.hold)
     // from the moment one is queued until none is left to finish — wherever it
-    // was started from, whatever screen is open. A no-op in the remote apps.
+    // was started from, whatever screen is open. Not in the remote apps (followsDownloads).
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var watcher: Job? = null
 
     /** Follows the downloads until none is queued or under way, holding the server meanwhile. */
     @Synchronized fun watch() {
-        if (watcher?.isActive == true) return
+        if (!followsDownloads(BuildConfig.IS_SOLO) || watcher?.isActive == true) return
         watcher = scope.launch {
             SoloServer.hold(SoloHold.DOWNLOADING)
             try { followUntilIdle() } finally { SoloServer.release(SoloHold.DOWNLOADING) }

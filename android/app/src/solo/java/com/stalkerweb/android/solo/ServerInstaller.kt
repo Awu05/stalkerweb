@@ -18,6 +18,8 @@ fun interface AssetSource {
  * versions' folders are removed.
  */
 object ServerInstaller {
+    /** The asset naming the server version the app carries. */
+    const val VERSION_ASSET = "server.version"
     private const val ZIP = "server.zip"
     // Written last: a folder without it was cut short (the app stopped mid-way), and is redone.
     private const val DONE = ".installed"
@@ -25,6 +27,9 @@ object ServerInstaller {
     /** Returns `root/<versionTag>/backend/server.js`. */
     fun ensureInstalled(context: Context, assets: AssetSource, versionTag: String, root: File): File =
         ensureInstalled(assets, versionTag, root)
+
+    /** Whether [versionTag] is unpacked in [root] already: a start without it unpacks first, and takes longer. */
+    fun isInstalled(versionTag: String, root: File): Boolean = File(File(root, versionTag), DONE).isFile
 
     fun ensureInstalled(assets: AssetSource, versionTag: String, root: File): File {
         require(versionTag.isNotBlank() && versionTag.none { it == '/' || it == '\\' } && versionTag != "." && versionTag != "..") {

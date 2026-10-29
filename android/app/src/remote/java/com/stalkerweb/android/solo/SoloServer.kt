@@ -1,6 +1,7 @@
 package com.stalkerweb.android.solo
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import com.stalkerweb.android.data.repo.AppContainer
 import okhttp3.OkHttpClient
 
@@ -24,4 +25,7 @@ object SoloServer {
     fun onConnectionFailed() {}
 
     fun restart() {}
+
+    @Suppress("UNUSED_PARAMETER")
+    fun attach(activity: ComponentActivity) {}
 }

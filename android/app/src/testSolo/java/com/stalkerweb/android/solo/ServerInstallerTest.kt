@@ -78,4 +78,14 @@ class ServerInstallerTest {
         assertFalse(File(tmp.root, "escaped.js").exists())
         assertFalse(File(root.parentFile, "escaped.js").exists())
     }
+
+    @Test fun `says whether a version is unpacked yet`() {
+        val root = tmp.newFolder("server")
+        assertFalse(ServerInstaller.isInstalled("v1", root))
+        File(root, "v1/backend").mkdirs()
+        assertFalse(ServerInstaller.isInstalled("v1", root))   // cut short
+        ServerInstaller.ensureInstalled(FakeAssets(serverZip), "v1", root)
+        assertTrue(ServerInstaller.isInstalled("v1", root))
+        assertFalse(ServerInstaller.isInstalled("v2", root))
+    }
 }

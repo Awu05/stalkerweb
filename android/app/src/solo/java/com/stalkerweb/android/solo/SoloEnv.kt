@@ -9,18 +9,17 @@ object SoloEnv {
 
     fun build(
         port: Int,
-        castPort: Int,
         accessKey: String,
         dataDir: File,
         downloadDir: File,
         version: String,
     ): Map<String, String> = mapOf(
         // This device only: the app talks to it on 127.0.0.1, and just the cast
-        // stream is offered on the Wi-Fi, on CAST_PORT, for a Chromecast.
+        // stream is offered on the Wi-Fi, for a Chromecast, on a port the server
+        // picks each time it starts casting.
         "SOLO" to "1",
         "HOST" to "127.0.0.1",
         "PORT" to port.toString(),
-        "CAST_PORT" to castPort.toString(),
         "ACCESS_KEY" to accessKey,
         // The app's private storage.
         "DATA_DIR" to dataDir.path,

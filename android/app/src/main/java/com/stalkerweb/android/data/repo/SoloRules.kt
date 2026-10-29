@@ -129,3 +129,57 @@ fun soloForeground(holds: Set<String>): SoloForeground? = when {
     SoloHold.PLAYING in holds || SoloHold.CASTING in holds -> SoloForeground.MediaPlayback
     else -> SoloForeground.DataSync
 }
+
+/**
+ * Whether the app follows its downloads to hold the server up for them
+ * (DownloadsRepository.watch): Solo only — a remote app's downloads are on a
+ * server it doesn't keep running.
+ */
+fun followsDownloads(isSolo: Boolean): Boolean = isSolo
+
+/**
+ * What the server is still held for once the app's process has ended (swiped
+ * away, or stopped by Android). Playing was in the app and ended with it; a
+ * download goes on in the server, and a cast on the TV, which keeps fetching
+ * from it — those are kept until the server says they're over ([holdsAfterStatus]).
+ */
+fun holdsLeftByApp(holds: Set<String>): Set<String> = holds - SoloHold.PLAYING
+
+/** The server's word on what still needs it (GET /api/solo/status). */
+data class SoloStatus(val downloadsActive: Boolean, val castActive: Boolean)
+
+/** The server's answer to GET /api/solo/status, or null when it isn't one. */
+fun parseSoloStatus(json: String): SoloStatus? {
+    fun flag(name: String) = Regex(""""$name"\s*:\s*(true|false)\b""").find(json)?.groupValues?.get(1)?.toBooleanStrict()
+    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null)
+}
+
+/**
+ * [left] (holdsLeftByApp) once the server has said [status]: each is let go
+ * when the server no longer has it going. One the server can't speak for
+ * isn't kept — nothing in the app is left to let go of it.
+ */
+fun holdsAfterStatus(left: Set<String>, status: SoloStatus): Set<String> = left.filterTo(mutableSetOf()) {
+    when (it) {
+        SoloHold.DOWNLOADING -> status.downloadsActive
+        SoloHold.CASTING -> status.castActive
+        else -> false
+    }
+}
+
+/** How long a server that's still starting (installing or booting) is given before a restart may stop it after all. */
+const val SOLO_STUCK_START_MS = 180_000L
+
+/**
+ * Whether a restart the app asks for (Try again, a key refused) starts Node
+ * again. Not while the server is still starting — unpacking itself on a first
+ * start, or booting: stopping it then only starts that over. It's waited for
+ * again, unless it has been at it for [SOLO_STUCK_START_MS] without answering.
+ */
+fun restartsNode(answered: Boolean, startingForMs: Long): Boolean = answered || startingForMs >= SOLO_STUCK_START_MS
+
+/** How long the first start of a server version may take: it unpacks the server first. */
+const val SOLO_FIRST_START_MS = 60_000L
+
+/** How long to wait for the server to answer: [askedMs], or longer when this version isn't [installed] yet. */
+fun startWaitMs(askedMs: Long, installed: Boolean): Long = if (installed) askedMs else maxOf(askedMs, SOLO_FIRST_START_MS)
