@@ -40,6 +40,7 @@ data class DownloadJob(
     val totalBytes: Long = 0,
     val error: String? = null,
     val createdAt: Long = 0,
+    val filePath: String? = null,           // where the server saved it, once done
 )
 
 @JsonClass(generateAdapter = false)

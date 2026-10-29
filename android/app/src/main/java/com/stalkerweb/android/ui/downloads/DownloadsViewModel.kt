@@ -21,6 +21,7 @@ data class DownloadsState(val jobs: List<DownloadJob> = emptyList(), val loading
 class DownloadsViewModel(private val downloads: DownloadsRepository) : ViewModel() {
     private val _state = MutableStateFlow(DownloadsState())
     val state: StateFlow<DownloadsState> = _state.asStateFlow()
+    val published: StateFlow<Set<String>> = downloads.published
 
     init {
         // Ones still going that the app didn't queue this run (from before a

@@ -66,6 +66,7 @@ object SoloServer {
 
         start()
         CastNetwork.start(app, container)
+        DownloadPublisher.start(scope, app, container)
         // And each time the app comes to the foreground: while it was in the
         // background Android may have stopped the service, or its process.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

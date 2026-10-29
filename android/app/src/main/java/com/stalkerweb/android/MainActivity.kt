@@ -37,6 +37,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stalkerweb.android.crash.CrashReporter
+import com.stalkerweb.android.solo.DownloadPublisher
 import com.stalkerweb.android.data.api.AppEvent
 import com.stalkerweb.android.data.repo.PlayerParams
 import com.stalkerweb.android.data.update.UpdateManager
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         createNotificationChannel()
+        DownloadPublisher.attach(this)
 
         val container     = (application as StalkerWebApp).container
         val updateManager = UpdateManager(this)
