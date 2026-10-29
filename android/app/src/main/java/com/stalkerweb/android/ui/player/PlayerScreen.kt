@@ -45,9 +45,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -74,6 +72,8 @@ import coil.compose.AsyncImage
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
+import com.stalkerweb.android.data.repo.LiveKey
+import com.stalkerweb.android.data.repo.liveKey
 import com.stalkerweb.android.data.repo.nowPlaying
 import com.stalkerweb.android.data.repo.progressAt
 import com.stalkerweb.android.data.repo.progressOf
@@ -145,6 +145,9 @@ private class LiveActions(
     val onExitFullscreen: () -> Unit,
     val onToggleStats: () -> Unit,
     val onGoFullscreen: () -> Unit,
+    val onHideControls: () -> Unit,
+    /** Whether a control has the remote's focus — the controls stay up while it does. */
+    val onControlsFocused: (Boolean) -> Unit,
 )
 
 @OptIn(UnstableApi::class)
@@ -174,6 +177,7 @@ fun PlayerScreen(
     }
 
     var showControls by remember { mutableStateOf(true) }
+    var controlsFocused by remember { mutableStateOf(false) }
     var isPlaying    by remember { mutableStateOf(false) }
     var isBuffering  by remember { mutableStateOf(true) }
     var playerError  by remember { mutableStateOf<String?>(null) }
@@ -252,9 +256,10 @@ fun PlayerScreen(
     LaunchedEffect(activeId) { playerError = null }
 
     // The controls hide after 3 s of playing — but not while the channel list is
-    // open: it covers their List button, and nothing else would close it.
-    LaunchedEffect(showControls, isPlaying, isLandscape, isTV, state.showChannelList) {
-        if (showControls && isPlaying && (isLandscape || isTV) && !state.showChannelList) {
+    // open (it covers their List button, and nothing else would close it), nor
+    // while the remote is on one of them.
+    LaunchedEffect(showControls, isPlaying, isLandscape, isTV, state.showChannelList, controlsFocused) {
+        if (showControls && isPlaying && (isLandscape || isTV) && !state.showChannelList && !controlsFocused) {
             delay(3_000)
             showControls = false
         }
@@ -309,6 +314,8 @@ fun PlayerScreen(
         onBack                 = onBack,
         onToggleControls       = { showControls = !showControls },
         onShowControls         = { showControls = true },
+        onHideControls         = { showControls = false },
+        onControlsFocused      = { controlsFocused = it },
         onTogglePlayPause      = { if (isPlaying) player?.pause() else player?.play() },
         onRetry                = { viewModel.loadStream(activeId) },
         onSleepTimer           = { showSleepTimer = true },
@@ -370,30 +377,51 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
     }
     val isFav = c.activeId in s.favoriteIds
 
+    // The remote is on the picture, or on one of the controls (lib: data/repo/LiveRules liveKey).
+    var onPicture by remember { mutableStateOf(true) }
+    val playPauseFocus = remember { FocusRequester() }
+    var focusControls by remember { mutableStateOf(false) }
+    // OK on the picture: the controls come up with Play/Pause in focus, once they're on screen.
+    LaunchedEffect(focusControls, c.showControls) {
+        if (focusControls && c.showControls) {
+            withFrameNanos { }
+            runCatching { playPauseFocus.requestFocus() }
+            focusControls = false
+        }
+    }
+    // The controls gone (timed out, Back): the remote back on the picture.
+    LaunchedEffect(c.showControls) {
+        if (!c.showControls && !s.showChannelList) runCatching { playerFocusRequester.requestFocus() }
+    }
+    val onControls = c.showControls && !onPicture && !s.showChannelList
+    LaunchedEffect(onControls) { a.onControlsFocused(onControls) }
+    // Back on a control: the controls go, the remote is on the picture again.
+    BackHandler(enabled = onControls) { a.onHideControls() }
+
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
+            .onFocusChanged { onPicture = it.isFocused }
             .focusable()
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                 a.onShowControls()
-                digitOf(event.nativeKeyEvent.keyCode)?.let { if (!s.showChannelList) { a.onDigit(it); return@onKeyEvent true } }
-                when (event.key) {
-                    Key.DirectionCenter, Key.Enter -> { a.onTogglePlayPause(); true }
-                    Key.MediaPlayPause             -> { a.onTogglePlayPause(); true }
-                    Key.MediaPlay                  -> { c.player?.play(); true }
-                    Key.MediaPause                 -> { c.player?.pause(); true }
-                    // D-pad Up/Down walk the list as it reads; CH+ is the next channel, as on any remote.
-                    Key.DirectionUp, Key.ChannelDown     -> { if (!s.showChannelList) { a.onPreviousChannel(); true } else false }
-                    Key.DirectionDown, Key.ChannelUp     -> { if (!s.showChannelList) { a.onNextChannel(); true } else false }
-                    Key.DirectionRight             -> { if (!s.showChannelList) { a.onToggleChannelList(); true } else false }
-                    Key.DirectionLeft              -> { if (s.showChannelList) { a.onCloseChannelList(); true } else false }
-                    Key.Info, Key.Guide, Key.G     -> { a.onToggleGuide(); true }
-                    // The remote's ≡ (focus stays on the picture, so the top bar's button is out of its reach).
-                    Key.Menu, Key.S                -> { a.onToggleStats(); true }
-                    else                           -> false
+                val code = event.nativeKeyEvent.keyCode
+                if (onPicture) digitOf(code)?.let { if (!s.showChannelList) { a.onDigit(it); return@onKeyEvent true } }
+                when (liveKey(code, onPicture = onPicture, listOpen = s.showChannelList)) {
+                    LiveKey.PlayPause       -> { a.onTogglePlayPause(); true }
+                    LiveKey.Play            -> { c.player?.play(); true }
+                    LiveKey.Pause           -> { c.player?.pause(); true }
+                    LiveKey.PreviousChannel -> { a.onPreviousChannel(); true }
+                    LiveKey.NextChannel     -> { a.onNextChannel(); true }
+                    LiveKey.OpenControls    -> { focusControls = true; true }
+                    LiveKey.OpenList        -> { a.onToggleChannelList(); true }
+                    LiveKey.CloseList       -> { a.onCloseChannelList(); true }
+                    LiveKey.Guide           -> { a.onToggleGuide(); true }
+                    LiveKey.Stats           -> { a.onToggleStats(); true }
+                    LiveKey.Pass            -> false
                 }
             }
             .clickable(
@@ -470,7 +498,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TipIconButton(label = "Play/Pause", onClick = a.onTogglePlayPause) {
+                    TipIconButton(label = "Play/Pause", onClick = a.onTogglePlayPause, modifier = Modifier.focusRequester(playPauseFocus)) {
                         Icon(
                             if (c.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             "Play/Pause", tint = Color.White,
