@@ -67,8 +67,14 @@ android {
     sourceSets {
         getByName("solo") { jniLibs.srcDir("libnode/jniLibs") }
     }
+    // Native libs compressed in the APK (and unpacked at install): libnode.so is
+    // ~50 MB per ABI. Only Solo has any of its own; for the remote apps this
+    // changes next to nothing.
     packaging {
-        jniLibs { pickFirsts += "lib/*/libnode.so" }
+        jniLibs {
+            pickFirsts += "lib/*/libnode.so"
+            useLegacyPackaging = true
+        }
     }
 
     signingConfigs {

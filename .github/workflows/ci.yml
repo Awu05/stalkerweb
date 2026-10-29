@@ -102,6 +102,10 @@ jobs:
         working-directory: android
         run: gradle :app:assembleMobileRemoteDebug :app:assembleTvRemoteDebug :app:assembleMobileSoloDebug :app:assembleTvSoloDebug
 
+      - name: APK sizes
+        working-directory: android/app/build/outputs/apk
+        run: ls -l */debug/*.apk
+
       # The remote apps talk to a server elsewhere: no Node, no server inside.
       - name: Check the remote APKs carry no Node or server
         working-directory: android/app/build/outputs/apk

@@ -24,19 +24,6 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_ACCESS_KEY, null)
         set(value) = prefs.edit().putString(KEY_ACCESS_KEY, value).apply()
 
-    // Solo only: the server inside the app — its two ports (the app's, and the
-    // cast listener's on the Wi-Fi) and its access key, chosen on first launch
-    // (solo/SoloServer). 0 = not chosen yet.
-    var soloPort: Int
-        get() = prefs.getInt(KEY_SOLO_PORT, 0)
-        set(value) = prefs.edit().putInt(KEY_SOLO_PORT, value).apply()
-    var soloCastPort: Int
-        get() = prefs.getInt(KEY_SOLO_CAST_PORT, 0)
-        set(value) = prefs.edit().putInt(KEY_SOLO_CAST_PORT, value).apply()
-    var soloKey: String?
-        get() = prefs.getString(KEY_SOLO_KEY, null)
-        set(value) = prefs.edit().putString(KEY_SOLO_KEY, value).apply()
-
     // The server's playback-only token, put in stream and image links (players
     // and cast devices can't send the header). Fetched from the server.
     var shareToken: String?
@@ -284,9 +271,6 @@ class AppPrefs(context: Context) {
         private const val KEY_SERVER_URL      = "server_url"
         private const val KEY_ACCESS_KEY      = "access_key"
         private const val KEY_SHARE_TOKEN     = "share_token"
-        private const val KEY_SOLO_PORT       = "solo_port"
-        private const val KEY_SOLO_CAST_PORT  = "solo_cast_port"
-        private const val KEY_SOLO_KEY        = "solo_key"
         private const val KEY_VIEWER_ID       = "viewer_id"
         private const val KEY_ACCESS_REJECTED = "access_rejected_message"
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"

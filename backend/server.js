@@ -516,6 +516,13 @@ const httpServer = listenOn(app, config.port, () => {
     : 'no ACCESS_KEY — anyone who can reach this server can use it (fine on a home network; set one before exposing it to the internet)');
   tryAutoConnect();
 });
+// The port taken (EADDRINUSE) or not allowed: say so, and stop with an error —
+// a server that can't listen is no use, and Solo's app picks other ports
+// when it starts the server again.
+httpServer.on('error', (e) => {
+  log.error('server', `can't listen on ${config.host}:${config.port} (${e.code || e.message}) — stopping`);
+  process.exit(1);
+});
 
 // Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast
 // (lib/soloCast.js). Not started without an access key: no share token, nothing
