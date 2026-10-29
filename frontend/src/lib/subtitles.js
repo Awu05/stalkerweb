@@ -15,6 +15,9 @@ const TWO_LETTER = {
   eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', dut: 'nl', nld: 'nl',
   rus: 'ru', ara: 'ar', chi: 'zh', zho: 'zh', jpn: 'ja', kor: 'ko', tur: 'tr', pol: 'pl', swe: 'sv', nor: 'no',
   dan: 'da', fin: 'fi', gre: 'el', ell: 'el', heb: 'he', hin: 'hi', rum: 'ro', ron: 'ro', hun: 'hu', cze: 'cs', ces: 'cs',
+  per: 'fa', fas: 'fa', ukr: 'uk', bul: 'bg', hrv: 'hr', srp: 'sr', slo: 'sk', slk: 'sk', slv: 'sl', tha: 'th', vie: 'vi',
+  ind: 'id', may: 'ms', msa: 'ms', ben: 'bn', urd: 'ur', tam: 'ta', tel: 'te', pan: 'pa', cat: 'ca', alb: 'sq', sqi: 'sq',
+  nob: 'no', nno: 'no',
 }
 
 /** A language code as two letters where it can be: "eng" → "en", "pt-BR" → "pt". */

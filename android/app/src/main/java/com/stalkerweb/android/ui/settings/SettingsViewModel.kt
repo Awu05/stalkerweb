@@ -128,10 +128,9 @@ class SettingsViewModel(
         viewers.filtersSaved()
     }
 
-    fun setAutoSkip(on: Boolean) = act("Saved") {
-        settings.saveAutoSkip(on)
-        viewers.refresh()
-    }
+    // The viewer's player settings (the VOD player's gear has the same).
+    fun setSkipMode(mode: String) = act("Saved") { viewers.savePlayerSettings(skipMode = mode) }
+    fun setAudioLanguage(code: String) = act("Saved") { viewers.savePlayerSettings(audioLanguage = code) }
 
     // Connection
     // A portal change reloads Channels, VOD and the Guide (as the Portal screen does on Back).

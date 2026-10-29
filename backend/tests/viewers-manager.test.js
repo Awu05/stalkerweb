@@ -230,3 +230,47 @@ describe('favorites per viewer', () => {
     expect(viewers.get(a.id).favorites.channels).toEqual(['90210'])
   })
 })
+
+describe('player settings per viewer', () => {
+  beforeEach(() => viewers.ensureInitialized({}))
+
+  it('starts with the Skip button and the stream\'s own audio', () => {
+    expect(viewers.create({ name: 'Andy' })).toMatchObject({ skipMode: 'button', audioLanguage: '' })
+  })
+
+  it('reads an old viewer\'s auto-skip as the "auto" skip mode', () => {
+    const file = path.join(dir, 'viewers.json')
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const id = data.viewers[0].id
+    data.viewers[0].autoSkip = true
+    delete data.viewers[0].skipMode
+    data.viewers.push({ id: 'view_old', name: 'Old', color: COLORS[1] })
+    fs.writeFileSync(file, JSON.stringify(data))
+    const fresh = new ViewersManager(dir)
+    expect(fresh.get(id).skipMode).toBe('auto')
+    expect(fresh.get('view_old')).toMatchObject({ skipMode: 'button', audioLanguage: '' })
+  })
+
+  it('saves the skip mode, keeping autoSkip in step for older apps', () => {
+    const a = viewers.create({ name: 'Andy' })
+    expect(viewers.setFilters(a.id, { skipMode: 'off' })).toMatchObject({ skipMode: 'off', autoSkip: false })
+    expect(viewers.setFilters(a.id, { skipMode: 'auto' })).toMatchObject({ skipMode: 'auto', autoSkip: true })
+    expect(statusOf(() => viewers.setFilters(a.id, { skipMode: 'always' }))).toBe(400)
+  })
+
+  it('takes an older app\'s autoSkip as the skip mode', () => {
+    const a = viewers.create({ name: 'Andy' })
+    expect(viewers.setFilters(a.id, { autoSkip: true }).skipMode).toBe('auto')
+    expect(viewers.setFilters(a.id, { autoSkip: false }).skipMode).toBe('button')
+    expect(viewers.setFilters(a.id, { autoSkip: true, skipMode: 'off' }).skipMode).toBe('off')
+  })
+
+  it('saves a preferred audio language as a two-letter code, or none', () => {
+    const a = viewers.create({ name: 'Andy' })
+    expect(viewers.setFilters(a.id, { audioLanguage: 'ES' }).audioLanguage).toBe('es')
+    expect(viewers.setFilters(a.id, { audioLanguage: '' }).audioLanguage).toBe('')
+    for (const bad of ['eng', 'e', 'en-US', 7, null]) {
+      expect(statusOf(() => viewers.setFilters(a.id, { audioLanguage: bad }))).toBe(400)
+    }
+  })
+})

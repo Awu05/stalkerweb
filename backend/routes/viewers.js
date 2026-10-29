@@ -2,13 +2,16 @@
 // GET    /api/viewers              — { defaultViewerId, viewers: [{ id, name, color }] }
 // POST   /api/viewers              — { name, color? } create
 // GET    /api/viewers/me           — the viewer this request is for, with its filters
-// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult?, autoSkip? }
+// PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult?,
+//                                       skipMode? ('off' | 'button' | 'auto'), audioLanguage? ('' | 'en'…),
+//                                       autoSkip? (older apps: true = 'auto', false = 'button') }
 // PUT    /api/viewers/:id          — { name?, color? }
 // DELETE /api/viewers/:id          — not the last one
 
 'use strict';
 
 const express = require('express');
+const { skipModeOf, audioLanguageOf } = require('../viewers/ViewersManager');
 const log = require('../logger');
 const TAG = 'viewers';
 
@@ -30,7 +33,11 @@ module.exports = function viewersModule(viewers) {
     disabledLanguages: v.disabledLanguages ?? [],
     disabledVodCategories: v.disabledVodCategories ?? [],
     showAdult: v.showAdult === true,
-    autoSkip: v.autoSkip === true,   // skip intros and recaps without asking (lib/skipSegments.js)
+    // The player's settings gear: intro skipping (lib/skipSegments.js) and the
+    // preferred audio language. autoSkip is for older apps (= skipMode 'auto').
+    skipMode: skipModeOf(v),
+    autoSkip: skipModeOf(v) === 'auto',
+    audioLanguage: audioLanguageOf(v),
   });
 
   // Runs a change and answers with its result, or with the error it raised.

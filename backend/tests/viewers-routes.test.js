@@ -78,6 +78,10 @@ describe('viewers API and favorites', () => {
     expect(saved.body).toMatchObject({ id: sam.id, isDefault: false, disabledGenres: ['Sports'], showAdult: true })
     expect((await call('GET', '/api/viewers/me')).body.disabledGenres).toEqual([])
     expect((await call('PUT', '/api/viewers/me/filters', { showAdult: 'yes' }, sam.id)).status).toBe(400)
+    const player = await call('PUT', '/api/viewers/me/filters', { skipMode: 'off', audioLanguage: 'fr' }, sam.id)
+    expect(player.body).toMatchObject({ skipMode: 'off', autoSkip: false, audioLanguage: 'fr' })
+    expect((await call('GET', '/api/viewers/me', null, sam.id)).body).toMatchObject({ skipMode: 'off', audioLanguage: 'fr' })
+    expect((await call('PUT', '/api/viewers/me/filters', { audioLanguage: 'french' }, sam.id)).status).toBe(400)
   })
 
   it('tells a device whose viewer was deleted, instead of using the default viewer\'s data', async () => {

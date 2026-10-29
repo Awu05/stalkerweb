@@ -1,6 +1,7 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.CreateViewerRequest
+import com.stalkerweb.android.data.api.PlayerSettingsRequest
 import com.stalkerweb.android.data.api.ViewerDetails
 import com.stalkerweb.android.data.api.ViewerSummary
 import com.stalkerweb.android.data.prefs.AppPrefs
@@ -46,6 +47,13 @@ class ViewerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
 
     suspend fun refresh(): ViewerDetails? =
         runCatching { apis.get().getMyViewer() }.getOrNull().also { _current.value = it }
+
+    /**
+     * The viewer's player settings (the VOD player's gear, Settings): intro
+     * skipping and the preferred audio language. Throws with the server's message.
+     */
+    suspend fun savePlayerSettings(skipMode: String? = null, audioLanguage: String? = null): ViewerDetails =
+        apis.get().savePlayerSettings(PlayerSettingsRequest(skipMode, audioLanguage)).also { _current.value = it }
 
     /** The current viewer's live TV filter, reading the viewer first if needed. */
     suspend fun filter(): ViewerFilter = ViewerFilter.from(_current.value ?: refresh())
