@@ -64,6 +64,7 @@ module.exports = function streamRoutes(appState) {
     // The TV plays it from its own address: claimed for any.
     appState.activity?.claim({ kind: 'live', id: rawId, viewerId: req.viewer?.id, cast: true,
       title: appState.channelManager?.getChannel?.(rawId)?.name });
+    appState.castHls?.retry?.(rawId);   // a channel that stopped answering last time gets another go
     res.json(await castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
   });
 

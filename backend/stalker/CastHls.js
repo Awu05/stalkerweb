@@ -10,9 +10,11 @@
 // When the source drops (a restart at the portal), the reader opens it again
 // and the playlist carries on after an #EXT-X-DISCONTINUITY, so the TV keeps
 // playing. A session ends once the device stops asking for it; the next
-// request starts it again. Each holds a dozen pieces in memory — for 4K that's
+// request starts it again. One whose source stopped answering (the reader gave
+// up) isn't started again for the TV: its asks fail until it stops asking, or
+// the app asks for a new cast link (retry()). Each holds a dozen pieces in memory — for 4K that's
 // a lot — so there are at most a few (in Solo, on a phone, one channel and
-// fewer pieces: config.js), and a stopped one lets go at once.
+// fewer, smaller pieces: config.js), and a stopped one lets go at once.
 //
 // An HLS channel whose segments the segmenter can't cut (encrypted, or fMP4)
 // is passed through: playlist() answers null, and the route sends the TV to
@@ -32,22 +34,24 @@ class CastHls {
    * @param {(channelId: string) => string} o.inputUrlFor  this server's own stream URL for a channel
    * @param {string} [o.userAgent]       what this server reads its own stream as
    * @param {number} [o.idleMs]          a session no one asked for in this long is stopped
-   * @param {number} [o.startTimeoutMs]  how long the first piece may take
+   * @param {number} [o.startTimeoutMs]  how long an ask waits for the first piece
    * @param {number} [o.maxSessions]     channels cast at once; the least recently used gives way
    * @param {number} [o.windowSize]      pieces in each channel's playlist (TsSegmenter)
    * @param {typeof readSelfStream} [o.reader]
    */
-  constructor({ inputUrlFor, userAgent = null, idleMs = 30_000, startTimeoutMs = 15_000, maxSessions = 3, windowSize = 10,
-    now = Date.now, reader = readSelfStream } = {}) {
+  constructor({ inputUrlFor, userAgent = null, idleMs = 30_000, startTimeoutMs = 20_000, maxSessions = 3, windowSize = 10,
+    maxPieceBytes = 32 * 1024 * 1024, now = Date.now, reader = readSelfStream } = {}) {
     this._inputUrlFor = inputUrlFor;
     this._userAgent = userAgent;
     this._idleMs = idleMs;
     this._startTimeoutMs = startTimeoutMs;
     this._maxSessions = maxSessions;
     this._windowSize = windowSize;
+    this._maxPieceBytes = maxPieceBytes;
     this._now = now;
     this._reader = reader;
     this._sessions = new Map();   // channelId → { seg, ctrl, lastUsed, waiters }
+    this._gaveUp = new Map();     // channelId → when the TV last asked, for a channel that stopped answering
     this._sweeper = setInterval(() => this._sweep(), Math.max(1000, Math.min(idleMs, 10_000)));
     this._sweeper.unref?.();
   }
@@ -61,6 +65,10 @@ class CastHls {
    */
   playlist(channelId) {
     const id = String(channelId);
+    if (!this._sessions.has(id) && this._gaveUp.has(id)) {
+      this._gaveUp.set(id, this._now());
+      return Promise.reject(new Error('The channel stopped answering'));
+    }
     const s = this._sessions.get(id) ?? this._start(id);
     s.lastUsed = this._now();
     if (s.passthrough) return Promise.resolve(null);
@@ -68,9 +76,11 @@ class CastHls {
     if (text) return Promise.resolve(text);
     return new Promise((resolve, reject) => {
       const w = { resolve, reject, timer: null };
+      // Only this ask gives up: the reader carries on, so the TV's next ask
+      // may find the first piece (a 4K channel can take a while). The session
+      // ends the usual ways — no one asks any more, or its source gives up.
       w.timer = setTimeout(() => {
         s.waiters = s.waiters.filter((x) => x !== w);
-        this._stop(id, 'no picture in time');
         reject(new Error('The channel took too long to start'));
       }, this._startTimeoutMs);
       w.timer.unref?.();
@@ -92,11 +102,18 @@ class CastHls {
   }
 
   /** The channel's session ended now (the sender stopped casting it, or moved on). */
-  stop(channelId, why = 'stopped') { this._stop(String(channelId), why); }
+  stop(channelId, why = 'stopped') {
+    this._gaveUp.delete(String(channelId));
+    this._stop(String(channelId), why);
+  }
+
+  /** A new cast of the channel: one that stopped answering is tried again on the TV's next ask. */
+  retry(channelId) { this._gaveUp.delete(String(channelId)); }
 
   /** Every session ended (on shutdown). */
   stopAll() {
     for (const id of [...this._sessions.keys()]) this._stop(id, 'shutdown');
+    this._gaveUp.clear();
     clearInterval(this._sweeper);
   }
 
@@ -108,7 +125,7 @@ class CastHls {
       this._stop(oldest, 'room for another channel');
     }
     log.info(TAG, `ch ${id}: casting as HLS`);
-    const s = { seg: new TsSegmenter({ now: this._now, windowSize: this._windowSize }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [], passthrough: null };
+    const s = { seg: new TsSegmenter({ now: this._now, windowSize: this._windowSize, maxPieceBytes: this._maxPieceBytes }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [], passthrough: null };
     this._sessions.set(id, s);
     const current = () => this._sessions.get(id) === s;
     this._reader(this._inputUrlFor(id), {
@@ -138,7 +155,11 @@ class CastHls {
       },
     }).then(
       () => { if (current() && !s.passthrough) this._stop(id, 'its source ended'); },
-      (e) => { if (current()) this._stop(id, `its source failed: ${e.message}`); },
+      (e) => {
+        if (!current()) return;
+        if (e.gaveUp) this._gaveUp.set(id, this._now());
+        this._stop(id, `its source failed: ${e.message}`);
+      },
     );
     return s;
   }
@@ -159,6 +180,7 @@ class CastHls {
   _sweep() {
     const t = this._now();
     for (const [id, s] of this._sessions) if (t - s.lastUsed > this._idleMs) this._stop(id, 'no longer watched');
+    for (const [id, at] of this._gaveUp) if (t - at > this._idleMs) this._gaveUp.delete(id);
   }
 }
 

@@ -17,13 +17,18 @@
 // (the segmenter marks a discontinuity) and it's opened again after
 // min(2^n × 250 ms, 5 s), n the breaks since bytes last came. An HLS channel
 // carries on from the segment after the last one sent, when the playlist still
-// lists it, so the TV isn't shown again what it played. It only ends when
-// `signal` aborts.
+// lists it, so the TV isn't shown again what it played. It ends when `signal`
+// aborts — or gives up on a channel that stopped answering: 8 tries in a row
+// with nothing, or 2 minutes without a byte. Then it rejects (`gaveUp`), and
+// the cast session ends rather than knock at the portal for as long as the
+// TV keeps asking.
 
 const { parsePlaylist } = require('../lib/restartSmoother');
 
 const START_SEGMENTS = 3;      // where an HLS channel starts: this many from the end
 const STALL_MS = 15_000;       // nothing in this long: the source is gone, open it again
+const GIVE_UP_TRIES = 8;       // tries in a row with nothing: the channel stopped answering
+const GIVE_UP_MS = 120_000;    // and so has one that sent nothing in this long
 const backoff = (n) => Math.min(2 ** n * 250, 5000);
 
 /** Waits `ms`, or less when `signal` aborts. */
@@ -47,14 +52,17 @@ function sleep(ms, signal) {
  * @param {string} [o.userAgent]
  * @param {typeof fetch} [o.fetchImpl]
  * @param {number} [o.pollMs]                the HLS playlist's re-read interval (tests); else half a segment
+ * @param {(n: number) => number} [o.backoffMs]  the wait before try n+1 after n in a row with nothing (tests)
+ * @param {() => number} [o.now]             the clock, for the 2 minutes (tests)
  */
 async function readSelfStream(url, { onData, onBreak, onUnsupported = () => {}, signal, userAgent = null, fetchImpl = globalThis.fetch,
-  pollMs = null, stallMs = STALL_MS } = {}) {
+  pollMs = null, stallMs = STALL_MS, backoffMs = backoff, now = Date.now } = {}) {
   const headers = userAgent ? { 'User-Agent': userAgent } : {};
   // Across reconnects: where an HLS channel got to (the restart smoother keeps
   // its numbers steady), and a segment that failed once already.
   const state = { last: null, failed: null };
   let breaks = 0;
+  let lastData = now();
   while (!signal.aborted) {
     // One go at the source, with its own abort: for the caller's, and for a stall.
     const attempt = new AbortController();
@@ -82,9 +90,12 @@ async function readSelfStream(url, { onData, onBreak, onUnsupported = () => {}, 
     signal.removeEventListener('abort', stop);
     if (signal.aborted) break;
     if (unsupported) { onUnsupported(unsupported); return; }
-    if (got) breaks = 0;
+    if (got) { breaks = 0; lastData = now(); }
+    else if (breaks + 1 >= GIVE_UP_TRIES || now() - lastData >= GIVE_UP_MS) {
+      throw Object.assign(new Error('the channel stopped answering'), { gaveUp: true });
+    }
     onBreak();
-    await sleep(backoff(breaks++), signal);
+    await sleep(backoffMs(breaks++), signal);
   }
 }
 

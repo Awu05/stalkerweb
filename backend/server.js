@@ -361,7 +361,7 @@ appState.shareToken = access.shareToken;
 {
   const { CastHls } = require('./stalker/CastHls');
   appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA,
-    windowSize: config.castWindow, maxSessions: config.castMaxSessions });
+    windowSize: config.castWindow, maxSessions: config.castMaxSessions, maxPieceBytes: config.castMaxPieceBytes });
 }
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).

@@ -120,8 +120,8 @@ describe('Solo config', () => {
   })
 
   it('keeps less of a cast channel in memory in Solo', () => {
-    expect(load({})).toMatchObject({ castWindow: 10, castMaxSessions: 3 })
-    expect(load({ SOLO: '1' })).toMatchObject({ castWindow: 6, castMaxSessions: 1 })
+    expect(load({})).toMatchObject({ castWindow: 10, castMaxSessions: 3, castMaxPieceBytes: 32 * 1024 * 1024 })
+    expect(load({ SOLO: '1' })).toMatchObject({ castWindow: 6, castMaxSessions: 1, castMaxPieceBytes: 12 * 1024 * 1024 })
   })
 })
 

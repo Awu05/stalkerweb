@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest'
 import os from 'os'
 import http from 'http'
 import { setInterval, clearInterval } from 'timers'
@@ -35,12 +35,13 @@ describe('cast links', () => {
 })
 
 describe('/api/stream/:id/cast and /api/vod/cast', () => {
-  let server, base, stopped
+  let server, base, stopped, retried
   beforeAll(async () => {
     stopped = []
+    retried = []
     const appState = {
       shareToken: 'tok',
-      castHls: { stop: (id) => stopped.push(id) },   // no FFmpeg needed: nothing asks whether it's there
+      castHls: { stop: (id) => stopped.push(id), retry: (id) => retried.push(id) },   // no FFmpeg needed: nothing asks whether it's there
       sessionManager: { isAuthenticated: () => true },
       vodManager: { getStreamUrl: async (id) => (id === 'hls' ? 'http://cdn/x/index.m3u8?t=1' : 'http://cdn/x/movie.mkv') },
     }
@@ -63,6 +64,7 @@ describe('/api/stream/:id/cast and /api/vod/cast', () => {
   it('gives a live channel as HLS under the share token', async () => {
     const r = await get('/api/stream/42/cast', '192.168.1.5:8983')
     expect(r.body).toEqual({ url: 'http://192.168.1.5:8983/k/tok/proxy/cast/live/42/index.m3u8', contentType: 'application/x-mpegURL', live: true, reachable: true })
+    expect(retried).toContain('42')   // a channel that stopped answering gets another go
   })
 
   it('says when the address is only this machine', async () => {
@@ -178,6 +180,16 @@ describe('CastHls', () => {
     expect(readers).toHaveLength(2)
   })
 
+  it('caps a piece at the size it is told to (Solo: 12 MB, for a 4K channel)', async () => {
+    hls = make({ maxPieceBytes: 12 * 1024 * 1024 })
+    hls.playlist('6').catch(() => {})
+    expect(hls._sessions.get('6').seg.maxPieceBytes).toBe(12 * 1024 * 1024)
+    hls.stopAll()
+    hls = make()
+    hls.playlist('6').catch(() => {})
+    expect(hls._sessions.get('6').seg.maxPieceBytes).toBe(32 * 1024 * 1024)
+  })
+
   it('starts no more than maxSessions', async () => {
     hls = make({ maxSessions: 2 })
     hls.playlist('1').catch(() => {}); clock += 10
@@ -202,11 +214,35 @@ describe('CastHls', () => {
     expect(hls.size).toBe(1)
   })
 
-  it('gives up on a channel that never starts', async () => {
-    hls = make({ startTimeoutMs: 50 })
+  it('answers a slow first ask with an error, but keeps reading for the next one', async () => {
+    hls = make({ startTimeoutMs: 50, idleMs: 1000 })
     await expect(hls.playlist('4')).rejects.toThrow('too long')
-    expect(readers[0].signal.aborted).toBe(true)
+    expect(readers[0].signal.aborted).toBe(false)   // only that ask gave up
+    expect(hls.size).toBe(1)
+    readers[0].onData(makeTs({ seconds: 12 }))
+    expect(await hls.playlist('4')).toContain('#EXTM3U')
+    expect(readers).toHaveLength(1)
+    // It ends the usual way: no one asks for it any more.
+    clock += 1500
+    hls._sweep()
     expect(hls.size).toBe(0)
+    expect(readers[0].signal.aborted).toBe(true)
+  })
+
+  it('waits 20 s for the first piece: one at 17 s still serves the ask', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    try {
+      hls = make()
+      const p = hls.playlist('4')
+      let settled = null
+      p.then(() => { settled = 'ok' }, (e) => { settled = e.message })
+      vi.advanceTimersByTime(17_000)
+      expect(settled).toBe(null)
+      readers[0].onData(makeTs({ seconds: 12 }))
+      await Promise.resolve()
+      expect(settled).toBe('ok')
+      expect(await hls.playlist('4')).toContain('#EXTM3U')
+    } finally { vi.useRealTimers() }
   })
 
   it('ends the session when its reader fails, and starts again next time', async () => {
@@ -216,6 +252,33 @@ describe('CastHls', () => {
     fail(new Error('boom'))
     await expect(p).rejects.toThrow('stopped')
     expect(hls.size).toBe(0)
+    hls.playlist('8').catch(() => {})
+    expect(readers).toHaveLength(2)
+  })
+
+  it('ends the session when its source stops answering, and refuses the TV until a new cast', async () => {
+    let fail
+    hls = make({ idleMs: 1000, reader: (url, o) => { readers.push({ url, ...o }); return new Promise((_, reject) => { fail = reject }) } })
+    const p = hls.playlist('8')
+    fail(Object.assign(new Error('the channel stopped answering'), { gaveUp: true }))
+    await expect(p).rejects.toThrow('stopped')
+    expect(hls.size).toBe(0)
+    await expect(hls.playlist('8')).rejects.toThrow('stopped answering')   // the TV's next ask: a 502
+    expect(hls.segment('8', 'seg0.ts')).toBeNull()                         // a piece: a 404
+    expect(readers).toHaveLength(1)                                        // not opened again
+    hls.retry('8')   // the app asked for a cast link again
+    hls.playlist('8').catch(() => {})
+    expect(readers).toHaveLength(2)
+  })
+
+  it('forgets a channel that stopped answering once the TV stops asking', async () => {
+    let fail
+    hls = make({ idleMs: 1000, reader: (url, o) => { readers.push({ url, ...o }); return new Promise((_, reject) => { fail = reject }) } })
+    const p = hls.playlist('8')
+    fail(Object.assign(new Error('the channel stopped answering'), { gaveUp: true }))
+    await expect(p).rejects.toThrow()
+    clock += 1500
+    hls._sweep()
     hls.playlist('8').catch(() => {})
     expect(readers).toHaveLength(2)
   })

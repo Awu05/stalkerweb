@@ -92,6 +92,42 @@ describe('readSelfStream', () => {
     expect(Date.now() - t0).toBeGreaterThanOrEqual(700)
   })
 
+  it('gives up on a source that keeps refusing: 8 tries in a row with nothing', async () => {
+    let calls = 0
+    const breaks = []
+    const fetchImpl = async () => { calls++; return new Response('Forbidden', { status: 403 }) }
+    await expect(readSelfStream('http://127.0.0.1:1/proxy/stream/9', {
+      onData: () => {}, onBreak: () => breaks.push(1),
+      signal: new AbortController().signal, fetchImpl, backoffMs: () => 0,
+    })).rejects.toThrow('the channel stopped answering')
+    expect(calls).toBe(8)
+  })
+
+  it('gives up after 2 minutes with no bytes, however few the tries', async () => {
+    let t = 0
+    let calls = 0
+    // Each try takes 30 s to fail (a source that never answers).
+    const fetchImpl = async () => { calls++; t += 30_000; return new Response('Forbidden', { status: 403 }) }
+    const e = await readSelfStream('http://127.0.0.1:1/proxy/stream/9', {
+      onData: () => {}, onBreak: () => {}, now: () => t,
+      signal: new AbortController().signal, fetchImpl, backoffMs: () => 0,
+    }).catch((x) => x)
+    expect(e.message).toBe('the channel stopped answering')
+    expect(e.gaveUp).toBe(true)
+    expect(calls).toBe(4)
+  })
+
+  it('does not give up on a source that still sends something now and then', async () => {
+    const ctrl = new AbortController()
+    let calls = 0
+    const fetchImpl = async () => (++calls % 7 === 0 ? ts(['x']) : new Response('Forbidden', { status: 403 }))
+    await readSelfStream('http://127.0.0.1:1/proxy/stream/9', {
+      onData: () => {}, onBreak: () => { if (calls >= 60) ctrl.abort() },
+      signal: ctrl.signal, fetchImpl, backoffMs: () => 0,
+    })
+    expect(calls).toBeGreaterThanOrEqual(60)
+  })
+
   it('stops when aborted', async () => {
     const ctrl = new AbortController()
     let signal
