@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.stalkerweb.android.data.api.DownloadJob
 import com.stalkerweb.android.data.repo.AppContainer
+import com.stalkerweb.android.data.repo.goneKey
+import com.stalkerweb.android.data.repo.isInside
 import com.stalkerweb.android.data.repo.mimeOf
 import com.stalkerweb.android.data.repo.publicName
 import com.stalkerweb.android.data.repo.toPublish
@@ -24,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.nio.file.Files
 
 /**
  * The server downloads into the app's private folder, where no other app (nor
@@ -85,16 +88,33 @@ object DownloadPublisher {
                         .onFailure { Log.w(TAG, "saving a download failed (${it.javaClass.simpleName})") }
                         .getOrDefault(false)
                     if (saved) c.downloads.markPublished(job.id)
+                    else if (!usable(job)) c.downloads.markPublished(goneKey(job.id))
                 }
             }
         }
     }
 
+    /**
+     * Whether the job's file is still there to save: the file is the server's
+     * word, so it must be a plain file in the download folder (not a link, not
+     * somewhere else in the app's storage). One that isn't is let go, not retried.
+     */
+    private fun usable(job: DownloadJob): Boolean {
+        val context = app ?: return true
+        val file = File(job.filePath ?: return false)
+        if (!file.exists() && !Files.isSymbolicLink(file.toPath())) return false
+        if (Files.isSymbolicLink(file.toPath()) || !isInside(SoloEnv.downloadDir(context.filesDir), file)) {
+            Log.w(TAG, "a download's file is outside the download folder; not saved")
+            return false
+        }
+        return file.isFile
+    }
+
     /** Copies the job's file to the Downloads folder, then deletes it here. False if it couldn't (yet). */
     private fun copyOut(job: DownloadJob): Boolean {
         val context = app ?: return false
+        if (!usable(job)) return false
         val source = File(job.filePath ?: return false)
-        if (!source.isFile) return false
         val name = publicName(job)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver

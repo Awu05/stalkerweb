@@ -131,7 +131,7 @@ class SoloServerService : Service() {
             val version = assets.open(VERSION_FILE).bufferedReader().use { it.readText().trim() }
             val entry = ServerInstaller.ensureInstalled(this, { name -> assets.open(name) }, version, File(filesDir, "server"))
             val dataDir = File(filesDir, "data").apply { mkdirs() }
-            val downloadDir = File(filesDir, "downloads").apply { mkdirs() }
+            val downloadDir = SoloEnv.downloadDir(filesDir).apply { mkdirs() }
             val env = SoloEnv.build(config.port, config.castPort, config.key, dataDir, downloadDir, BuildConfig.VERSION_NAME)
             Log.i(TAG, "starting the server (version $version) on 127.0.0.1:${config.port}")
             runtime.start(entry, emptyList(), env)

@@ -4,6 +4,9 @@ import java.io.File
 
 /** The environment the server inside Solo runs with (its Solo mode, backend/config.js). */
 object SoloEnv {
+    /** Where the server saves downloads, in the app's private storage. */
+    fun downloadDir(filesDir: File): File = File(filesDir, "downloads")
+
     fun build(
         port: Int,
         castPort: Int,
