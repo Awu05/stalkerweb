@@ -22,6 +22,19 @@ function dropHeader(headers, name) {
   for (const k of Object.keys(headers)) if (k.toLowerCase() === name) delete headers[k];
 }
 
+/**
+ * A Cookie header from the caller's and the jar's: the caller's cookies are
+ * kept, the jar's win on the same name (the jar holds what the portal set).
+ */
+function mergeCookies(caller, jar) {
+  if (!caller) return jar;
+  if (!jar) return caller;
+  const name = (pair) => pair.split('=')[0].trim();
+  const fromJar = new Set(jar.split(';').map(name));
+  const kept = caller.split(';').map((p) => p.trim()).filter((p) => p && !fromJar.has(name(p)));
+  return kept.length ? `${kept.join('; ')}; ${jar}` : jar;
+}
+
 /** A response's set-cookie headers as a list (a lone one can arrive as text). */
 function setCookiesOf(headers) {
   const raw = headers && (headers['set-cookie'] || headers['Set-Cookie']);
@@ -40,7 +53,7 @@ function withCookieJar(instance, jar) {
 
   instance.interceptors.request.use((config) => {
     const url = instance.getUri(config);
-    const cookie = jar.getCookieStringSync(url);
+    const cookie = mergeCookies(config.headers.get('Cookie'), jar.getCookieStringSync(url));
     if (cookie) config.headers.set('Cookie', cookie);
     // Each redirect: keep what the page we're leaving set, then send the
     // jar's cookies on to the next. `url` is where we are now.
@@ -72,4 +85,4 @@ function withCookieJar(instance, jar) {
   return instance;
 }
 
-module.exports = { withCookieJar };
+module.exports = { withCookieJar, mergeCookies };

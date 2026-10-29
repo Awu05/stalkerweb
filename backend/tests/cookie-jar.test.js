@@ -41,7 +41,7 @@ const ipv6 = await new Promise((resolve) => {
 })
 
 function client(jar) {
-  return withCookieJar(axios.create({ jar, withCredentials: true, maxRedirects: 10 }), jar)
+  return withCookieJar(axios.create({ withCredentials: true, maxRedirects: 10 }), jar)
 }
 
 describe('cookie jar for axios', () => {
@@ -52,6 +52,19 @@ describe('cookie jar for axios', () => {
     const { data } = await client(jar).get(`${base}/echo`)
     expect(data.cookie).toContain('mac=00%3A1A%3A79%3A12%3A34%3A56')
     expect(data.cookie).toContain('stb_lang=en')
+  })
+
+  it("keeps a Cookie the caller set, the jar's winning on the same name", async () => {
+    const jar = new CookieJar()
+    jar.setCookieSync('mac=jar', base)
+    const { data } = await client(jar).get(`${base}/echo`, { headers: { cookie: 'extra=1; mac=caller' } })
+    const sent = data.cookie.split('; ').sort()
+    expect(sent).toEqual(['extra=1', 'mac=jar'])
+  })
+
+  it("sends the caller's Cookie as is when the jar has none for the address", async () => {
+    const { data } = await client(new CookieJar()).get(`${base}/echo`, { headers: { Cookie: 'extra=1' } })
+    expect(data.cookie).toBe('extra=1')
   })
 
   it('keeps cookies the portal sets, across a redirect', async () => {
