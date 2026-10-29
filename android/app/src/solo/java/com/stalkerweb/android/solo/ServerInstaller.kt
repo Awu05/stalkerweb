@@ -27,7 +27,7 @@ object ServerInstaller {
         ensureInstalled(assets, versionTag, root)
 
     fun ensureInstalled(assets: AssetSource, versionTag: String, root: File): File {
-        require(versionTag.isNotBlank() && versionTag.none { it == '/' || it == '\' } && versionTag != "." && versionTag != "..") {
+        require(versionTag.isNotBlank() && versionTag.none { it == '/' || it == '\\' } && versionTag != "." && versionTag != "..") {
             "bad server version tag"
         }
         val dir = File(root, versionTag)
