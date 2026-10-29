@@ -320,7 +320,7 @@ module.exports = function vodRoutes(appState, config, { watchStore = null, skipS
     try {
       const link = await vodStreamLink(req.query);
       claimVod(req, { cast: true });
-      res.json(castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
+      res.json(await castLink(req, appState.shareToken, link.path, link.isHls ? 'application/x-mpegURL' : vodContentType(link.ext), false));
     } catch (e) {
       res.status(e.status || 502).json({ error: e.message });
     }

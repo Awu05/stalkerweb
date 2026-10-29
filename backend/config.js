@@ -10,13 +10,18 @@ if (solo && (process.env.HOST || '').trim() && process.env.HOST.trim() !== SOLO_
 
 const config = {
   port: parseInt(process.env.PORT || '8983', 10),
-  // The address to listen on. 0.0.0.0 = every address (IPv6 too, see
-  // server.js). Solo is always 127.0.0.1, so only the app reaches it.
-  host: solo ? SOLO_HOST : (process.env.HOST || '').trim() || '0.0.0.0',
+  // The address to listen on: every address (IPv6 too, see server.js) — in
+  // Solo only 127.0.0.1, so only the app reaches it. HOST isn't read: cast
+  // and the server's own pulls go to 127.0.0.1, which another address breaks.
+  host: solo ? SOLO_HOST : '0.0.0.0',
   // Solo: the server runs inside the StalkerWeb Solo Android app, and a second
   // listener on CAST_PORT gives a Chromecast the cast stream only (lib/soloCast.js).
   solo,
   castPort: solo ? parseInt(process.env.CAST_PORT || '0', 10) || 0 : 0,
+  // Cast channels in memory (stalker/CastHls.js): pieces in each playlist, and
+  // channels at once. A phone has less to spare: 6 and 1 there, 10 and 3 elsewhere.
+  castWindow: solo ? 6 : 10,
+  castMaxSessions: solo ? 1 : 3,
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   nodeEnv: process.env.NODE_ENV || 'development',
   // Optional HTTPS listener (see server.js): port plus PEM certificate and key.

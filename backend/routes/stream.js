@@ -58,13 +58,13 @@ module.exports = function streamRoutes(appState) {
   // A cast device's link for a live channel: the channel as HLS (CastHls),
   // under the playback-only share token. Nothing is resolved here — the
   // device's first request starts it.
-  router.get('/:channelId/cast', (req, res) => {
+  router.get('/:channelId/cast', async (req, res) => {
     const rawId = req.params.channelId;
     if (!/^\d+$/.test(rawId)) return res.status(400).json({ error: 'Invalid channel ID' });
     // The TV plays it from its own address: claimed for any.
     appState.activity?.claim({ kind: 'live', id: rawId, viewerId: req.viewer?.id, cast: true,
       title: appState.channelManager?.getChannel?.(rawId)?.name });
-    res.json(castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
+    res.json(await castLink(req, appState.shareToken, `/proxy/cast/live/${rawId}/index.m3u8`, 'application/x-mpegURL', true));
   });
 
   // The sender stopped casting the channel, or moved the TV to another: its

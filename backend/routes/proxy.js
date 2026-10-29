@@ -1036,8 +1036,11 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     const buf = appState.castHls?.segment(req.params.channelId, req.params.segment);
     if (!buf) return res.status(404).send('Not found');
     appState.touchActivity?.();
-    res.set('Cache-Control', 'no-cache');
-    res.type('video/mp2t').send(buf);
+    // Sent as it is: send() would hash every piece (megabytes, every few
+    // seconds) for an ETag — and a piece's name comes round again in a new
+    // session, so it would be no use anyway.
+    res.set({ 'Cache-Control': 'no-cache', 'Content-Type': 'video/mp2t', 'Content-Length': String(buf.length) });
+    res.end(buf);
   });
 
   // ── GET /proxy/hls?url=<encoded> — sub-playlist proxy ────────────────────

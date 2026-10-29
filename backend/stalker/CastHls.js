@@ -11,7 +11,8 @@
 // and the playlist carries on after an #EXT-X-DISCONTINUITY, so the TV keeps
 // playing. A session ends once the device stops asking for it; the next
 // request starts it again. Each holds a dozen pieces in memory — for 4K that's
-// a lot — so there are at most a few, and a stopped one lets go at once.
+// a lot — so there are at most a few (in Solo, on a phone, one channel and
+// fewer pieces: config.js), and a stopped one lets go at once.
 //
 // An HLS channel whose segments the segmenter can't cut (encrypted, or fMP4)
 // is passed through: playlist() answers null, and the route sends the TV to
@@ -33,15 +34,17 @@ class CastHls {
    * @param {number} [o.idleMs]          a session no one asked for in this long is stopped
    * @param {number} [o.startTimeoutMs]  how long the first piece may take
    * @param {number} [o.maxSessions]     channels cast at once; the least recently used gives way
+   * @param {number} [o.windowSize]      pieces in each channel's playlist (TsSegmenter)
    * @param {typeof readSelfStream} [o.reader]
    */
-  constructor({ inputUrlFor, userAgent = null, idleMs = 30_000, startTimeoutMs = 15_000, maxSessions = 3, now = Date.now,
-    reader = readSelfStream } = {}) {
+  constructor({ inputUrlFor, userAgent = null, idleMs = 30_000, startTimeoutMs = 15_000, maxSessions = 3, windowSize = 10,
+    now = Date.now, reader = readSelfStream } = {}) {
     this._inputUrlFor = inputUrlFor;
     this._userAgent = userAgent;
     this._idleMs = idleMs;
     this._startTimeoutMs = startTimeoutMs;
     this._maxSessions = maxSessions;
+    this._windowSize = windowSize;
     this._now = now;
     this._reader = reader;
     this._sessions = new Map();   // channelId → { seg, ctrl, lastUsed, waiters }
@@ -105,7 +108,7 @@ class CastHls {
       this._stop(oldest, 'room for another channel');
     }
     log.info(TAG, `ch ${id}: casting as HLS`);
-    const s = { seg: new TsSegmenter({ now: this._now }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [], passthrough: null };
+    const s = { seg: new TsSegmenter({ now: this._now, windowSize: this._windowSize }), ctrl: new AbortController(), lastUsed: this._now(), waiters: [], passthrough: null };
     this._sessions.set(id, s);
     const current = () => this._sessions.get(id) === s;
     this._reader(this._inputUrlFor(id), {

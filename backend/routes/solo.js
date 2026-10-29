@@ -3,8 +3,8 @@
 // Solo only (SOLO=1): what the app tells the server about the device.
 //
 //   PUT /api/solo/network { lanHost }   the device's Wi-Fi address (an IP), or
-//                                       null without Wi-Fi — cast links point
-//                                       there (lib/soloCast.js)
+//                                       null without Wi-Fi — the cast listener
+//                                       listens there (lib/soloCast.js)
 //
 // Behind the access gate like the rest of /api: the app's own key, not the
 // share token.
@@ -20,10 +20,9 @@ function soloRoutes(soloCast) {
     if (lanHost !== null && !soloCast.isLanHost(lanHost)) {
       return res.status(400).json({ error: 'lanHost must be an IP address, or null without Wi-Fi' });
     }
-    const before = soloCast.castOrigin();
-    soloCast.setLanHost(lanHost);
-    const now = soloCast.castOrigin();
-    if (now !== before) log.info('solo', now ? `cast links now on ${now}` : 'no Wi-Fi address — casting needs Wi-Fi');
+    if (soloCast.setLanHost(lanHost)) {
+      log.info('solo', lanHost ? `Wi-Fi address ${lanHost} — cast links go there` : 'no Wi-Fi address — casting needs Wi-Fi');
+    }
     res.status(204).end();
   });
 

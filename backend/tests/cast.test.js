@@ -133,6 +133,13 @@ describe('CastHls', () => {
     expect(hls.available()).toBe(true)
   })
 
+  it('lists as many pieces as it is told to (Solo keeps fewer)', async () => {
+    hls = make({ windowSize: 2 })
+    const p = hls.playlist('6')
+    readers[0].onData(makeTs({ seconds: 30 }))
+    expect(pieces(await p)).toHaveLength(2)
+  })
+
   it('keeps the TV playing across a source restart (EXT-X-DISCONTINUITY, pieces keep coming)', async () => {
     hls = make()
     const p = hls.playlist('21')
@@ -341,6 +348,8 @@ describe('the cast playlist route', () => {
     const seg = await get(`/k/tok/proxy/cast/live/44/${name}`)
     expect(seg.status).toBe(200)
     expect(seg.headers['content-type']).toMatch(/video\/mp2t/)
+    expect(seg.headers.etag).toBeUndefined()   // not hashed for one
+    expect(Number(seg.headers['content-length'])).toBe(seg.body.length)
     expect(startsWithKeyframe(seg.body)).toBe(true)
   })
 })

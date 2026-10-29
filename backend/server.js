@@ -170,6 +170,10 @@ app.use((req, res, next) => {
 });
 
 app.use(access.stripPrefix);
+// Solo: what comes in on the cast listener hands out links under its cast
+// token, not the share token (lib/soloCast.js).
+const soloCast = require('./lib/soloCast');
+app.use(soloCast.lanLinks);
 // Which viewer each request is for — after the access prefix (links look like
 // /k/<token>/v/<viewer>/…) and before the gate, which checks the stripped path.
 app.use(viewerContext.middleware);
@@ -356,7 +360,8 @@ function selfStreamUrl(id) {
 appState.shareToken = access.shareToken;
 {
   const { CastHls } = require('./stalker/CastHls');
-  appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA });
+  appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA,
+    windowSize: config.castWindow, maxSessions: config.castMaxSessions });
 }
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).
@@ -418,8 +423,7 @@ app.use('/api/xmltv', xmltvRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
 // Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast links.
-// (They point at the cast listener once it's up, below.)
-const soloCast = require('./lib/soloCast');
+// (They point at the cast listener, below.)
 require('./routes/solo').mount(app, config, soloCast);
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
@@ -524,13 +528,12 @@ httpServer.on('error', (e) => {
   process.exit(1);
 });
 
-// Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast
-// (lib/soloCast.js). Not started without an access key: no share token, nothing
-// it could safely answer.
-let castServer = null;
+// Solo: the cast stream — and only that — on the Wi-Fi, for a Chromecast, while
+// something is cast (lib/soloCast.js). Off without an access key: no share
+// token, nothing it could safely answer.
 if (config.solo) {
   if (config.castPort) {
-    castServer = soloCast.startLanListener({ app, port: config.castPort, shareToken: access.shareToken });
+    soloCast.enable({ app, port: config.castPort, shareToken: access.shareToken, castSessions: () => appState.castHls?.size ?? 0 });
   } else {
     log.warn('server', 'Solo without CAST_PORT — the cast listener is not started, so casting is off');
   }
@@ -584,7 +587,7 @@ function shutdown(signal) {
     appState.sessionManager.destroy();
   }
   httpsServer?.close();
-  castServer?.close();
+  soloCast.disable();   // the cast listener
   httpServer.close(() => {
     log.info('server', 'HTTP server closed');
     process.exit(0);

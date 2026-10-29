@@ -5,14 +5,15 @@
 // share token (/k/<token>, lib/access.js) — never the access key — and the
 // address the app was opened on, which the device must be able to reach too.
 // In Solo the app is on 127.0.0.1, so links go to the cast listener on the
-// device's Wi-Fi address instead (lib/soloCast.js).
+// device's Wi-Fi address instead, under that listener's own cast token
+// (lib/soloCast.js) — asking for one starts it.
 
 const { origin } = require('./publicUrl');
 const soloCast = require('./soloCast');
 
 /** Scheme, host and (with an access key) the share-token prefix. */
 function castBase(req, shareToken) {
-  return `${soloCast.castOrigin() || origin(req)}${shareToken ? `/k/${shareToken}` : ''}`;
+  return `${origin(req)}${shareToken ? `/k/${shareToken}` : ''}`;
 }
 
 /** Whether a host is only this machine — a cast device can't reach that. */
@@ -29,15 +30,14 @@ function vodContentType(ext) {
 }
 
 /** What a cast-link request answers: the URL, its type, and whether a device can reach it. */
-function castLink(req, shareToken, pathAndQuery, contentType, live) {
-  return {
-    url: `${castBase(req, shareToken)}${pathAndQuery}`,
-    contentType,
-    live,
-    // In Solo: reachable once there's a Wi-Fi address; without one the link
-    // stays on 127.0.0.1 and the app says casting needs Wi-Fi.
-    reachable: soloCast.active() ? !!soloCast.castOrigin() : !isLocalHost(req.get('host')),
-  };
+async function castLink(req, shareToken, pathAndQuery, contentType, live) {
+  if (soloCast.active()) {
+    // Reachable once the cast listener is up on the Wi-Fi address; without
+    // one the link stays on 127.0.0.1 and the app says casting needs Wi-Fi.
+    const lan = await soloCast.ensureListener();
+    return { url: `${lan || castBase(req, shareToken)}${pathAndQuery}`, contentType, live, reachable: !!lan };
+  }
+  return { url: `${castBase(req, shareToken)}${pathAndQuery}`, contentType, live, reachable: !isLocalHost(req.get('host')) };
 }
 
 module.exports = { castBase, isLocalHost, vodContentType, castLink };
