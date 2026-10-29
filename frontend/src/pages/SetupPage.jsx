@@ -30,7 +30,7 @@ import {
 import ViewersCard from '@/components/ViewersCard'
 import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
-import { AutoSkipSetting } from '@/components/SkipControls'
+import PlaybackSettings from '@/components/PlaybackSettings'
 import SubtitleSettings from '@/components/SubtitleSettings'
 import TimezonePicker from '@/components/TimezonePicker'
 import { missingFields, prepareForm } from '@/lib/profileRequired'
@@ -1043,7 +1043,7 @@ export default function SetupPage() {
           title={viewer ? `My playback (${viewer.name})` : 'My playback'}
           description="How movies and episodes play for you. Other viewers keep their own."
         >
-          <AutoSkipSetting />
+          <PlaybackSettings />
         </Card>
           </>
         )}

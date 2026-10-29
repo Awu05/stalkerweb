@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import Hls from 'hls.js'
 import {
@@ -21,8 +21,11 @@ import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
 import { SkipButton, SkipMatch } from '@/components/SkipControls'
 import { SubtitleButton, SubtitleMenu } from '@/components/SubtitleMenu'
+import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSettingsMenu'
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
-import { skipAt, autoSkipTo } from '@/lib/skipSegments'
+import { useVodAudio } from '@/lib/useVodAudio'
+import { usePlayerSettings } from '@/lib/usePlayerSettings'
+import { skipAt, autoSkipTo, nextPromptAt } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
@@ -263,7 +266,7 @@ export default function VodPlayerPage() {
   // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
   // The parts that can be skipped, from the server: for this title only
   // (`for`), so the last episode's never show on the next while it loads.
-  const [skipFound, setSkipFound] = useState(null)   // { for, imdbId, match, intro, recap, outro, autoSkip }
+  const [skipFound, setSkipFound] = useState(null)   // { for, imdbId, match, intro, recap, outro, skipMode, autoSkip }
   const [skipAsk, setSkipAsk]     = useState(0)      // goes up when the show's match is changed
   const seasonNo = searchParams.get('season') || ''
   const year     = searchParams.get('year') || ''
@@ -277,8 +280,17 @@ export default function VodPlayerPage() {
       .catch(() => { if (!cancelled) setSkipFound(null) })
     return () => { cancelled = true }
   }, [videoId, portalName, year, seasonNo, seriesNo, isEpisode, progressKey, skipAsk])
-  const skipParts = skipFound?.for === progressKey && mediaKey === progressKey && !onTv ? skipFound : null
-  const skipNow = upNext ? null : skipAt(skipParts, currentTime)
+  // The viewer's player settings (the gear): a skip mode changed there counts at once.
+  const player = usePlayerSettings()
+  const ownMedia = mediaKey === progressKey && !onTv
+  const chosenSkipMode = player.settings?.skipMode
+  const skipParts = useMemo(() => (skipFound?.for === progressKey && ownMedia
+    ? (chosenSkipMode ? { ...skipFound, skipMode: chosenSkipMode } : skipFound)
+    : null), [skipFound, progressKey, ownMedia, chosenSkipMode])
+  // "Next episode" near the end or at the credits (whatever the skip mode), else a Skip button.
+  const skipNow = upNext || !ownMedia ? null
+    : nextPromptAt(skipParts, currentTime, duration, !!neighbours.next) ? { kind: 'next', label: 'Next episode' }
+    : skipAt(skipParts, currentTime)
   // Auto-skip: each intro or recap once, so going back to watch it stays put.
   // From the video's own position: the state can be a step behind it — still
   // 0 in the render where the resume above has just sought to 20:00, which
@@ -286,7 +298,7 @@ export default function VodPlayerPage() {
   const autoSkippedRef = useRef({ key: null, done: new Set() })
   useEffect(() => {
     const v = videoRef.current
-    if (!v || !skipParts?.autoSkip) return
+    if (!v || !skipParts) return
     if (autoSkippedRef.current.key !== progressKey) autoSkippedRef.current = { key: progressKey, done: new Set() }
     const done = autoSkippedRef.current.done
     const at = v.currentTime
@@ -303,6 +315,15 @@ export default function VodPlayerPage() {
     ready: mediaKey === progressKey && !onTv,
   })
   useEffect(() => { setSubsOpen(false) }, [progressKey])
+
+  // ── The settings gear: audio track, preferred language, intro skipping ──
+  const [gearOpen, setGearOpen] = useState(false)
+  const audio = useVodAudio({
+    videoRef, hlsRef, events: Hls.Events, titleKey: progressKey,
+    ready: mediaKey === progressKey && !onTv,
+    preferred: player.settings ? player.settings.audioLanguage : null,
+  })
+  useEffect(() => { setGearOpen(false) }, [progressKey])
 
   function doSkip(toNextEpisode) {
     if (toNextEpisode && neighbours.next) { playEpisode(neighbours.next.season, neighbours.next.episode); return }
@@ -441,6 +462,8 @@ export default function VodPlayerPage() {
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
+    // On a seek too: a jump far ahead can wait a while for its first
+    // 'timeupdate', and the bar and the Next episode button should follow it.
     const onTime   = () => setCurrentTime(v.currentTime)
     const onDur    = () => { setDuration(v.duration || 0); mediaKeyRef.current = streamKeyRef.current; setMediaKey(streamKeyRef.current) }
     const onPlay   = () => { setPlaying(true); setStatus('playing') }
@@ -453,12 +476,16 @@ export default function VodPlayerPage() {
     }
     v.addEventListener('error',            onError)
     v.addEventListener('timeupdate',       onTime)
+    v.addEventListener('seeking',          onTime)
+    v.addEventListener('seeked',           onTime)
     v.addEventListener('durationchange',   onDur)
     v.addEventListener('play',             onPlay)
     v.addEventListener('pause',            onPause)
     v.addEventListener('ended',            onEnded)
     return () => {
       v.removeEventListener('timeupdate',     onTime)
+      v.removeEventListener('seeking',        onTime)
+      v.removeEventListener('seeked',         onTime)
       v.removeEventListener('durationchange', onDur)
       v.removeEventListener('play',           onPlay)
       v.removeEventListener('pause',          onPause)
@@ -714,7 +741,11 @@ export default function VodPlayerPage() {
             delay={subs.delay} onDelay={subs.setDelay} onClose={() => setSubsOpen(false)} />
         )}
 
-        <SkipButton skip={skipNow} onSkip={doSkip} nextEpisode={!!neighbours.next} raised={showControls || status !== 'playing'} />
+        {gearOpen && !onTv && (
+          <PlayerSettingsMenu audio={audio} settings={player.settings} onChange={player.change} onClose={() => setGearOpen(false)} />
+        )}
+
+        <SkipButton skip={skipNow} onSkip={doSkip} raised={showControls || status !== 'playing'} />
 
         {upNext && (
           <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
@@ -806,7 +837,8 @@ export default function VodPlayerPage() {
               {isEpisode ? <List size={18} /> : <Info size={18} />}
             </button>
             <SubtitleButton on={subs.choice.kind !== 'off'} open={subsOpen}
-              onToggle={() => { if (!subsOpen) subs.loadOnline(); setSubsOpen(o => !o) }} />
+              onToggle={() => { if (!subsOpen) subs.loadOnline(); setGearOpen(false); setSubsOpen(o => !o) }} />
+            <PlayerSettingsButton open={gearOpen} onToggle={() => { setSubsOpen(false); setGearOpen(o => !o) }} />
             <StatsButton open={statsOpen} onToggle={() => setStatsOpen(o => !o)} />
             <CastButtons cast={cast} />
             {document.pictureInPictureEnabled && (

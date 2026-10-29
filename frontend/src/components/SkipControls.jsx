@@ -1,20 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronsRight, SkipForward } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
-import { useApp } from '@/lib/appContext'
 import { showToast } from '@/lib/toast'
 import { matchLabel } from '@/lib/skipSegments'
-import { getMyViewer, saveMyFilters, setVodSkipMatch } from '../stalkerApi'
+import { setVodSkipMatch } from '../stalkerApi'
 
 // Skip intro / recap / credits (lib/skipSegments.js).
 
 /**
- * The button over the video while an intro, recap or the credits play. At
- * the credits with another episode to come, it's "Next episode" instead.
+ * The button over the video while an intro, recap or the credits play — or
+ * "Next episode" (`skip.kind` 'next': near the end, or at the credits, with
+ * another episode to come; lib/skipSegments.js nextPromptAt).
  */
-export function SkipButton({ skip, onSkip, nextEpisode = false, raised = false }) {
+export function SkipButton({ skip, onSkip, raised = false }) {
   if (!skip) return null
-  const next = skip.kind === 'outro' && nextEpisode
+  const next = skip.kind === 'next'
   const Icon = next ? SkipForward : ChevronsRight
   return (
     <button
@@ -84,34 +83,6 @@ export function SkipMatch({ videoId, found, onChanged }) {
           </div>
         </form>
       )}
-    </div>
-  )
-}
-
-/** Settings → Viewers: skip intros and recaps without asking, for this viewer. */
-export function AutoSkipSetting() {
-  const { viewer } = useApp()
-  const [on, setOn] = useState(null)
-  useEffect(() => {
-    let cancelled = false
-    getMyViewer().then((me) => { if (!cancelled) setOn(me.autoSkip === true) }).catch(() => { if (!cancelled) setOn(false) })
-    return () => { cancelled = true }
-  }, [viewer?.id])
-
-  function toggle(val) {
-    setOn(val)
-    saveMyFilters({ autoSkip: val }).catch((e) => { setOn(!val); showToast(`Couldn't save: ${e.message}`, 'error') })
-  }
-
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <p className="text-sm font-medium text-[var(--color-text)]">Skip intros & recaps automatically</p>
-        <p className="text-xs text-[var(--color-muted)] mt-0.5">
-          Where their times are known (from IntroDB, a community database). Otherwise a Skip button shows while they play. Credits are never skipped by themselves.
-        </p>
-      </div>
-      <Switch checked={!!on} disabled={on === null} onCheckedChange={toggle} />
     </div>
   )
 }
