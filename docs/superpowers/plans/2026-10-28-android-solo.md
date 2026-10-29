@@ -293,7 +293,7 @@ git commit -m "feat(server): HLS downloads without ffmpeg — the pieces joined 
     - `HOST` (default `'0.0.0.0'`; Solo passes `127.0.0.1`) → `config.host`
     - `CAST_PORT` (Solo only) → `config.castPort`
   - `soloCast.setLanHost(host: string | null)`
-  - `soloCast.castOrigin(): string | null`, which is `http://<lanHost>:<castPort>`, or null with no LAN address.
+  - `soloCast.castOrigin(): string | null`, which is `http://<lanHost>:<port>` of the cast listener while it's up, or null. (As built: the listener takes a free port each time it starts — `CAST_PORT` is no longer read — and `soloCast.ensureListener(pathAndQuery, { image })` starts it and returns `<castOrigin>/k/<castToken>`, a token per cast link.)
   - `soloCast.lanGate(shareToken: string): express middleware`. It lets through only `GET`/`HEAD` on paths starting `/k/<shareToken>/proxy/`. Anything else gets 404.
   - `PUT /api/solo/network { lanHost: string | null }` → 204. It's registered only when `config.solo`, behind the normal access guard (full key).
   - In Solo, with no LAN address, `castLink` returns `reachable: false` with `url` built on the loopback origin, as it does for localhost today. The app then shows "casting needs Wi-Fi".
