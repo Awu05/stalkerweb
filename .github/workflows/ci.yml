@@ -133,6 +133,45 @@ jobs:
           check mobileSolo/debug/app-mobile-solo-debug.apk com.stalkerweb.android.solo
           check tvSolo/debug/app-tv-solo-debug.apk com.stalkerweb.android.tv.solo
 
+      # The release builds too, as release.yml makes them on a tag — so a tag
+      # never finds out first (minified, signed). Signed with the real key when
+      # the secret is there, else a throwaway one made here (never committed).
+      - name: Signing key for the release builds
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          ks="$RUNNER_TEMP/release.keystore"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$ks"
+          else
+            echo "no KEYSTORE_B64 secret: a throwaway key"
+            keytool -genkeypair -keystore "$ks" -storepass android -keypass android -alias androiddebugkey               -keyalg RSA -keysize 2048 -validity 1 -dname "CN=CI throwaway" -noprompt
+          fi
+          echo "KEYSTORE_PATH=$ks" >> "$GITHUB_ENV"
+
+      - name: Build release APKs (mobile + tv, remote + Solo)
+        working-directory: android
+        run: gradle :app:assembleMobileRemoteRelease :app:assembleTvRemoteRelease :app:assembleMobileSoloRelease :app:assembleTvSoloRelease -PversionName=0.0.0
+
+      - name: Release APK sizes
+        working-directory: android/app/build/outputs/apk
+        run: ls -l */release/*.apk
+
+      - name: Check the release APKs — Node and the server in Solo only
+        working-directory: android/app/build/outputs/apk
+        run: |
+          for apk in mobileRemote/release/app-mobile-remote-release.apk tvRemote/release/app-tv-remote-release.apk; do
+            n=$(unzip -l "$apk" | grep -c -E 'libnode|server\.zip' || true)
+            echo "$apk: $n libnode/server.zip entries"
+            [ "$n" = 0 ] || { unzip -l "$apk" | grep -E 'libnode|server\.zip'; exit 1; }
+          done
+          for apk in mobileSolo/release/app-mobile-solo-release.apk tvSolo/release/app-tv-solo-release.apk; do
+            for entry in lib/arm64-v8a/libnode.so lib/armeabi-v7a/libnode.so assets/server.zip; do
+              unzip -l "$apk" | grep -q " $entry\$" || { echo "$apk: no $entry"; exit 1; }
+              echo "$apk: $entry"
+            done
+          done
+
       - name: Upload mobile APK artifact
         uses: actions/upload-artifact@v7
         with:
