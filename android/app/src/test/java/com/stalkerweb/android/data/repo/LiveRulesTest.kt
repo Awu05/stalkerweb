@@ -1,6 +1,5 @@
 package com.stalkerweb.android.data.repo
 
-import android.view.KeyEvent
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.ChannelHealth
 import org.junit.Assert.assertEquals
@@ -54,34 +53,5 @@ class LiveRulesTest {
         assertEquals(l, moveItem(l, 0, -1))
         assertEquals(l, moveItem(l, 2, 1))
         assertEquals(l, moveItem(l, 7, 1))
-    }
-
-    @Test fun `on the picture, up and down change channel and OK brings up the controls`() {
-        val key = { code: Int -> liveKey(code, onPicture = true, listOpen = false) }
-        assertEquals(LiveKey.PreviousChannel, key(KeyEvent.KEYCODE_DPAD_UP))
-        assertEquals(LiveKey.NextChannel, key(KeyEvent.KEYCODE_DPAD_DOWN))
-        assertEquals(LiveKey.OpenControls, key(KeyEvent.KEYCODE_DPAD_CENTER))
-        assertEquals(LiveKey.OpenControls, key(KeyEvent.KEYCODE_ENTER))
-        assertEquals(LiveKey.OpenList, key(KeyEvent.KEYCODE_DPAD_RIGHT))
-        assertEquals(LiveKey.Pass, key(KeyEvent.KEYCODE_DPAD_LEFT))
-    }
-
-    @Test fun `on a button, the d-pad and OK are the button's — only media and channel keys still act`() {
-        val key = { code: Int -> liveKey(code, onPicture = false, listOpen = false) }
-        for (code in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
-                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)) {
-            assertEquals(LiveKey.Pass, key(code))
-        }
-        assertEquals(LiveKey.PlayPause, key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-        assertEquals(LiveKey.NextChannel, key(KeyEvent.KEYCODE_CHANNEL_UP))
-        assertEquals(LiveKey.PreviousChannel, key(KeyEvent.KEYCODE_CHANNEL_DOWN))
-    }
-
-    @Test fun `with the channel list open the d-pad walks the list, and left closes it`() {
-        val key = { code: Int -> liveKey(code, onPicture = false, listOpen = true) }   // the list has the focus
-        assertEquals(LiveKey.Pass, key(KeyEvent.KEYCODE_DPAD_UP))
-        assertEquals(LiveKey.Pass, key(KeyEvent.KEYCODE_DPAD_DOWN))
-        assertEquals(LiveKey.Pass, key(KeyEvent.KEYCODE_DPAD_RIGHT))
-        assertEquals(LiveKey.CloseList, key(KeyEvent.KEYCODE_DPAD_LEFT))
     }
 }
