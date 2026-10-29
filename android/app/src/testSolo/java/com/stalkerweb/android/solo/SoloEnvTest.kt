@@ -14,7 +14,7 @@ class SoloEnvTest {
         assertEquals("production", env["NODE_ENV"])
     }
 
-    @Test fun `no cast port: the server picks one each time it starts casting`() {
+    @Test fun `no cast port, the server picks one each time it starts casting`() {
         assertFalse(SoloEnv.build(18983, "k3y", File("/d"), File("/d/dl"), "0.5.0").containsKey("CAST_PORT"))
     }
 }
