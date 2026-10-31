@@ -29,7 +29,7 @@
 
 ## Review Focus
 1. **A source that restarts or stalls mid-recording:** the recording carries on, with a gap, and fails only if the source stays down past its end time. Test in Task 2.
-2. **The server restarts during a scheduled recording:** it restarts at once and appends to a new part of the same recording (or a second file marked as part 2). It's never lost silently. Test in Task 3.
+2. **The server restarts during a scheduled recording:** the part already written is kept as a finished recording, marked "(part 1)". A new recording for the rest starts at once, titled "(part 2)" and linked by `partOf`. Nothing is lost silently. Test in Task 3.
 3. **Two recordings that overlap with `max_streams` 1:** the second one is refused at scheduling time with "overlaps", and at start time the recording wins over watching. Test in Task 4.
 4. **A programme whose guide times change after it's scheduled:** the scheduled times stay as booked, with padding as set then. That's the simple rule; say so in the UI. Test in Task 3.
 5. **Deleting a recording while it plays or records:** stop it first, then delete. The file is never left half-written. Test in Task 4.
@@ -49,7 +49,7 @@
   - `remove(id)`
   - `due(now)` returns the recordings that should be running.
   - `overlapping(startAt, endAt)`
-- **`Recording`:** `{ id, viewerId, channelId, channelName, title, startAt, endAt, status: 'scheduled'|'recording'|'done'|'failed'|'missed'|'cancelled', filePath?, bytes, error?, createdAt }`. Times are ms; `startAt`/`endAt` already include the padding.
+- **`Recording`:** `{ id, viewerId, channelId, channelName, title, startAt, endAt, status: 'scheduled'|'recording'|'done'|'failed'|'missed'|'cancelled', filePath?, bytes, error?, partOf?, createdAt }`. Times are ms; `startAt`/`endAt` already include the padding.
 - Saved with `lib/jsonFile.js` (`writeJsonAtomic` / `DebouncedSave`) to `DATA_DIR/recordings.json`.
 
 - [ ] **Step 1: Tests**
@@ -103,7 +103,7 @@
 
 - [ ] **Step 1: Tests:**
   - `'starts a scheduled recording at its start and stops at its end'`
-  - `'after a restart, starts one that should be running and marks one whose time passed as missed'`
+  - `'after a restart, keeps the part written as "(part 1)" and starts "(part 2)" for the rest; marks one whose time passed as missed'`
   - `'keeps the booked times when the guide changes later'`
   - `'stop() ends a recording early'`
   - `'names files Channel – Programme – date time, safely'`
