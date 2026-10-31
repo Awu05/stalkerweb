@@ -295,11 +295,14 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     Icon(Icons.Default.Settings, "Player settings", tint = Color.White)
                 }
                 StatsButton(statsOpen) { statsOpen = !statsOpen }
-                if (!isTV && cast != null) CastButton(cast)
-                TipIconButton(label = "Download to server", onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
-                TipIconButton(label = if (inMyList) "Remove from My List" else "Add to My List", onClick = viewModel::toggleMyList) {
-                    Icon(if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        if (inMyList) "Remove from My List" else "Add to My List", tint = Color.White)
+                // A recording is already on the server, and isn't a VOD title: no cast, download or My List (as on the web).
+                if (!p.isRecording) {
+                    if (!isTV && cast != null) CastButton(cast)
+                    TipIconButton(label = "Download to server", onClick = viewModel::download) { Icon(Icons.Default.Download, "Download to server", tint = Color.White) }
+                    TipIconButton(label = if (inMyList) "Remove from My List" else "Add to My List", onClick = viewModel::toggleMyList) {
+                        Icon(if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            if (inMyList) "Remove from My List" else "Add to My List", tint = Color.White)
+                    }
                 }
             }
         }

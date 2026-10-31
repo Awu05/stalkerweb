@@ -51,6 +51,7 @@ import com.stalkerweb.android.data.repo.VodRepository
 import com.stalkerweb.android.data.repo.WatchRepository
 import com.stalkerweb.android.data.repo.WatchRules
 import com.stalkerweb.android.data.repo.episodeNeighbours
+import com.stalkerweb.android.data.repo.recordingPositionToKeep
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -102,6 +103,9 @@ data class VodPlayerState(
  * The VOD player (the web's VodPlayerPage): plays [PlayerParams], resumes where
  * the viewer left off, saves the position (shared with the web), and for a
  * show offers its episodes, Previous / Next and an "Up next" after the end.
+ * A live TV recording ([PlayerParams.isRecording]) plays here too, from the
+ * server's file: no skip times, online subtitles, cast or watch history —
+ * its resume point is kept on this device.
  */
 @OptIn(UnstableApi::class)
 class VodPlayerViewModel(
@@ -239,7 +243,7 @@ class VodPlayerViewModel(
             applyPreferredAudio()
         }
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
-        watch.load()
+        if (!params.isRecording) watch.load()
         load(params)
         // Twice a second: the Skip button, and auto-skip.
         viewModelScope.launch {
@@ -311,6 +315,7 @@ class VodPlayerViewModel(
             audio = if (same) _state.value.audio else emptyList())
         // A track picked by hand was for the last title: this one starts in the preferred language.
         if (!same) _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build() }
+        if (params.isRecording) { loadRecording(params); return }
         if (skipParts?.first != params.key) {
             skipParts = null
             viewModelScope.launch {
@@ -331,6 +336,20 @@ class VodPlayerViewModel(
                     if (_player.value != null) play() else pendingPlay = play
                 }
                 .onFailure { _state.value = _state.value.copy(loading = false, error = it.toApiError().message ?: "Could not load video") }
+        }
+    }
+
+    // A recording: its file as HLS byte ranges, from this server (routes/recordingFile.js) —
+    // under the playback token when a key is set, as the live streams are.
+    private fun loadRecording(params: PlayerParams) {
+        loadJob?.cancel()
+        pendingPlay = null
+        loadJob = viewModelScope.launch {
+            links.ensureShareToken()
+            if (_state.value.params?.key != params.key) return@launch
+            val url = "${links.base()}/proxy/recording/${android.net.Uri.encode(params.recordingId)}/index.m3u8"
+            val play = { startPlayback(url, params) }
+            if (_player.value != null) play() else pendingPlay = play
         }
     }
 
@@ -362,8 +381,9 @@ class VodPlayerViewModel(
             return
         }
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
-        val saved = watch.progressFor(key) ?: return
-        val at = WatchRules.resumeAt(saved.position, duration) ?: return
+        val params = _state.value.params
+        val savedAt = if (params?.isRecording == true) prefs.recordingPosition(params.recordingId) else watch.progressFor(key)?.position
+        val at = WatchRules.resumeAt(savedAt ?: return, duration) ?: return
         p.seekTo((at * 1000).toLong())
         _state.value = _state.value.copy(resumedFrom = at)
     }
@@ -522,6 +542,8 @@ class VodPlayerViewModel(
         val subs = _state.value.subtitles
         // Asked once — again after it failed.
         if (subs.onlineLoading || (subs.online != null && subs.online.error == null)) return
+        // A recording has no title to look subtitles up by: only its own.
+        if (params.isRecording) { _state.value = _state.value.copy(subtitles = subs.copy(online = SubtitlesResponse(configured = true))); startSubtitles(); return }
         _state.value = _state.value.copy(subtitles = subs.copy(onlineLoading = true))
         viewModelScope.launch {
             val r = vod.onlineSubtitles(params)
@@ -631,13 +653,15 @@ class VodPlayerViewModel(
 
     /** Saves where the TV is in this title (it plays the one on screen). */
     private fun persistFromTv() {
-        val params = _state.value.params ?: return
+        val params = _state.value.params?.takeIf { !it.isRecording } ?: return   // a recording isn't cast
         val r = cast?.remote?.value ?: return
         if (r.durationMs <= 0 || r.positionMs <= 0) return
         save(params, r.positionMs / 1000.0, r.durationMs / 1000.0)
     }
 
     private fun save(params: PlayerParams, position: Double, duration: Double) {
+        // A recording's place is this device's (the web keeps its own); gone once near the end.
+        if (params.isRecording) { prefs.setRecordingPosition(params.recordingId, recordingPositionToKeep(position, duration)); return }
         val stored = params.copy(screenshotUrl = links.relativeImage(params.screenshotUrl))
         watch.saveProgress(SaveWatchRequest(
             key = params.key,

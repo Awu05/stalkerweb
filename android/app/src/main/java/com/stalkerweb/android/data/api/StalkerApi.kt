@@ -243,6 +243,26 @@ interface StalkerApi {
     @POST("api/settings")
     suspend fun saveSettings(@Body body: SettingsUpdate)
 
+    // ── Live TV recordings (backend routes/recordings.js) ─────────────────────
+    @GET("api/recordings")
+    suspend fun getRecordings(): RecordingsResponse
+
+    /** A guide programme booked; 409 (with clash) when it overlaps past the provider's limit. */
+    @POST("api/recordings")
+    suspend fun scheduleRecording(@Body body: ScheduleRecordingRequest): Recording
+
+    /** The channel recorded from now; 409 with takesStream when the limit is in use (ask, then force). */
+    @POST("api/recordings/now")
+    suspend fun recordNow(@Body body: RecordNowRequest): Recording
+
+    /** Stops one recording (what it has is kept), or cancels one not started. */
+    @POST("api/recordings/{id}/stop")
+    suspend fun stopRecording(@Path("id") id: String, @Body body: Map<String, String> = emptyMap()): Recording
+
+    /** Stops it if it's running, then deletes it and its file. */
+    @DELETE("api/recordings/{id}")
+    suspend fun deleteRecording(@Path("id") id: String): DeletedResponse
+
     @PUT("api/viewers/{id}")
     suspend fun updateViewer(@Path("id") id: String, @Body body: ViewerUpdate): ViewerSummary
 

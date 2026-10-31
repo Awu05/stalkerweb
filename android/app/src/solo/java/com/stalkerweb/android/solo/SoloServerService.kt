@@ -41,11 +41,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * from SoloConfig, not the Intent, so a restart without one works the same.
  * Node's own output goes to logcat, tag "stalkerweb".
  *
- * While the app holds it (SoloServer.hold: playing, casting, downloading) it
+ * While the app holds it (SoloServer.hold: playing, casting, downloading, recording) it
  * runs in the foreground, with a quiet "StalkerWeb Solo is running"
  * notification — shown only if notifications are allowed, it works the same
  * without. Media playback while playing or casting, which Android doesn't
- * time-limit; a data sync while only downloading.
+ * time-limit; a data sync while only downloading or recording.
  *
  * When the app's process ends, a download or a cast it held the server for
  * goes on without it: those holds stay, and the server is asked every 30 s
@@ -210,7 +210,8 @@ class SoloServerService : Service() {
             val entry = ServerInstaller.ensureInstalled(this, { name -> assets.open(name) }, version, File(filesDir, "server"))
             val dataDir = File(filesDir, "data").apply { mkdirs() }
             val downloadDir = SoloEnv.downloadDir(filesDir).apply { mkdirs() }
-            val env = SoloEnv.build(config.port, config.key, dataDir, downloadDir, BuildConfig.VERSION_NAME)
+            val recordingsDir = SoloEnv.recordingsDir(filesDir).apply { mkdirs() }
+            val env = SoloEnv.build(config.port, config.key, dataDir, downloadDir, recordingsDir, BuildConfig.VERSION_NAME)
             Log.i(TAG, "starting the server (version $version) on 127.0.0.1:${config.port}")
             runtime.start(entry, emptyList(), env)
         }.getOrElse {

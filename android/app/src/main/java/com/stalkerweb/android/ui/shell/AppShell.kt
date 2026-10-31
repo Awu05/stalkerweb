@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
@@ -74,12 +75,13 @@ private data class Section(val route: String, val label: String, val icon: Image
 private val CHANNELS  = Section("channels", "Channels", Icons.Default.Tv)
 private val VOD       = Section("vod", "VOD", Icons.Default.Movie)
 private val DOWNLOADS = Section("downloads", "Downloads", Icons.Default.Download)
+private val RECORDINGS = Section("recordings", "Recordings", Icons.Default.FiberManualRecord)
 private val GUIDE     = Section("guide", "Guide", Icons.Default.GridView)
 private const val SETTINGS = "settings"
 private const val STATUS_POLL_MS = 30_000L
 
 /**
- * The app's frame, like the web's sidebar: Channels, VOD, Downloads, Guide,
+ * The app's frame, like the web's sidebar: Channels, VOD, Downloads, Recordings, Guide,
  * with the viewer, the connection and Settings. A side rail on TVs and wide
  * screens (the remote moves into it with Left), a bottom bar on phones.
  */
@@ -90,6 +92,7 @@ fun AppShell(
     vod: @Composable () -> Unit,
     guide: @Composable () -> Unit,
     downloads: @Composable () -> Unit,
+    recordings: @Composable () -> Unit,
     settings: @Composable () -> Unit,
     reminders: List<Reminder>,
     onCancelReminder: (String) -> Unit,
@@ -115,6 +118,7 @@ fun AppShell(
         add(CHANNELS)
         if (state.vodEnabled) add(VOD)
         add(DOWNLOADS)
+        add(RECORDINGS)
         if (state.epgEnabled) add(GUIDE)
     }
     fun go(route: String) = nav.navigate(route) {
@@ -140,6 +144,7 @@ fun AppShell(
                 composable(CHANNELS.route) { channels() }
                 composable(VOD.route) { vod() }
                 composable(DOWNLOADS.route) { downloads() }
+                composable(RECORDINGS.route) { recordings() }
                 composable(GUIDE.route) { guide() }
                 composable(SETTINGS) { settings() }
             }

@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.stalkerweb.android.data.api.DownloadJob
+import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.repo.AppContainer
 import com.stalkerweb.android.data.repo.FolderFile
 import com.stalkerweb.android.data.repo.goneKey
@@ -26,6 +27,8 @@ import com.stalkerweb.android.data.repo.openedInside
 import com.stalkerweb.android.data.repo.orphansToPublish
 import com.stalkerweb.android.data.repo.publicFileName
 import com.stalkerweb.android.data.repo.publicName
+import com.stalkerweb.android.data.repo.publicRecordingName
+import com.stalkerweb.android.data.repo.recordingsToPublish
 import com.stalkerweb.android.data.repo.stalePartsToDelete
 import com.stalkerweb.android.data.repo.toPublish
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +64,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 8–9 a file written to the folder directly is handed to the media scanner,
  * so it shows in the Downloads and gallery apps; and storage refused, the
  * Downloads screen says why nothing is saved there ([storageDenied]).
+ *
+ * Finished live TV recordings are saved there the same way (the server's
+ * list, RecordingsRepository.onList), with the same checks against their own
+ * folder — but the private copy is kept: the app plays recordings from the
+ * server, which reads that file. Only the .ts is saved, never the index
+ * beside it (the server's own, for playing it).
  */
 object DownloadPublisher {
     private const val TAG = "DownloadPublisher"
@@ -69,6 +78,7 @@ object DownloadPublisher {
 
     private val lock = Mutex()
     @Volatile private var lastJobs: List<DownloadJob> = emptyList()
+    @Volatile private var lastRecordings: List<Recording> = emptyList()
     @Volatile private var app: Application? = null
     @Volatile private var container: AppContainer? = null
     @Volatile private var scope: CoroutineScope? = null
@@ -84,9 +94,12 @@ object DownloadPublisher {
         this.app = app
         this.container = container
         container.downloads.onJobs = { jobs -> publish(jobs) }
+        container.recordings.onList = { list -> publishRecordings(list) }
         // Finished while the app was closed: look once the server answers.
         scope.launch {
             if (!SoloServer.awaitReady(container.httpClient)) return@launch
+            // Recordings too — and one going or about to (booked before) holds the server up again.
+            runCatching { container.recordings.list() }
             val jobs = runCatching { container.downloads.list() }.getOrNull() ?: return@launch
             sweep(jobs)
         }
@@ -97,7 +110,7 @@ object DownloadPublisher {
         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return
         val launcher = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             _storageDenied.value = !granted
-            if (granted) { publish(lastJobs); scope?.launch { sweep(lastJobs) } }
+            if (granted) { publish(lastJobs); publishRecordings(lastRecordings); scope?.launch { sweep(lastJobs) } }
         }
         activity.lifecycleScope.launch {
             needsPermission.first { it }
@@ -122,6 +135,39 @@ object DownloadPublisher {
                 }
             }
         }
+    }
+
+    private fun publishRecordings(list: List<Recording>) {
+        lastRecordings = list
+        val scope = scope ?: return
+        val c = container ?: return
+        if (recordingsToPublish(list, c.prefs.publishedRecordings).isEmpty()) return
+        scope.launch {
+            lock.withLock {
+                for (r in recordingsToPublish(lastRecordings, c.prefs.publishedRecordings)) {
+                    val saved = runCatching { copyOut(r) }
+                        .onFailure { Log.w(TAG, "saving a recording failed (${it.javaClass.simpleName})") }
+                        .getOrDefault(false)
+                    if (saved) c.recordings.markPublished(r.id)
+                    else if (!usable(r)) c.recordings.markPublished(goneKey(r.id))
+                }
+            }
+        }
+    }
+
+    /** Whether the recording's file is still there to save: a plain file in the recordings folder (as [usable] for a download). */
+    private fun usable(r: Recording): Boolean {
+        val context = app ?: return true
+        val file = File(r.filePath ?: return false)
+        if (!file.exists() && !Files.isSymbolicLink(file.toPath())) return false
+        return confined(file, SoloEnv.recordingsDir(context.filesDir))
+    }
+
+    /** Copies the recording's .ts to the Downloads folder, keeping it here (the app plays it from the server). */
+    private fun copyOut(r: Recording): Boolean {
+        val context = app ?: return false
+        if (!usable(r)) return false
+        return copyOut(File(r.filePath ?: return false), publicRecordingName(r), SoloEnv.recordingsDir(context.filesDir), keep = true)
     }
 
     /**
@@ -165,8 +211,13 @@ object DownloadPublisher {
     /** [file] is a plain file in the download folder: not a link, not somewhere else in the app's storage. */
     private fun confined(file: File): Boolean {
         val context = app ?: return false
-        if (Files.isSymbolicLink(file.toPath()) || !isInside(SoloEnv.downloadDir(context.filesDir), file)) {
-            Log.w(TAG, "a download's file is outside the download folder; not saved")
+        return confined(file, SoloEnv.downloadDir(context.filesDir))
+    }
+
+    /** [file] is a plain file in [dir]: not a link, not somewhere else in the app's storage. */
+    private fun confined(file: File, dir: File): Boolean {
+        if (Files.isSymbolicLink(file.toPath()) || !isInside(dir, file)) {
+            Log.w(TAG, "a file is outside its folder (${dir.name}); not saved")
             return false
         }
         return file.isFile
@@ -179,17 +230,17 @@ object DownloadPublisher {
     }
 
     /**
-     * [source] opened, if the opened file is a regular file inside the download
-     * folder (by the real path of its descriptor, /proc/self/fd/<n>); else null.
+     * [source] opened, if the opened file is a regular file inside [dir] (the
+     * download or recordings folder, by the real path of its descriptor,
+     * /proc/self/fd/<n>); else null.
      */
-    private fun openChecked(source: File): InputStream? {
-        val context = app ?: return null
+    private fun openChecked(source: File, dir: File): InputStream? {
         val pfd = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
         try {
             val regular = OsConstants.S_ISREG(Os.fstat(pfd.fileDescriptor).st_mode)
             val real = File("/proc/self/fd/${pfd.fd}").canonicalPath
-            if (!openedInside(SoloEnv.downloadDir(context.filesDir).canonicalPath, real, regular)) {
-                Log.w(TAG, "a download's file is not a plain file in the download folder; not saved")
+            if (!openedInside(dir.canonicalPath, real, regular)) {
+                Log.w(TAG, "a file is not a plain file in its folder (${dir.name}); not saved")
                 pfd.close()
                 return null
             }
@@ -200,17 +251,21 @@ object DownloadPublisher {
         }
     }
 
-    /** Copies [source] to the Downloads folder as [name], then deletes it here. False if it couldn't (yet). */
-    private fun copyOut(source: File, name: String): Boolean {
+    /**
+     * Copies [source] (inside [dir]) to the Downloads folder as [name], then
+     * deletes it here — unless [keep]. False if it couldn't (yet).
+     */
+    private fun copyOut(source: File, name: String, dir: File? = null, keep: Boolean = false): Boolean {
         val context = app ?: return false
+        val folder = dir ?: SoloEnv.downloadDir(context.filesDir)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
             ContextCompat.checkSelfPermission(context, PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             needsPermission.value = true
             return false
         }
-        val input = openChecked(source) ?: throw IOException("not a file to save")
+        val input = openChecked(source, folder) ?: throw IOException("not a file to save")
         input.use { copyOut(context, it, name) }
-        source.delete()
+        if (!keep) source.delete()
         return true
     }
 

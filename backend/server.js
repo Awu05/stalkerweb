@@ -445,10 +445,11 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
 // Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast
 // links (they point at the cast listener, below), and whether a cast is on;
-// and asks what still needs the server (a download, a cast).
+// and asks what still needs the server (a download, a cast, a recording).
 require('./routes/solo').mount(app, config, soloCast, {
   downloadsActive: () => downloadManager.hasActive(),
   castSessions: () => appState.castHls?.size ?? 0,
+  recordingsActive: () => (appState.recordings?.active().length ?? 0) > 0,
 });
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback

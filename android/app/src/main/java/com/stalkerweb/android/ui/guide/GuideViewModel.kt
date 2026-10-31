@@ -8,6 +8,10 @@ import com.stalkerweb.android.data.api.Group
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.data.repo.GuideRepository
 import com.stalkerweb.android.data.repo.LiveRepository
+import com.stalkerweb.android.data.repo.RecordingsRepository
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import com.stalkerweb.android.data.repo.RemindersRepository
 import com.stalkerweb.android.data.repo.ViewerRepository
 import kotlinx.coroutines.Job
@@ -42,6 +46,8 @@ class GuideViewModel(
     private val live: LiveRepository,
     val reminders: RemindersRepository,
     private val viewers: ViewerRepository,
+    /** Record on a programme: booked on the server, which records it with every app closed. */
+    private val recordings: RecordingsRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(GuideState())
     val state: StateFlow<GuideState> = _state.asStateFlow()
@@ -69,4 +75,21 @@ class GuideViewModel(
     }
 
     fun setFilter(f: String?) { _state.value = _state.value.copy(filter = f) }
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    /**
+     * [e] on [ch] booked to record, at the guide's times (the server pads
+     * them, as Settings says). Booked times stay as they are if the guide
+     * moves the programme later. A clash past the provider's stream limit is
+     * refused, with what it clashes with.
+     */
+    fun record(ch: Channel, e: EpgEvent) {
+        viewModelScope.launch {
+            runCatching { recordings.schedule(ch.uniqueId, ch.name, e.title, e.startTime * 1000, e.endTime * 1000) }
+                .onSuccess { _messages.tryEmit("\"${e.title}\" will be recorded — see Recordings") }
+                .onFailure { _messages.tryEmit(it.toApiError().message ?: "Couldn't book the recording") }
+        }
+    }
 }

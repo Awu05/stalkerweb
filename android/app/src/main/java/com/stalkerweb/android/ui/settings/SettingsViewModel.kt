@@ -148,6 +148,9 @@ class SettingsViewModel(
         if (update.vodEnabled != before?.vodEnabled || update.epgEnabled != before?.epgEnabled) viewers.sectionsChanged()
     }
 
+    /** The recordings card: the provider's stream limit and the padding (shared by every viewer). */
+    fun saveRecordings(update: SettingsUpdate) = act("Saved — applies to recordings booked from now on.") { settings.save(update) }
+
     // Logos
     fun refreshLogos() = act("Logo database refreshed") { settings.refreshLogos() }
     fun addOverride(name: String, url: String) = act { settings.addOverride(name, url) }

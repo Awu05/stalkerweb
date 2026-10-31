@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -96,7 +97,8 @@ private fun clock(secs: Long): String = hm.format(Date(secs * 1000))
  * The guide: a timeline grid on TV and wide screens (channels down the side,
  * programmes across; the remote moves Up/Down between channels and
  * Left/Right between programmes), a channel → schedule list on phones.
- * OK on a programme: details, with Watch (on now) or Remind me (later).
+ * OK on a programme: details, with Watch (on now) or Remind me (later), and
+ * Record (on now or later: the server records it).
  */
 @Composable
 fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
@@ -114,6 +116,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     val anchorSecs = remember(state.epg) { System.currentTimeMillis() / 1000 }
     var nowSecs by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); nowSecs = System.currentTimeMillis() / 1000 } }
+    LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
 
     fun toggleReminder(ch: Channel, e: EpgEvent) {
         val wasSet = reminders.any { it.id == "${ch.uniqueId}:${e.startTime}" }
@@ -205,7 +208,16 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
                     else -> {}
                 }
             },
-            dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // On now or still to come: booked on the server (the web's programme popup).
+                    if (e.endTime > nowSecs) OutlinedButton(onClick = { viewModel.record(ch, e); details = null }) {
+                        Icon(Icons.Default.FiberManualRecord, null, Modifier.size(14.dp), tint = SwColors.Live)
+                        Text("  Record")
+                    }
+                    TextButton(onClick = { details = null }) { Text("Close") }
+                }
+            },
         )
     }
 }

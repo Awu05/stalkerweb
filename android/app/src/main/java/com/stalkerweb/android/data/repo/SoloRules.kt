@@ -22,6 +22,7 @@ enum class SettingsCard(val tab: String) {
     DeviceProfile("connection"),
     Links("links"),
     PlaybackGuide("playback"),
+    Recordings("playback"),
     ChannelLogos("logos"),
     LogoOverrides("logos"),
     LogoStripWords("logos"),
@@ -114,6 +115,8 @@ object SoloHold {
     const val PLAYING = "playing"
     const val CASTING = "casting"
     const val DOWNLOADING = "downloading"
+    /** A live channel being recorded, or about to be (RecordingsRepository.watch). */
+    const val RECORDING = "recording"
 }
 
 /** How Android is told the server is in use (the foreground service type). */
@@ -121,7 +124,7 @@ enum class SoloForeground { MediaPlayback, DataSync }
 
 /**
  * Playing or casting keeps the server up as media playback, which Android
- * doesn't time-limit; anything else (downloading) as a data sync. Nothing
+ * doesn't time-limit; anything else (downloading, recording) as a data sync. Nothing
  * held: it needn't be kept up.
  */
 fun soloForeground(holds: Set<String>): SoloForeground? = when {
@@ -146,12 +149,13 @@ fun followsDownloads(isSolo: Boolean): Boolean = isSolo
 fun holdsLeftByApp(holds: Set<String>): Set<String> = holds - SoloHold.PLAYING
 
 /** The server's word on what still needs it (GET /api/solo/status). */
-data class SoloStatus(val downloadsActive: Boolean, val castActive: Boolean)
+data class SoloStatus(val downloadsActive: Boolean, val castActive: Boolean, val recordingsActive: Boolean = false)
 
 /** The server's answer to GET /api/solo/status, or null when it isn't one. */
 fun parseSoloStatus(json: String): SoloStatus? {
     fun flag(name: String) = Regex(""""$name"\s*:\s*(true|false)\b""").find(json)?.groupValues?.get(1)?.toBooleanStrict()
-    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null)
+    // recordingsActive: a server from before recordings has none to keep it up for.
+    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null, flag("recordingsActive") ?: false)
 }
 
 /**
@@ -163,6 +167,7 @@ fun holdsAfterStatus(left: Set<String>, status: SoloStatus): Set<String> = left.
     when (it) {
         SoloHold.DOWNLOADING -> status.downloadsActive
         SoloHold.CASTING -> status.castActive
+        SoloHold.RECORDING -> status.recordingsActive
         else -> false
     }
 }

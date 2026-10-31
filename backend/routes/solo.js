@@ -9,7 +9,8 @@
 //                                       while on, the cast listener doesn't
 //                                       stop for want of requests (a paused
 //                                       movie), for up to 6 hours without one
-//   GET /api/solo/status                { downloadsActive, castActive } — what
+//   GET /api/solo/status                { downloadsActive, castActive,
+//                                       recordingsActive } — what
 //                                       still needs the server, for the app's
 //                                       keep-alive when it comes back after
 //                                       Android stopped it
@@ -40,8 +41,9 @@ function healthProof(key, nonce) {
  * @param {object} [o]
  * @param {() => boolean} [o.downloadsActive]  a download queued or running
  * @param {() => number} [o.castSessions]      channels being cast (stalker/CastHls.js)
+ * @param {() => boolean} [o.recordingsActive] a live channel being recorded (recordings/)
  */
-function soloRoutes(soloCast, { downloadsActive = () => false, castSessions = () => 0 } = {}) {
+function soloRoutes(soloCast, { downloadsActive = () => false, castSessions = () => 0, recordingsActive = () => false } = {}) {
   const router = express.Router();
 
   router.put('/network', (req, res) => {
@@ -67,6 +69,7 @@ function soloRoutes(soloCast, { downloadsActive = () => false, castSessions = ()
     res.json({
       downloadsActive: !!downloadsActive(),
       castActive: castSessions() > 0 || soloCast.castingActive(),
+      recordingsActive: !!recordingsActive(),
     });
   });
 
