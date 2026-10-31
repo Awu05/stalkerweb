@@ -10,7 +10,8 @@ import { useSpaceToPlay, isTypingTarget } from '@/lib/useSpaceToPlay'
 import { startPlaying } from '@/lib/startPlaying'
 import { useSoundOnFirstGesture } from '@/lib/forcedMute'
 import ForcedMuteNote from '@/components/ForcedMuteNote'
-import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip } from '../stalkerApi'
+import { getVodStreamUrl, getVodCastLink, getVodSeasons, getVodEpisodes, getVodSkip, recordingStreamUrl } from '../stalkerApi'
+import { loadRecordingPosition, saveRecordingPosition } from '@/lib/recordings'
 import { useCasting } from '@/lib/useCasting'
 import { resumeAfterCast } from '@/lib/cast'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
@@ -55,6 +56,8 @@ export default function VodPlayerPage() {
   const goBack = () => (openedDirectly ? navigate('/vod') : navigate(-1))
 
   const videoId      = searchParams.get('videoId') || ''
+  // A live TV recording (the Recordings page): played from the server's file, not the portal.
+  const recordingId  = searchParams.get('recording') || ''
   const cmd          = searchParams.get('cmd') || ''
   const title        = searchParams.get('title') || 'Untitled'
   const seriesNo     = parseInt(searchParams.get('series') || '0', 10)
@@ -197,7 +200,7 @@ export default function VodPlayerPage() {
   useEffect(() => { volumeRef.current = volume }, [volume])
 
   // ── Continue Watching: persist position + resume ──────────────────────────
-  const progressKey = makeVodKey({ videoId, seasonId, episodeId })
+  const progressKey = recordingId ? `rec:${recordingId}` : makeVodKey({ videoId, seasonId, episodeId })
 
   // Latest metadata for the saver, read through a ref so the save interval
   // doesn't need to re-bind when params change (router reuses this component).
@@ -219,8 +222,9 @@ export default function VodPlayerPage() {
     if (!v || !v.duration || !isFinite(v.duration)) return
     // Not while the previous title's media is still the one playing.
     if (mediaKeyRef.current !== metaRef.current.key) return
+    if (recordingId) { saveRecordingPosition(recordingId, v.currentTime, v.duration); return }
     saveVodProgress({ ...metaRef.current, position: v.currentTime, duration: v.duration })
-  }, [])
+  }, [recordingId])
 
   // Save every 10s while playing, and once more on unmount / title change.
   useEffect(() => {
@@ -254,14 +258,14 @@ export default function VodPlayerPage() {
     }
     if (!v || !duration || mediaKey !== progressKey || resumedKeyRef.current === progressKey) return
     resumedKeyRef.current = progressKey
-    const saved = getVodProgress(progressKey)
+    const saved = recordingId ? loadRecordingPosition(recordingId) : getVodProgress(progressKey)
     if (saved && saved.position >= VOD_RESUME_MIN_SECS && saved.position < duration * VOD_DONE_FRACTION) {
       try { v.currentTime = saved.position } catch { /* seek rejected */ }
       setResumedFrom(saved.position)
     } else {
       setResumedFrom(0)
     }
-  }, [progressKey, duration, mediaKey])
+  }, [progressKey, duration, mediaKey, recordingId])
 
   // ── Skip intro / recap / credits (lib/skipSegments.js) ──────────────────────
   // The parts that can be skipped, from the server: for this title only
@@ -352,17 +356,20 @@ export default function VodPlayerPage() {
 
   // Fetch + load stream
   useEffect(() => {
-    if (!videoId) { setStatus('error'); setErrorMsg('No video ID provided.'); return }
+    if (!videoId && !recordingId) { setStatus('error'); setErrorMsg('No video ID provided.'); return }
     if (onTv) return
 
     let cancelled = false
     setStatus('loading')
     setErrorMsg('')
     // A new title: what's on screen until it loads is the old one's.
-    streamKeyRef.current = makeVodKey({ videoId, seasonId, episodeId })
+    streamKeyRef.current = recordingId ? `rec:${recordingId}` : makeVodKey({ videoId, seasonId, episodeId })
     mediaKeyRef.current = null
     setMediaKey(null)
     setScrubPct(null)
+
+    // A recording: its file as HLS byte ranges, from this server (routes/recordingFile.js).
+    if (recordingId) { loadStreamUrl(recordingStreamUrl(recordingId)); return () => { cancelled = true } }
 
     getVodStreamUrl({ videoId, cmd, series: seriesNo, seasonId, episodeId })
       .then(({ streamUrl }) => {
@@ -373,7 +380,7 @@ export default function VodPlayerPage() {
       })
 
     return () => { cancelled = true }
-  }, [videoId, cmd, seriesNo, seasonId, episodeId, onTv])
+  }, [videoId, recordingId, cmd, seriesNo, seasonId, episodeId, onTv])
 
   function loadStreamUrl(url) {
     const video = videoRef.current
@@ -840,7 +847,7 @@ export default function VodPlayerPage() {
               onToggle={() => { if (!subsOpen) subs.loadOnline(); setGearOpen(false); setSubsOpen(o => !o) }} />
             <PlayerSettingsButton open={gearOpen} onToggle={() => { setSubsOpen(false); setGearOpen(o => !o) }} />
             <StatsButton open={statsOpen} onToggle={() => setStatsOpen(o => !o)} />
-            <CastButtons cast={cast} />
+            {!recordingId && <CastButtons cast={cast} />}
             {document.pictureInPictureEnabled && (
               <button
                 onClick={togglePiP}
@@ -868,7 +875,7 @@ export default function VodPlayerPage() {
             )}
           </div>
 
-          <MyListButton item={myListItem} className="self-start" />
+          {!recordingId && <MyListButton item={myListItem} className="self-start" />}
 
           {/* Meta chips */}
           <div className="flex flex-wrap gap-1.5">

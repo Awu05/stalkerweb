@@ -31,6 +31,7 @@ import ViewersCard from '@/components/ViewersCard'
 import ActivityPanel from '@/components/ActivityPanel'
 import ChannelFilters from '@/components/ChannelFilters'
 import PlaybackSettings from '@/components/PlaybackSettings'
+import RecordingSettings from '@/components/RecordingSettings'
 import SubtitleSettings from '@/components/SubtitleSettings'
 import TimezonePicker from '@/components/TimezonePicker'
 import { missingFields, prepareForm } from '@/lib/profileRequired'
@@ -1387,6 +1388,10 @@ export default function SetupPage() {
 
         <Card title="Subtitles" description="Online subtitles, offered in the movie and episode player beside the ones inside the videos — shared by every viewer.">
           <SubtitleSettings />
+        </Card>
+
+        <Card title="Recordings" description="Live TV recorded on the server, from the live player or the guide — shared by every viewer.">
+          <RecordingSettings />
         </Card>
           </>
         )}

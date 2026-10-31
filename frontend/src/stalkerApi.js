@@ -20,7 +20,8 @@ async function _fetch(path, opts = {}) {
       // Signed out (ACCESS_KEY set, cookie missing or revoked): App shows the login.
       if (r.status === 401 && e.accessRequired) window.dispatchEvent(new Event(ACCESS_REQUIRED))
       if (r.status === 409 && e.viewerGone) window.dispatchEvent(new Event(VIEWER_GONE))
-      throw new Error(e.error || r.statusText)
+      // The answer's details go with it (a 409's clash, for one).
+      throw Object.assign(new Error(e.error || r.statusText), { status: r.status, body: e })
     }
     return r.json()
   } finally {
@@ -268,4 +269,13 @@ export const setVodSkipMatch = (videoId, imdbId) => _put(`/vod/skip/match/${enco
 export const getDownloads     = ()       => _get('/downloads')
 export const enqueueDownloads = (items)  => _post('/downloads', { items })
 export const cancelDownload   = (id)     => _delete(`/downloads/${encodeURIComponent(id)}`)
+
+// ── Live TV recordings (the server's recordings/) ─────────────────────────
+export const getRecordings     = (all = false) => _get(`/recordings${all ? '?all=1' : ''}`)
+export const scheduleRecording = (programme)   => _post('/recordings', programme)            // { channelId, channelName, title, startAt, endAt }
+export const recordNow         = (p)           => _post('/recordings/now', p)                // { channelId, channelName, title, endAt | null, force? }
+export const stopRecording     = (id)          => _post(`/recordings/${encodeURIComponent(id)}/stop`, {})
+export const deleteRecording   = (id)          => _delete(`/recordings/${encodeURIComponent(id)}`)
+/** A finished recording as HLS (byte ranges into its .ts file), for the player. */
+export const recordingStreamUrl = (id) => `/proxy/recording/${encodeURIComponent(id)}/index.m3u8`
 

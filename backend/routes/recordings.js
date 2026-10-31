@@ -3,7 +3,7 @@
 // POST   /api/recordings           — book a guide programme { channelId, channelName, title, startAt, endAt }
 // POST   /api/recordings/now       — record a channel now { channelId, channelName, title, endAt | null, force? }
 // POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started
-// DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file
+// DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file → { deleted }
 //
 // The provider's stream limit (Settings: max_streams, 1 by default): booking a
 // recording that would overlap others past it is refused (409 with the
@@ -85,7 +85,7 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
     const file = store().get(r.id)?.filePath;
     if (file) for (const f of [file, `${file}.index`, `${file}.part`, `${file}.part.index`]) fs.rmSync(f, { force: true });
     store().remove(r.id);
-    res.status(204).end();
+    res.json({ deleted: r.id });
   });
 
   return router;

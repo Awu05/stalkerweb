@@ -86,7 +86,7 @@ describe('/api/recordings', () => {
     const now = await call('POST', '/api/recordings/now', { channelId: '10', channelName: 'Movies', title: 'Film', endAt: T0 + 120 * MIN, force: true })
     const id = now.body.id
     const del = await call('DELETE', `/api/recordings/${id}`)
-    expect(del.status).toBe(204)
+    expect(del.status).toBe(200)
     expect((await call('GET', '/api/recordings')).body.recordings.find((x) => x.id === id)).toBeUndefined()
     expect(fs.readdirSync(dir).some((f) => f.includes('Film'))).toBe(false)   // no file left, finished or half-written
 

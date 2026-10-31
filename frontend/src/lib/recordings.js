@@ -21,7 +21,7 @@ export function endForChoice(choice, now, programmeEnd = null) {
 }
 
 /** { scheduled (soonest first), recording, done (newest first — failed and missed too) }; cancelled ones aren't shown. */
-export function groupRecordings(list, now = Date.now()) {
+export function groupRecordings(list) {
   const by = (s) => list.filter((r) => s.includes(r.status))
   return {
     scheduled: by(['scheduled']).sort((a, b) => a.startAt - b.startAt),
@@ -68,4 +68,26 @@ export function recordingLabel(r, { now = Date.now(), timeZone } = {}) {
     default:
       return ''
   }
+}
+
+// Where a recording was left — kept on this device, not in the server's
+// Continue Watching (a recording isn't a VOD title). Gone once near the end.
+const POS_KEY = (id) => `sw:recording-position:${id}`
+const DONE_FRACTION = 0.95
+const browserStorage = () => { try { return globalThis.localStorage ?? null } catch { return null } }
+
+/** { position } (seconds), or null. */
+export function loadRecordingPosition(id, storage = browserStorage()) {
+  try {
+    const n = Number(storage?.getItem(POS_KEY(id)))
+    return Number.isFinite(n) && n > 0 ? { position: n } : null
+  } catch { return null }
+}
+
+export function saveRecordingPosition(id, position, duration, storage = browserStorage()) {
+  try {
+    if (!storage || !(duration > 0)) return
+    if (position >= duration * DONE_FRACTION) storage.removeItem(POS_KEY(id))
+    else storage.setItem(POS_KEY(id), String(Math.floor(position)))
+  } catch { /* storage refused: no resume, nothing else lost */ }
 }

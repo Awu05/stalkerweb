@@ -29,6 +29,7 @@ import { ClearSearch } from '@/components/ui/clear-search'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import { useCasting } from '@/lib/useCasting'
 import { CastButtons, CastingOverlay } from '@/components/CastControls'
+import RecordButton from '@/components/RecordButton'
 
 // M mutes and unmutes by itself (the key handler below): its first press is left to it.
 const isMuteShortcut = (e) => e.code === 'KeyM' && !isTypingTarget(e.target)
@@ -39,7 +40,7 @@ function Controls({
   audioTracks, activeAudio, subtitleTracks, activeSub,
   showGuide, onToggleGuide, isFavorite, onToggleFavorite,
   onPlayPause, onMute, onVolume, onFullscreen, onToggleList, onTogglePiP,
-  onAudioTrack, onSubtitleTrack, cast, statsOpen, onToggleStats,
+  onAudioTrack, onSubtitleTrack, cast, statsOpen, onToggleStats, recordChannel, recordProgramme,
 }) {
   return (
     <div data-player-controls className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
@@ -98,6 +99,7 @@ function Controls({
           </select>
         )}
         <StatsButton open={statsOpen} onToggle={onToggleStats} />
+        <RecordButton channel={recordChannel} programme={recordProgramme} />
         {cast && <CastButtons cast={cast} />}
         {/* PiP button — only shown when browser supports it */}
         {document.pictureInPictureEnabled && (
@@ -1391,6 +1393,7 @@ export default function PlayerPage() {
             onTogglePiP={togglePiP}
             cast={cast}
             statsOpen={statsOpen} onToggleStats={() => setStatsOpen(o => !o)}
+            recordChannel={activeChannel} recordProgramme={activeChannel ? nowNext?.[String(activeChannel.uniqueId)]?.now : null}
             onAudioTrack={setAudioTrack}
             onSubtitleTrack={setSubtitleTrack}
           />

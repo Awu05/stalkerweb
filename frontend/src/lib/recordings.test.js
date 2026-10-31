@@ -16,7 +16,7 @@ describe('groupRecordings', () => {
       rec({ id: 'f', status: 'missed', startAt: NOW - 600 * MIN, endAt: NOW - 500 * MIN }),
       rec({ id: 'g', status: 'cancelled', startAt: NOW, endAt: NOW + MIN }),
     ]
-    const g = groupRecordings(list, NOW)
+    const g = groupRecordings(list)
     expect(g.scheduled.map((r) => r.id)).toEqual(['b', 'a'])
     expect(g.recording.map((r) => r.id)).toEqual(['c'])
     expect(g.done.map((r) => r.id)).toEqual(['e', 'd', 'f'])
@@ -53,5 +53,24 @@ describe('endForChoice', () => {
     expect(endForChoice('30', NOW)).toBe(NOW + 30 * MIN)
     expect(endForChoice('120', NOW)).toBe(NOW + 120 * MIN)
     expect(endForChoice('stop', NOW)).toBeNull()
+  })
+})
+
+describe('recording positions (resume, on this device)', () => {
+  const store = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) } }
+  it('keeps where a recording was left, and forgets it once it is near the end', async () => {
+    const { loadRecordingPosition, saveRecordingPosition } = await import('./recordings')
+    const s = store()
+    expect(loadRecordingPosition('r1', s)).toBeNull()
+    saveRecordingPosition('r1', 600, 3600, s)
+    expect(loadRecordingPosition('r1', s)).toEqual({ position: 600 })
+    saveRecordingPosition('r1', 3500, 3600, s)   // past 95%: finished
+    expect(loadRecordingPosition('r1', s)).toBeNull()
+  })
+  it('never throws when storage is unavailable', async () => {
+    const { loadRecordingPosition, saveRecordingPosition } = await import('./recordings')
+    const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') } }
+    expect(loadRecordingPosition('r1', broken)).toBeNull()
+    expect(() => saveRecordingPosition('r1', 10, 100, broken)).not.toThrow()
   })
 })

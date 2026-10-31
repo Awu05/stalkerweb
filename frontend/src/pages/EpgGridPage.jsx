@@ -1,14 +1,15 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Play, X, Bell, BellOff, Tv2, Loader2, AlertCircle } from 'lucide-react'
+import { Play, X, Bell, BellOff, Tv2, Loader2, AlertCircle, CircleDot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { isLanguageDisabled } from '@/lib/languages'
 import { matchesStation } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
-import { getChannelEpg, getProxiedLogoUrl } from '../stalkerApi'
+import { getChannelEpg, getProxiedLogoUrl, scheduleRecording } from '../stalkerApi'
+import { showToast } from '@/lib/toast'
 import { useReminders } from '@/lib/useReminders'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -136,6 +137,15 @@ const ProgrammeBlock = memo(function ProgrammeBlock({ prog, channel, gridStartMs
 })
 
 // ── Programme detail popup ────────────────────────────────────────────────────
+// Booked on the server (routes/recordings.js): it records with every app closed. A clash past the
+// provider's stream limit is refused with what it clashes with.
+function bookRecording(prog, channel, onClose) {
+  scheduleRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
+    startAt: prog.startTime * 1000, endAt: prog.endTime * 1000 })
+    .then(() => { showToast(`"${prog.title}" will be recorded — see Recordings`); onClose() })
+    .catch((e) => showToast(e.message, 'error'))
+}
+
 function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, hasReminder }) {
   const live = isNow(prog.startTime, prog.endTime)
   const future = prog.startTime * 1000 > Date.now()
@@ -203,6 +213,14 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
             >
               {hasReminder ? <BellOff size={13} /> : <Bell size={13} />}
               {hasReminder ? 'Remove Reminder' : 'Set Reminder'}
+            </button>
+          )}
+          {(live || future) && channel && (
+            <button
+              onClick={() => bookRecording(prog, channel, onClose)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium border bg-[var(--color-surface-2)] border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-live)]/50 transition-colors"
+            >
+              <CircleDot size={13} className="text-[var(--color-live)]" /> Record
             </button>
           )}
           <button
