@@ -594,23 +594,27 @@ describe('PUT /api/solo/casting and GET /api/solo/status', () => {
     } finally { s.server.close() }
   })
 
-  it('says whether a download or a cast still needs the server', async () => {
+  it('says whether a download, a cast or a recording still needs the server', async () => {
     soloCast.enable({ app: express(), shareToken: T, logger: quiet })
     let downloads = false
     let sessions = 0
-    const s = await serve({ solo: true }, { downloadsActive: () => downloads, castSessions: () => sessions })
+    let recordings = false
+    const s = await serve({ solo: true }, { downloadsActive: () => downloads, castSessions: () => sessions, recordingsActive: () => recordings })
+    const none = { downloadsActive: false, castActive: false, recordingsActive: false }
     try {
-      expect(await status(s.base, KEY)).toEqual({ status: 200, body: { downloadsActive: false, castActive: false } })
+      expect(await status(s.base, KEY)).toEqual({ status: 200, body: none })
       downloads = true
-      expect((await status(s.base, KEY)).body).toEqual({ downloadsActive: true, castActive: false })
+      expect((await status(s.base, KEY)).body).toEqual({ ...none, downloadsActive: true })
       downloads = false
       sessions = 1   // a channel being cast
-      expect((await status(s.base, KEY)).body).toEqual({ downloadsActive: false, castActive: true })
+      expect((await status(s.base, KEY)).body).toEqual({ ...none, castActive: true })
       sessions = 0
       await casting(s.base, { active: true }, KEY)   // the app said a cast is on (a movie)
-      expect((await status(s.base, KEY)).body).toEqual({ downloadsActive: false, castActive: true })
+      expect((await status(s.base, KEY)).body).toEqual({ ...none, castActive: true })
       await casting(s.base, { active: false }, KEY)
-      expect((await status(s.base, KEY)).body).toEqual({ downloadsActive: false, castActive: false })
+      expect((await status(s.base, KEY)).body).toEqual(none)
+      recordings = true   // a live channel being recorded (recordings/)
+      expect((await status(s.base, KEY)).body).toEqual({ ...none, recordingsActive: true })
     } finally { s.server.close() }
   })
 })

@@ -52,4 +52,15 @@ class ApiErrorTest {
         assertNull(appEventFor(401, """{"error":"Portal refused the MAC"}"""))
         assertNull(appEventFor(500, null))
     }
+
+    // POST /api/recordings/now while the provider's streams are in use: asked first, then sent with force.
+    @Test fun aRecordingThatWouldTakeTheStreamAsksFirst() {
+        val e = apiErrorFor(409, """{"error":"You're already watching — Record anyway?","takesStream":true}""")
+        assertTrue(e is ApiError.TakesStream)
+        assertEquals("You're already watching — Record anyway?", e.message)
+        // A booking that clashes is just refused, with why.
+        val clash = apiErrorFor(409, """{"error":"This overlaps \"Evening News\"","clash":{"id":"r1"}}""")
+        assertTrue(clash is ApiError.Failed)
+        assertEquals("This overlaps \"Evening News\"", clash.message)
+    }
 }

@@ -43,4 +43,15 @@ class PlayerParamsTest {
         assertEquals("1", ep.season)
         assertEquals(webSeasonEpisode, ep.toQuery())
     }
+
+    // A live TV recording (the web's /vod-player?recording=<id>&title=…): its own key, not a VOD title's.
+    @Test fun aRecordingHasItsOwnLinkAndKey() {
+        val r = PlayerParams(videoId = "", title = "Evening News", recordingId = "rec1")
+        assertTrue(r.isRecording)
+        assertFalse(r.isEpisode)
+        assertEquals("recording:rec1", r.key)
+        assertEquals(r, PlayerParams.parse(r.toQuery()))
+        assertFalse(movie.isRecording)
+        assertFalse(movie.toQuery().contains("recording"))
+    }
 }

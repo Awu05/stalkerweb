@@ -121,6 +121,10 @@ class SoloRulesTest {
         assertEquals(setOf(SoloHold.CASTING), holdsAfterStatus(setOf(SoloHold.CASTING), SoloStatus(downloadsActive = true, castActive = true)))
         // One the server can't speak for isn't kept.
         assertEquals(emptySet<String>(), holdsAfterStatus(setOf("something else"), SoloStatus(downloadsActive = true, castActive = true)))
+        // A recording goes on in the server too, until it says none is running.
+        val rec = setOf(SoloHold.RECORDING)
+        assertEquals(rec, holdsAfterStatus(rec, SoloStatus(downloadsActive = false, castActive = false, recordingsActive = true)))
+        assertEquals(emptySet<String>(), holdsAfterStatus(rec, SoloStatus(downloadsActive = true, castActive = true, recordingsActive = false)))
     }
 
     @Test fun `reads the server's status, and nothing else as one`() {
@@ -130,6 +134,19 @@ class SoloRulesTest {
         assertNull(parseSoloStatus("""{"downloadsActive":"yes","castActive":false}"""))
         assertNull(parseSoloStatus("""{"error":"Unauthorized"}"""))
         assertNull(parseSoloStatus(""))
+        assertEquals(SoloStatus(downloadsActive = false, castActive = false, recordingsActive = true),
+            parseSoloStatus("""{"downloadsActive":false,"castActive":false,"recordingsActive":true}"""))
+    }
+
+    @Test fun `a recording keeps the server up as a data sync, like a download`() {
+        assertEquals(SoloForeground.DataSync, soloForeground(setOf(SoloHold.RECORDING)))
+        assertEquals(setOf(SoloHold.RECORDING), holdsLeftByApp(setOf(SoloHold.RECORDING, SoloHold.PLAYING)))
+    }
+
+    @Test fun `both apps show the recordings settings, on the Playback tab`() {
+        assertTrue(SettingsCard.Recordings in shownCards(isSolo = true))
+        assertTrue(SettingsCard.Recordings in shownCards(isSolo = false))
+        assertEquals("playback", SettingsCard.Recordings.tab)
     }
 
     @Test fun `a restart doesn't stop a server that's still starting, unless it's stuck`() {
