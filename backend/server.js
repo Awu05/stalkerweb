@@ -367,6 +367,19 @@ appState.shareToken = access.shareToken;
   appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA,
     windowSize: config.castWindow, maxSessions: config.castMaxSessions, maxPieceBytes: config.castMaxPieceBytes });
 }
+// Live TV recordings: booked in recordings.json, made by reading this server's
+// own /proxy/stream (the live buffer and restart smoother included), written
+// as .ts files to the recordings folder (recordings/).
+{
+  const RecordingStore = require('./recordings/RecordingStore');
+  const { RecordingScheduler } = require('./recordings/RecordingScheduler');
+  appState.recordingStore = new RecordingStore(config.dataDir);
+  appState.recordings = new RecordingScheduler({
+    store: appState.recordingStore, urlFor: selfStreamUrl, dirFor: () => config.recordingsDir,
+    userAgent: appState.internalUA, timeZone: process.env.TZ || undefined,
+  });
+  appState.recordings.run().catch((e) => log.error('recordings', `couldn't start: ${e.message}`));
+}
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).
 // Without FFmpeg: the stream types the cast packager read, if it's being cast.
@@ -593,9 +606,12 @@ function shutdown(signal) {
   }
   httpsServer?.close();
   soloCast.disable();   // the cast listener
-  httpServer.close(() => {
-    log.info('server', 'HTTP server closed');
-    process.exit(0);
+  // Recordings first: each one's file finished (renamed from .part) before the server goes.
+  Promise.resolve(appState.recordings?.stopAll()).catch(() => {}).finally(() => {
+    httpServer.close(() => {
+      log.info('server', 'HTTP server closed');
+      process.exit(0);
+    });
   });
   setTimeout(() => { log.error('server', 'forced exit after timeout'); process.exit(1); }, 5000);
 }
