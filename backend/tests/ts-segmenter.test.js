@@ -340,3 +340,33 @@ describe('TsSegmenter', () => {
     for (const n of listed(ref.playlist())) expect(s.segment(n).equals(ref.segment(n)), n).toBe(true)
   })
 })
+
+describe('TsSegmenter for recordings', () => {
+  it('hands each closed piece to onPiece, and finish() closes the last one', () => {
+    const got = []
+    const s = new TsSegmenter({ windowSize: 1, onPiece: (data, dur, disc) => got.push({ data, dur, disc }) })
+    s.push(makeTs({ seconds: 10, keyEvery: 2 }))
+    expect(got.length).toBeGreaterThanOrEqual(1)
+    const before = got.length
+    s.finish()
+    expect(got.length).toBe(before + 1)
+    for (const p of got) {
+      expect(pidOf(p.data, 0)).toBe(0)                 // every piece starts with the PAT…
+      expect(startsWithKeyframe(p.data)).toBe(true)    // …and a keyframe: playable on its own
+    }
+    expect(got.reduce((t, p) => t + p.dur, 0)).toBeCloseTo(10, 0)
+    s.finish()                                         // nothing open: nothing more
+    expect(got.length).toBe(before + 1)
+  })
+
+  it('marks the first piece after a break', () => {
+    const got = []
+    const s = new TsSegmenter({ windowSize: 1, onPiece: (data, dur, disc) => got.push({ dur, disc }) })
+    s.push(makeTs({ seconds: 6, keyEvery: 2 }))
+    s.discontinuity()
+    s.push(makeTs({ seconds: 6, keyEvery: 2 }))
+    s.finish()
+    expect(got.some((p) => p.disc)).toBe(true)
+    expect(got[0].disc).toBe(false)
+  })
+})

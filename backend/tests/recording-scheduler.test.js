@@ -54,7 +54,7 @@ describe('RecordingScheduler', () => {
     expect(sched.active()).toEqual([r.id])
     started[0].finish({ status: 'done', bytes: 4096 })
     await flush()
-    expect(store.get(r.id)).toMatchObject({ status: 'done', bytes: 4096 })
+    expect(store.get(r.id)).toMatchObject({ status: 'done', bytes: 4096, endedAt: clock.t })
     expect(sched.active()).toEqual([])
   })
 

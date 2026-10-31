@@ -83,7 +83,7 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
     // Stopped first, its file finished: then nothing is left half-written.
     if (appState.recordings.stop(r.id)) await appState.recordings.settled(r.id);
     const file = store().get(r.id)?.filePath;
-    if (file) { fs.rmSync(file, { force: true }); fs.rmSync(file + '.part', { force: true }); }
+    if (file) for (const f of [file, `${file}.index`, `${file}.part`, `${file}.part.index`]) fs.rmSync(f, { force: true });
     store().remove(r.id);
     res.status(204).end();
   });

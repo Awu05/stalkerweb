@@ -39,6 +39,16 @@ function setup({ steps, free = () => 10 * GB }) {
   return { clock, run, calls: () => calls }
 }
 
+// The file and its index: pieces one after another, each starting on a TS packet, adding up to the file.
+function pieces(f) {
+  const idx = fs.readFileSync(f + '.index', 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const buf = fs.readFileSync(f)
+  let at = 0
+  for (const p of idx) { expect(p.o).toBe(at); expect(buf[p.o]).toBe(0x47); at += p.l }
+  expect(at).toBe(buf.length)
+  return idx
+}
+
 const A = makeTs({ seconds: 2 })
 const B = makeTs({ seconds: 2, startPts: 900_000 })
 
@@ -50,9 +60,11 @@ describe('startRecording', () => {
     expect(fs.existsSync(file + '.part')).toBe(true)
     s.clock.t += 61_000
     const r = await done
-    expect(r).toMatchObject({ status: 'done', bytes: A.length })
-    expect(fs.readFileSync(file).equals(A)).toBe(true)
+    expect(r.status).toBe('done')
+    expect(r.bytes).toBe(fs.statSync(file).size)
+    expect(pieces(file).length).toBeGreaterThan(0)
     expect(fs.existsSync(file + '.part')).toBe(false)
+    expect(fs.existsSync(file + '.part.index')).toBe(false)
   })
 
   it('carries on across a source restart', async () => {
@@ -62,7 +74,9 @@ describe('startRecording', () => {
     s.clock.t += 61_000
     const r = await done
     expect(r.status).toBe('done')
-    expect(fs.readFileSync(file).equals(Buffer.concat([A, B]))).toBe(true)
+    const idx = pieces(file)
+    expect(idx.some((p) => p.disc)).toBe(true)          // the restart is marked where it happened
+    expect(idx.reduce((t, p) => t + p.d, 0)).toBeCloseTo(4, 0)
   })
 
   it('opens the channel again when the reader gives up, until the end time', async () => {
@@ -72,8 +86,8 @@ describe('startRecording', () => {
     s.clock.t += 61_000
     const r = await done
     expect(s.calls()).toBeGreaterThanOrEqual(2)
-    expect(fs.readFileSync(file).equals(Buffer.concat([A, B]))).toBe(true)
     expect(r.status).toBe('done')
+    expect(pieces(file).reduce((t, p) => t + p.d, 0)).toBeCloseTo(4, 0)
   })
 
   it('fails when the source sends nothing for too long', async () => {
@@ -86,6 +100,7 @@ describe('startRecording', () => {
     expect(r.error).toMatch(/stopped sending|nothing/i)
     expect(fs.existsSync(file)).toBe(false)
     expect(fs.existsSync(file + '.part')).toBe(false)
+    expect(fs.existsSync(file + '.part.index')).toBe(false)
   })
 
   it('stopping early keeps what was recorded', async () => {
@@ -95,8 +110,9 @@ describe('startRecording', () => {
     await tick(40)
     ac.abort()
     const r = await done
-    expect(r).toMatchObject({ status: 'done', bytes: A.length })
-    expect(fs.readFileSync(file).equals(A)).toBe(true)
+    expect(r.status).toBe('done')
+    expect(r.bytes).toBeGreaterThan(0)
+    pieces(file)
   })
 
   it('disk full stops cleanly with what it has', async () => {

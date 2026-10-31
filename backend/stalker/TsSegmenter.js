@@ -110,7 +110,9 @@ class TsSegmenter {
    * @param {() => number} [opts.now]      the clock, for a piece's length when its PTS can't give it
    * @param {number} [opts.maxPieceBytes]  a piece's size cap (tests make it small)
    */
-  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now, maxPieceBytes = MAX_PIECE_BYTES } = {}) {
+  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now, maxPieceBytes = MAX_PIECE_BYTES, onPiece = null } = {}) {
+    // Each piece as it closes, (data, seconds, afterBreak) — recordings write them out (recordings/Recorder.js).
+    this.onPiece = onPiece;
     this.targetSeconds = targetSeconds;
     this.maxPieceBytes = maxPieceBytes;
     this.windowSize = windowSize;
@@ -339,6 +341,14 @@ class TsSegmenter {
     this._afterBreak();
   }
 
+  /** The stream is over (a recording ending): the open piece closes, measured as at a break. */
+  finish() {
+    const o = this.open;
+    if (!o) return;
+    const frames = ptsSeconds(o.maxPts, o.startPts) + (this.frameStep || 0);
+    this._close(frames > 0 ? frames : Math.max((o.lastAt - o.startAt) / 1000, 0.001));
+  }
+
   // Timestamps before a break mean nothing after it.
   _afterBreak() {
     if (this.pieces.length) this.pendingDisc = true;
@@ -377,6 +387,7 @@ class TsSegmenter {
     const data = o.buf.length - o.bytes > o.bytes >> 3 ? Buffer.from(o.buf.subarray(0, o.bytes)) : o.buf.subarray(0, o.bytes);
     this.lastBytes = o.bytes;
     this.pieces.push({ seq: o.seq, data, dur, disc: o.disc, key: o.key });
+    this.onPiece?.(data, dur, o.disc);
     // The target may only grow: a player may refuse a playlist whose target changed down.
     this.maxTarget = Math.max(this.maxTarget, Math.ceil(Number(dur.toFixed(3))));
     while (this.pieces.length > this.windowSize + KEEP_EXTRA) {

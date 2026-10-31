@@ -89,10 +89,12 @@ class RecordingScheduler {
     if (size > 0) {
       const file = freeName(r.filePath.replace(/\.ts$/, ' (part 1).ts'));
       fs.renameSync(part, file);
+      // Its index goes with it (what was written of it, a line a piece).
+      if (fs.existsSync(part + '.index')) fs.renameSync(part + '.index', file + '.index');
       this._store.update(r.id, { status: 'done', bytes: size, filePath: file, title: `${r.title} (part 1)`,
         error: 'The server restarted during this recording.' });
     } else {
-      if (part) fs.rmSync(part, { force: true });
+      if (part) { fs.rmSync(part, { force: true }); fs.rmSync(part + '.index', { force: true }); }
       this._store.update(r.id, { status: more ? 'cancelled' : 'failed', bytes: 0, error: 'The server restarted during this recording.' });
     }
     if (more) {
@@ -121,7 +123,8 @@ class RecordingScheduler {
       // The size shown while it records: saved now and then, not on every chunk.
       onBytes: (bytes) => { if (this._now() - lastSaved > 10_000) { lastSaved = this._now(); this._store.update(r.id, { bytes }); } },
     }).then((res) => {
-      this._store.update(r.id, { status: res.status, bytes: res.bytes, error: res.error });
+      // endedAt: when it really stopped (early, or when the disk filled) — its length on the Recordings page.
+      this._store.update(r.id, { status: res.status, bytes: res.bytes, error: res.error, endedAt: this._now() });
       log.info(TAG, `"${r.title || r.channelName}": ${res.status}${res.error ? ` — ${res.error}` : ''}`);
     }, (e) => {
       this._store.update(r.id, { status: 'failed', error: e.message });

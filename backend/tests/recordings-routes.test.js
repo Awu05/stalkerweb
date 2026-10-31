@@ -107,6 +107,26 @@ describe('/api/recordings', () => {
     expect((await call('GET', '/proxy/recording/nope')).status).toBe(404)
   })
 
+  it('serves a finished recording as HLS byte ranges into its one file', async () => {
+    const done = (await call('GET', '/api/recordings')).body.recordings.find((x) => x.status === 'done')
+    expect((await call('GET', `/proxy/recording/${done.id}/index.m3u8`)).status).toBe(404)   // no index yet
+    const NL = String.fromCharCode(10)
+    fs.writeFileSync(`${done.filePath}.index`, ['{"o":0,"l":8,"d":4.0}', '{"o":8,"l":11,"d":3.5,"disc":true}'].join(NL) + NL)
+    const m3u8 = await call('GET', `/proxy/recording/${done.id}/index.m3u8`)
+    expect(m3u8.status).toBe(200)
+    expect(m3u8.headers.get('content-type')).toMatch(/mpegurl/)
+    expect(m3u8.text).toContain('#EXT-X-PLAYLIST-TYPE:VOD')
+    expect(m3u8.text).toContain('#EXT-X-TARGETDURATION:4')
+    expect(m3u8.text).toContain(`#EXTINF:4.000,
+#EXT-X-BYTERANGE:8@0
+../${done.id}`)
+    expect(m3u8.text).toContain(`#EXT-X-DISCONTINUITY
+#EXTINF:3.500,
+#EXT-X-BYTERANGE:11@8
+../${done.id}`)
+    expect(m3u8.text.trim().endsWith('#EXT-X-ENDLIST')).toBe(true)
+  })
+
   it('only the owner sees theirs unless all=1', async () => {
     expect((await call('GET', '/api/recordings', null, bea)).body.recordings).toEqual([])
     const all = (await call('GET', '/api/recordings?all=1', null, bea)).body.recordings
