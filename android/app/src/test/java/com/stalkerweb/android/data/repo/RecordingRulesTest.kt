@@ -110,4 +110,28 @@ class RecordingRulesTest {
         assertTrue(recordingsHint(isSolo = false).contains("on the server"))
         assertTrue(recordingsHint(isSolo = true).contains("Downloads/StalkerWeb"))
     }
+
+    @Test fun `the Record button follows the recording until it's no longer recording`() {
+        val list = listOf(rec("a", "recording", now - min, null), rec("b", "done", now - 60 * min, now - min), rec("c", "failed", now - 60 * min, now - min))
+        assertTrue(stillRecording(list, "a"))
+        assertFalse(stillRecording(list, "b"))      // ended by itself, or stopped elsewhere
+        assertFalse(stillRecording(list, "c"))
+        assertFalse(stillRecording(list, "gone"))   // deleted
+    }
+
+    private val server = "http://127.0.0.1:8983/proxy/recording/r/index.m3u8"
+    private val copy = "content://media/external/downloads/42"
+
+    @Test fun `Solo plays a recording from its Downloads copy, the remote app from the server`() {
+        assertEquals(copy, recordingPlayUrl(isSolo = true, copy = copy, serverUrl = server))
+        assertEquals(server, recordingPlayUrl(isSolo = true, copy = null, serverUrl = server))   // not saved to Downloads yet
+        assertEquals(server, recordingPlayUrl(isSolo = false, copy = copy, serverUrl = server))
+    }
+
+    @Test fun `Solo keeps one copy - the private files go once it's in Downloads, and deleting it deletes that copy`() {
+        assertEquals(listOf("/data/recordings/x.ts", "/data/recordings/x.ts.index"), privateFilesAfterPublish("/data/recordings/x.ts"))
+        assertEquals(copy, copyToDelete(isSolo = true, copy = copy))
+        assertNull(copyToDelete(isSolo = true, copy = null))
+        assertNull(copyToDelete(isSolo = false, copy = copy))
+    }
 }

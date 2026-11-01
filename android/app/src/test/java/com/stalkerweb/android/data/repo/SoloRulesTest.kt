@@ -207,4 +207,24 @@ class SoloRulesTest {
         assertFalse(asksForNotifications(34, granted = false, askedBefore = true, holds = held))
         assertFalse(asksForNotifications(34, granted = false, askedBefore = false, holds = emptySet()))
     }
+
+    @Test fun `reads when the next booked recording starts`() {
+        assertEquals(1_793_000_000_000L,
+            parseSoloStatus("""{"downloadsActive":false,"castActive":false,"recordingsActive":false,"nextRecordingAt":1793000000000}""")?.nextRecordingAt)
+        assertNull(parseSoloStatus("""{"downloadsActive":false,"castActive":false,"nextRecordingAt":null}""")!!.nextRecordingAt)
+        assertNull(parseSoloStatus("""{"downloadsActive":false,"castActive":false}""")!!.nextRecordingAt)
+    }
+
+    @Test fun `the server holds itself up for a recording on or within 15 minutes, and wakes 15 minutes before a later one`() {
+        val now = 1_793_000_000_000L
+        val min = 60_000L
+        val idle = SoloStatus(downloadsActive = false, castActive = false)
+        assertEquals(RecordingPlan(hold = false, alarmAt = null), recordingPlan(idle, now))
+        assertEquals(RecordingPlan(hold = true, alarmAt = null), recordingPlan(idle.copy(recordingsActive = true), now))
+        assertEquals(RecordingPlan(hold = true, alarmAt = null), recordingPlan(idle.copy(nextRecordingAt = now + 10 * min), now))
+        assertEquals(RecordingPlan(hold = true, alarmAt = null), recordingPlan(idle.copy(nextRecordingAt = now - min), now))   // due: starting
+        assertEquals(RecordingPlan(hold = false, alarmAt = now + 45 * min), recordingPlan(idle.copy(nextRecordingAt = now + 60 * min), now))
+        assertEquals(RecordingPlan(hold = true, alarmAt = now + 45 * min),
+            recordingPlan(idle.copy(recordingsActive = true, nextRecordingAt = now + 60 * min), now))
+    }
 }
