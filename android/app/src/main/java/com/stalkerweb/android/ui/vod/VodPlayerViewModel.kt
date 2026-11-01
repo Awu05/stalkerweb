@@ -347,7 +347,9 @@ class VodPlayerViewModel(
         loadJob = viewModelScope.launch {
             links.ensureShareToken()
             if (_state.value.params?.key != params.key) return@launch
-            val url = "${links.base()}/proxy/recording/${android.net.Uri.encode(params.recordingId)}/index.m3u8"
+            val server = "${links.base()}/proxy/recording/${android.net.Uri.encode(params.recordingId)}/index.m3u8"
+            // Solo: its copy in Downloads once saved there (the only copy then); else the server's HLS.
+            val url = com.stalkerweb.android.data.repo.recordingPlayUrl(com.stalkerweb.android.BuildConfig.IS_SOLO, prefs.recordingCopy(params.recordingId), server)
             val play = { startPlayback(url, params) }
             if (_player.value != null) play() else pendingPlay = play
         }
@@ -361,6 +363,8 @@ class VodPlayerViewModel(
         val builder = MediaItem.Builder().setUri(url).setMediaId(params.key)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+        // A recording's own .ts on the device (Solo's copy in Downloads): played as a file, seeking included.
+        else if (url.startsWith("content://") || url.startsWith("file://")) builder.setMimeType(MimeTypes.VIDEO_MP2T)
         runCatching {
             p.setMediaItem(builder.build())
             p.prepare()

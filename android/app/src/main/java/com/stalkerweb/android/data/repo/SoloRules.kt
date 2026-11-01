@@ -115,7 +115,7 @@ object SoloHold {
     const val PLAYING = "playing"
     const val CASTING = "casting"
     const val DOWNLOADING = "downloading"
-    /** A live channel being recorded, or about to be (RecordingsRepository.watch). */
+    /** A live channel being recorded, or about to be — held by the server itself (SoloServerService, recordingPlan). */
     const val RECORDING = "recording"
 }
 

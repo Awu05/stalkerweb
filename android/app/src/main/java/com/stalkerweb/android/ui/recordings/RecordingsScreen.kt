@@ -93,7 +93,7 @@ fun RecordingsScreen(viewModel: RecordingsViewModel, onPlay: (Recording) -> Unit
             onDismissRequest = { deleting = null },
             title = { Text("Delete \"${r.title.ifBlank { r.channelName }}\"?") },
             text = {
-                Text(if (BuildConfig.IS_SOLO && r.id in published) "The copy in Downloads/StalkerWeb stays." else "Its file is deleted too.",
+                Text(if (BuildConfig.IS_SOLO && r.id in published) "Its file in Downloads/StalkerWeb is deleted too." else "Its file is deleted too.",
                     color = SwColors.Muted)
             },
             confirmButton = { Button(onClick = { viewModel.delete(r); deleting = null }) { Text("Delete") } },

@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -25,6 +26,7 @@ import com.stalkerweb.android.data.repo.isInside
 import com.stalkerweb.android.data.repo.mimeOf
 import com.stalkerweb.android.data.repo.openedInside
 import com.stalkerweb.android.data.repo.orphansToPublish
+import com.stalkerweb.android.data.repo.privateFilesAfterPublish
 import com.stalkerweb.android.data.repo.publicFileName
 import com.stalkerweb.android.data.repo.publicName
 import com.stalkerweb.android.data.repo.publicRecordingName
@@ -67,9 +69,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Finished live TV recordings are saved there the same way (the server's
  * list, RecordingsRepository.onList), with the same checks against their own
- * folder — but the private copy is kept: the app plays recordings from the
- * server, which reads that file. Only the .ts is saved, never the index
- * beside it (the server's own, for playing it).
+ * folder, and then the private .ts and its index are deleted: one copy, not
+ * two. Only the .ts is saved, never the index. The app remembers where each
+ * went (RecordingsRepository.keepCopy) and plays it from there, and deleting
+ * the recording in the app deletes that copy too ([deleteCopy]).
  */
 object DownloadPublisher {
     private const val TAG = "DownloadPublisher"
@@ -95,10 +98,11 @@ object DownloadPublisher {
         this.container = container
         container.downloads.onJobs = { jobs -> publish(jobs) }
         container.recordings.onList = { list -> publishRecordings(list) }
+        container.recordings.onDeleteCopy = { uri -> deleteCopy(uri) }
         // Finished while the app was closed: look once the server answers.
         scope.launch {
             if (!SoloServer.awaitReady(container.httpClient)) return@launch
-            // Recordings too — and one going or about to (booked before) holds the server up again.
+            // Recordings too: finished ones saved to Downloads (the server holds itself up for the rest).
             runCatching { container.recordings.list() }
             val jobs = runCatching { container.downloads.list() }.getOrNull() ?: return@launch
             sweep(jobs)
@@ -147,8 +151,8 @@ object DownloadPublisher {
                 for (r in recordingsToPublish(lastRecordings, c.prefs.publishedRecordings)) {
                     val saved = runCatching { copyOut(r) }
                         .onFailure { Log.w(TAG, "saving a recording failed (${it.javaClass.simpleName})") }
-                        .getOrDefault(false)
-                    if (saved) c.recordings.markPublished(r.id)
+                        .getOrNull()
+                    if (saved != null) { c.recordings.keepCopy(r.id, saved); c.recordings.markPublished(r.id) }
                     else if (!usable(r)) c.recordings.markPublished(goneKey(r.id))
                 }
             }
@@ -163,11 +167,31 @@ object DownloadPublisher {
         return confined(file, SoloEnv.recordingsDir(context.filesDir))
     }
 
-    /** Copies the recording's .ts to the Downloads folder, keeping it here (the app plays it from the server). */
-    private fun copyOut(r: Recording): Boolean {
-        val context = app ?: return false
-        if (!usable(r)) return false
-        return copyOut(File(r.filePath ?: return false), publicRecordingName(r), SoloEnv.recordingsDir(context.filesDir), keep = true)
+    /**
+     * Copies the recording's .ts to the Downloads folder, then deletes it and
+     * its index here: where it went (a URI), or null if it couldn't (yet).
+     */
+    private fun copyOut(r: Recording): String? {
+        val context = app ?: return null
+        if (!usable(r)) return null
+        val file = File(r.filePath ?: return null)
+        val uri = copyOut(file, publicRecordingName(r), SoloEnv.recordingsDir(context.filesDir), keep = true) ?: return null
+        for (path in privateFilesAfterPublish(file.path)) {
+            val f = File(path)
+            if (f.exists() && !f.delete()) Log.w(TAG, "couldn't delete a saved recording's private file")
+        }
+        return uri
+    }
+
+    /** A recording's copy in Downloads deleted (the recording deleted in the app). */
+    private fun deleteCopy(uri: String) {
+        val context = app ?: return
+        val u = Uri.parse(uri)
+        val gone = runCatching {
+            if (u.scheme == "file") File(u.path ?: return).delete()
+            else context.contentResolver.delete(u, null, null) > 0
+        }.getOrDefault(false)
+        if (!gone) Log.w(TAG, "couldn't delete a recording's copy in Downloads (already gone?)")
     }
 
     /**
@@ -226,7 +250,7 @@ object DownloadPublisher {
     /** Copies the job's file to the Downloads folder, then deletes it here. False if it couldn't (yet). */
     private fun copyOut(job: DownloadJob): Boolean {
         if (!usable(job)) return false
-        return copyOut(File(job.filePath ?: return false), publicName(job))
+        return copyOut(File(job.filePath ?: return false), publicName(job)) != null
     }
 
     /**
@@ -253,23 +277,24 @@ object DownloadPublisher {
 
     /**
      * Copies [source] (inside [dir]) to the Downloads folder as [name], then
-     * deletes it here — unless [keep]. False if it couldn't (yet).
+     * deletes it here — unless [keep]. Where it went (a content:// URI, or
+     * file:// on Android 8-9), or null if it couldn't (yet).
      */
-    private fun copyOut(source: File, name: String, dir: File? = null, keep: Boolean = false): Boolean {
-        val context = app ?: return false
+    private fun copyOut(source: File, name: String, dir: File? = null, keep: Boolean = false): String? {
+        val context = app ?: return null
         val folder = dir ?: SoloEnv.downloadDir(context.filesDir)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
             ContextCompat.checkSelfPermission(context, PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             needsPermission.value = true
-            return false
+            return null
         }
         val input = openChecked(source, folder) ?: throw IOException("not a file to save")
-        input.use { copyOut(context, it, name) }
+        val uri = input.use { copyOut(context, it, name) }
         if (!keep) source.delete()
-        return true
+        return uri
     }
 
-    private fun copyOut(context: android.content.Context, input: InputStream, name: String) {
+    private fun copyOut(context: android.content.Context, input: InputStream, name: String): String {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
@@ -288,6 +313,7 @@ object DownloadPublisher {
                 runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
+            return uri.toString()
         } else {
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FOLDER)
             if (!dir.isDirectory && !dir.mkdirs()) throw IOException("can't make the Downloads folder")
@@ -300,6 +326,7 @@ object DownloadPublisher {
             }
             // Written past MediaStore: the scanner adds it, so the Downloads and gallery apps show it.
             MediaScannerConnection.scanFile(context, arrayOf(target.path), arrayOf(mimeOf(name)), null)
+            return Uri.fromFile(target).toString()
         }
     }
 
