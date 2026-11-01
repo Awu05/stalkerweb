@@ -148,14 +148,45 @@ fun followsDownloads(isSolo: Boolean): Boolean = isSolo
  */
 fun holdsLeftByApp(holds: Set<String>): Set<String> = holds - SoloHold.PLAYING
 
-/** The server's word on what still needs it (GET /api/solo/status). */
-data class SoloStatus(val downloadsActive: Boolean, val castActive: Boolean, val recordingsActive: Boolean = false)
+/**
+ * The server's word on what still needs it (GET /api/solo/status): a download,
+ * a cast, a recording running (anyone's), and when the next booked recording
+ * starts (ms, or null).
+ */
+data class SoloStatus(
+    val downloadsActive: Boolean,
+    val castActive: Boolean,
+    val recordingsActive: Boolean = false,
+    val nextRecordingAt: Long? = null,
+)
 
 /** The server's answer to GET /api/solo/status, or null when it isn't one. */
 fun parseSoloStatus(json: String): SoloStatus? {
     fun flag(name: String) = Regex(""""$name"\s*:\s*(true|false)\b""").find(json)?.groupValues?.get(1)?.toBooleanStrict()
-    // recordingsActive: a server from before recordings has none to keep it up for.
-    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null, flag("recordingsActive") ?: false)
+    val next = Regex(""""nextRecordingAt"\s*:\s*(\d{1,15})\b""").find(json)?.groupValues?.get(1)?.toLongOrNull()
+    // recordingsActive, nextRecordingAt: a server from before recordings has none to keep it up for.
+    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null, flag("recordingsActive") ?: false, next)
+}
+
+/**
+ * What Solo's server does about recordings, from its own status: [hold] —
+ * keep itself in the foreground (SoloHold.RECORDING) — and [alarmAt], when
+ * to wake to start holding (ms), or null for no alarm.
+ */
+data class RecordingPlan(val hold: Boolean, val alarmAt: Long?)
+
+/**
+ * The server decides, not the app's foreground (SoloServerService): it holds
+ * itself up while a recording runs or one starts within [RECORDING_SOON_MS];
+ * for one later, an alarm [RECORDING_SOON_MS] before it starts the service to
+ * hold it — so a booking far ahead isn't missed when Android stopped the
+ * server meanwhile.
+ */
+fun recordingPlan(status: SoloStatus, nowMs: Long): RecordingPlan {
+    val next = status.nextRecordingAt
+    val soon = next != null && next - nowMs <= RECORDING_SOON_MS
+    val wakeAt = next?.minus(RECORDING_SOON_MS)?.takeIf { it > nowMs }
+    return RecordingPlan(hold = status.recordingsActive || soon, alarmAt = wakeAt)
 }
 
 /**

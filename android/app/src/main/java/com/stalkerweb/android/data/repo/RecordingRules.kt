@@ -94,9 +94,10 @@ fun recordingPositionToKeep(position: Double, duration: Double): Double? =
 const val RECORDING_SOON_MS = 15 * MIN
 
 /**
- * Whether Solo's server must be kept up (SoloHold.RECORDING): one is
- * recording, or one is booked to start within [RECORDING_SOON_MS]. Solo
- * records on the device, so with the server stopped nothing records.
+ * Whether one is recording, or booked to start within [RECORDING_SOON_MS]:
+ * Solo's app follows the list meanwhile (RecordingsRepository.watch), to save
+ * each one to Downloads as it finishes. Keeping the server up for them is the
+ * server's own doing (recordingPlan, SoloServerService).
  */
 fun recordingNeedsServer(list: List<Recording>, now: Long): Boolean =
     list.any { it.status == "recording" || (it.status == "scheduled" && it.startAt - now <= RECORDING_SOON_MS) }
@@ -111,11 +112,33 @@ fun recordingsToPublish(list: List<Recording>, published: Set<String>): List<Rec
         it.id !in published && goneKey(it.id) !in published
 }
 
+/**
+ * Whether recording [id] is still being made, in [list] (GET /api/recordings) —
+ * not once it ended by itself, was stopped elsewhere, failed or was deleted.
+ * The live player's Record button follows it (the web's stillRecording).
+ */
+fun stillRecording(list: List<Recording>, id: String): Boolean = list.any { it.id == id && it.status == "recording" }
+
+/**
+ * Where the app plays a recording from: in Solo, its copy in
+ * Downloads/StalkerWeb once it's there ([copy], a content:// URI — the only
+ * copy then); else the server's HLS ([serverUrl]). The remote apps always
+ * play the server's.
+ */
+fun recordingPlayUrl(isSolo: Boolean, copy: String?, serverUrl: String): String =
+    if (isSolo && !copy.isNullOrBlank()) copy else serverUrl
+
+/** Solo: the private files deleted once a finished recording is saved to Downloads — the .ts and its index. */
+fun privateFilesAfterPublish(tsPath: String): List<String> = listOf(tsPath, "$tsPath.index")
+
+/** What deleting a recording in the app deletes on the device besides the server's: Solo's Downloads copy, or null. */
+fun copyToDelete(isSolo: Boolean, copy: String?): String? = copy?.takeIf { isSolo && it.isNotBlank() }
+
 /** A recording's name in the Downloads folder: the server's own file name. */
 fun publicRecordingName(r: Recording): String =
     publicFileName(r.filePath.orEmpty().substringAfterLast('/').substringAfterLast('\\'))
 
 /** What the Recordings screen says under its title: where recordings are made and kept. */
 fun recordingsHint(isSolo: Boolean): String =
-    if (isSolo) "Live TV recorded on this device while StalkerWeb Solo's server is running. Finished ones are also saved to Downloads/StalkerWeb. Kept until you delete them."
+    if (isSolo) "Live TV recorded on this device while StalkerWeb Solo's server is running. Finished ones are saved to Downloads/StalkerWeb. Kept until you delete them."
     else "Live TV recorded on the server — even with every app closed. Kept until you delete them."

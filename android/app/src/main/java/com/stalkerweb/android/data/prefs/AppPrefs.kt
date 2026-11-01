@@ -74,6 +74,16 @@ class AppPrefs(context: Context) {
     fun recordingPosition(id: String): Double? =
         prefs.getFloat("$KEY_RECORDING_POSITION_PREFIX$id", -1f).toDouble().takeIf { it > 0 }
 
+    // Solo: each recording's copy in Downloads/StalkerWeb (a content:// URI, or
+    // file:// on Android 8-9) — the only copy once it's saved: the app plays it
+    // from there, and deletes it with the recording.
+    fun recordingCopy(id: String): String? = prefs.getString("$KEY_RECORDING_COPY_PREFIX$id", null)
+
+    fun setRecordingCopy(id: String, uri: String?) {
+        if (uri == null) prefs.edit().remove("$KEY_RECORDING_COPY_PREFIX$id").apply()
+        else prefs.edit().putString("$KEY_RECORDING_COPY_PREFIX$id", uri).apply()
+    }
+
     /** Keeps [position], or forgets it with null (finished). */
     fun setRecordingPosition(id: String, position: Double?) {
         val editor = prefs.edit()
@@ -302,6 +312,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PUBLISHED_DOWNLOADS = "published_downloads"
         private const val KEY_PUBLISHED_RECORDINGS = "published_recordings"
         private const val KEY_RECORDING_POSITION_PREFIX = "recording_position_"
+        private const val KEY_RECORDING_COPY_PREFIX = "recording_copy_"
         private const val KEY_REMINDERS = "guide_reminders"
         private const val KEY_SETTINGS_TAB = "settings_tab"
         private const val KEY_SUBTITLE_CHOICE = "subtitle_choice"
