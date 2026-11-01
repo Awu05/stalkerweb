@@ -369,4 +369,17 @@ describe('TsSegmenter for recordings', () => {
     expect(got.some((p) => p.disc)).toBe(true)
     expect(got[0].disc).toBe(false)
   })
+
+  it('keeps none of the closed pieces when it hands them on (keepPieces: false)', () => {
+    const got = []
+    const s = new TsSegmenter({ keepPieces: false, onPiece: (data, dur, disc) => got.push({ dur, disc }) })
+    s.push(makeTs({ seconds: 60, keyEvery: 2 }))
+    s.discontinuity()
+    s.push(makeTs({ seconds: 20, keyEvery: 2 }))
+    s.finish()
+    expect(got.length).toBeGreaterThan(15)
+    expect(s.pieces.length).toBe(0)
+    expect(got.filter((p) => p.disc)).toHaveLength(1)   // the break is still marked
+  })
 })
+

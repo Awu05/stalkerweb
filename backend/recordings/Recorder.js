@@ -16,18 +16,31 @@
 // index is written as each piece lands, so a part cut short by a restart
 // still has one.
 //
+// The pieces go to the disk as fast as it takes them: a disk that falls more
+// than 64 MB behind ends the recording with what it has. A piece's index
+// line is written once the file has the piece, so the index never lists
+// bytes the file doesn't have.
+//
 // The result: done (with what was recorded — also when stopped early, or
 // when the disk filled up: `error` says so), or failed (nothing recorded:
 // too little space to start, a channel that never sent anything, one that
-// can't be recorded).
+// can't be recorded). Stopped by the server shutting down (the signal's
+// reason is 'shutdown'), it's 'shutdown': the .part and its index stay as
+// they are, for the next start to keep as part 1 (recordings/RecordingScheduler.js).
+//
+// A recording until stopped whose channel sends nothing for 30 minutes in a
+// row ends there, with what it has; a booked one rides it out to its end.
 
 const fs = require('fs');
-const { readSelfStream } = require('../stalker/selfStreamReader');
+const config = require('../config');
+const { readSelfStream, sleep } = require('../stalker/selfStreamReader');
 const { TsSegmenter } = require('../stalker/TsSegmenter');
 
 const GB = 1024 ** 3;
 const MIN_FREE_TO_START = GB;          // the spec: at least 1 GB free to start
 const MIN_FREE_WHILE = 50 * 1024 ** 2; // below this while recording: the disk is full
+const MAX_BACKLOG = 64 * 1024 ** 2;    // handed to the file but not on disk yet, past this: the disk can't keep up
+const GIVE_UP_MS = 30 * 60_000;        // an until-stopped recording with nothing from its channel this long ends
 
 /** Free bytes on the disk holding `dir` (null when it can't be told). */
 function freeBytesOf(dir) {
@@ -42,15 +55,18 @@ function freeBytesOf(dir) {
  * @param {string} o.url         this server's /proxy/stream URL for the channel
  * @param {string} o.filePath    where the finished recording goes
  * @param {number|null} o.endAt  when to stop (ms); null: until stopped
- * @param {AbortSignal} [o.signal]  stops it early — what was recorded is kept
+ * @param {AbortSignal} [o.signal]  stops it early — what was recorded is kept (aborted
+ *   with the reason 'shutdown': left as .part, for the next start)
  * @param {(bytes: number) => void} [o.onBytes]  the size so far, as it grows
  * @param {() => number|null} [o.freeBytes]      free disk space (tests)
- * @returns {Promise<{ status: 'done'|'failed', bytes: number, error?: string }>}
+ * @param {number} [o.maxPieceBytes]  a piece's size cap (the cast one: 12 MB in Solo, 32 MB elsewhere)
+ * @returns {Promise<{ status: 'done'|'failed'|'shutdown', bytes: number, error?: string }>}
  */
 async function startRecording({
   url, filePath, endAt = null, signal = new globalThis.AbortController().signal, now = Date.now, onBytes = () => {},
   freeBytes = () => freeBytesOf(require('path').dirname(filePath)), reader = readSelfStream, userAgent = null,
-  checkEveryMs = 1000, retryMs = 5000,
+  checkEveryMs = 1000, retryMs = 5000, giveUpMs = GIVE_UP_MS, maxBacklog = MAX_BACKLOG,
+  maxPieceBytes = config.castMaxPieceBytes, openFile = (p) => fs.createWriteStream(p),
 }) {
   const free = freeBytes();
   if (free != null && free < MIN_FREE_TO_START) {
@@ -58,9 +74,10 @@ async function startRecording({
   }
 
   const part = filePath + '.part';
-  const out = fs.createWriteStream(part);
+  const out = openFile(part);
   const index = fs.createWriteStream(part + '.index');
-  let bytes = 0;
+  let queued = 0;   // bytes handed to the file
+  let bytes = 0;    // bytes the file has taken
   let error = null;
   let unsupported = null;
   let writeFailed = null;
@@ -77,17 +94,27 @@ async function startRecording({
     if (f != null && f < MIN_FREE_WHILE) { error = 'The disk filled up — the recording stopped with what it had.'; stop(); }
   }, checkEveryMs);
 
-  // Pieces from the segmenter (only a few kept in memory): into the file, and a line in the index each.
+  // Pieces from the segmenter (it keeps none): into the file, and — once the
+  // file has one — its line in the index.
   const seg = new TsSegmenter({
-    windowSize: 1,
+    keepPieces: false, maxPieceBytes,
     onPiece: (data, dur, disc) => {
-      out.write(data);
-      index.write(JSON.stringify({ o: bytes, l: data.length, d: Number(dur.toFixed(3)), ...(disc ? { disc: true } : {}) }) + '\n');
-      bytes += data.length;
-      onBytes(bytes);
+      const line = JSON.stringify({ o: queued, l: data.length, d: Number(dur.toFixed(3)), ...(disc ? { disc: true } : {}) }) + '\n';
+      queued += data.length;
+      out.write(data, (e) => {
+        if (e) return;
+        index.write(line);
+        bytes += data.length;
+        onBytes(bytes);
+      });
+      if (out.writableLength > maxBacklog && !ac.signal.aborted) {
+        error = 'The disk couldn\'t keep up — the recording stopped with what it had.';
+        stop();
+      }
     },
   });
-  const onData = (buf) => { if (!ac.signal.aborted) seg.push(buf); };
+  let lastDataAt = now();
+  const onData = (buf) => { if (!ac.signal.aborted) { lastDataAt = now(); seg.push(buf); } };
 
   while (!ac.signal.aborted) {
     try {
@@ -101,19 +128,31 @@ async function startRecording({
       seg.discontinuity();
     }
     if (ac.signal.aborted) break;
-    await new Promise((r) => { const t = setTimeout(r, retryMs); ac.signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); });
+    // Until stopped, and nothing from the channel for half an hour: it isn't coming back.
+    if (endAt == null && now() - lastDataAt >= giveUpMs) {
+      error = 'The channel sent nothing for 30 minutes — the recording stopped with what it had.';
+      break;
+    }
+    await sleep(retryMs, ac.signal);
   }
   clearInterval(check);
   signal.removeEventListener('abort', stop);
 
   seg.finish();   // the last piece, still open
-  await Promise.all([new Promise((r) => out.end(r)), new Promise((r) => index.end(r))]);
+  // The file first — each piece's index line goes in as the file takes it — then the index.
+  await new Promise((r) => out.end(r));
+  await new Promise((r) => index.end(r));
   if (writeFailed?.code === 'ENOSPC') error = 'The disk filled up — the recording stopped with what it had.';
   else if (writeFailed) error = `The recording couldn't be written (${writeFailed.code || writeFailed.message}).`;
 
+  if (signal.aborted && signal.reason === 'shutdown' && bytes > 0) {
+    // Left as it is: the next start keeps it as part 1 and records the rest.
+    return { status: 'shutdown', bytes };
+  }
   if (bytes === 0) {
     fs.rmSync(part, { force: true });
     fs.rmSync(part + '.index', { force: true });
+    if (signal.aborted && signal.reason === 'shutdown') return { status: 'shutdown', bytes: 0 };
     const why = unsupported ? `This channel can't be recorded (${unsupported}).`
       : error || 'The channel stopped sending before anything was recorded.';
     return { status: 'failed', bytes: 0, error: why };

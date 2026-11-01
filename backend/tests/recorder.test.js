@@ -3,6 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createRequire } from 'module'
+import { Writable } from 'stream'
+import { getEventListeners } from 'events'
 import { makeTs } from './helpers/makeTs.js'
 
 const require = createRequire(import.meta.url)
@@ -49,6 +51,7 @@ function pieces(f) {
   return idx
 }
 
+const MIN = 60_000
 const A = makeTs({ seconds: 2 })
 const B = makeTs({ seconds: 2, startPts: 900_000 })
 
@@ -142,4 +145,114 @@ describe('startRecording', () => {
     expect(r.status).toBe('failed')
     expect(r.error).toMatch(/can't be recorded/i)
   })
+
+  it('a shutdown leaves the .part and its index for the next start to keep as part 1', async () => {
+    const s = setup({ steps: () => [A] })
+    const ac = new globalThis.AbortController()
+    const done = s.run({ signal: ac.signal })
+    await tick(40)
+    ac.abort('shutdown')
+    const r = await done
+    expect(r.status).toBe('shutdown')
+    expect(r.bytes).toBeGreaterThan(0)
+    expect(fs.existsSync(file)).toBe(false)
+    expect(fs.statSync(file + '.part').size).toBe(r.bytes)
+    expect(fs.readFileSync(file + '.part.index', 'utf8').trim().split('\n').length).toBeGreaterThan(0)
+  })
+
+  // A file stream that takes `ms` to finish each write (a slow disk).
+  const slowFile = (ms) => (p) => {
+    const real = fs.createWriteStream(p)
+    return new Writable({
+      write(chunk, _enc, cb) { setTimeout(() => real.write(chunk, cb), ms) },
+      final(cb) { real.end(cb) },
+    })
+  }
+  const LONG = makeTs({ seconds: 12, keyEvery: 2 })
+
+  it('writes an index line only once its piece is in the file', async () => {
+    const s = setup({ steps: () => [LONG] })
+    const ac = new globalThis.AbortController()
+    const done = s.run({ signal: ac.signal, openFile: slowFile(300) })
+    await tick(60)
+    // A piece is closed and queued, but the disk hasn't taken it yet: the index doesn't list it.
+    expect(fs.readFileSync(file + '.part.index', 'utf8')).toBe('')
+    ac.abort()
+    const r = await done
+    expect(r.status).toBe('done')
+    pieces(file)
+  })
+
+  it('stops with what is on disk when the disk can\'t keep up', async () => {
+    const s = setup({ steps: () => [LONG, LONG] })
+    const r = await s.run({ openFile: slowFile(20), maxBacklog: 1 })
+    expect(r.status).toBe('done')
+    expect(r.error).toMatch(/couldn't keep up/i)
+    expect(r.bytes).toBe(fs.statSync(file).size)
+    pieces(file)
+  })
+
+  it('keeps no closed pieces in memory, and cuts pieces at the size it\'s given', async () => {
+    const counts = []
+    for (const maxPieceBytes of [undefined, 20_000]) {
+      const s = setup({ steps: () => [LONG] })
+      const ac = new globalThis.AbortController()
+      const done = s.run({ signal: ac.signal, ...(maxPieceBytes ? { maxPieceBytes } : {}) })
+      await tick(40)
+      ac.abort()
+      await done
+      counts.push(pieces(file).length)
+      fs.rmSync(file); fs.rmSync(file + '.index')
+    }
+    expect(counts[1]).toBeGreaterThan(counts[0])
+  })
+
+  it('waits between tries without piling up abort listeners', async () => {
+    const seen = []
+    const ac = new globalThis.AbortController()
+    const reader = async (_u, { signal }) => {
+      seen.push(getEventListeners(signal, 'abort').length)
+      if (seen.length >= 12) ac.abort()
+      throw Object.assign(new Error('the channel stopped answering'), { gaveUp: true })
+    }
+    const r = await startRecording({ url: 'u', filePath: file, endAt: null, signal: ac.signal, freeBytes: () => 10 * GB, reader, checkEveryMs: 5, retryMs: 1 })
+    expect(r.status).toBe('failed')
+    expect(seen.length).toBeGreaterThanOrEqual(12)
+    expect(new Set(seen.slice(1)).size).toBe(1)
+    expect(seen.at(-1)).toBe(seen[1])
+  })
+
+  // A source that's down: each try takes 10 minutes of the test's clock and gives up.
+  const downFor = (clock, first = []) => {
+    let calls = 0
+    const reader = async (_u, { onData }) => {
+      calls += 1
+      if (calls === 1) for (const b of first) onData(b)
+      clock.t += 10 * MIN
+      throw Object.assign(new Error('the channel stopped answering'), { gaveUp: true })
+    }
+    return { reader, calls: () => calls }
+  }
+
+  it('an until-stopped recording gives up after 30 minutes with no source: done with what it has, failed with nothing', async () => {
+    for (const [first, status] of [[[], 'failed'], [[LONG], 'done']]) {
+      const clock = { t: 1_000_000 }
+      const d = downFor(clock, first)
+      const r = await startRecording({ url: 'u', filePath: file, endAt: null, now: () => clock.t, freeBytes: () => 10 * GB, reader: d.reader, checkEveryMs: 5, retryMs: 1 })
+      expect(r.status).toBe(status)
+      expect(r.error).toMatch(/30 minutes/)
+      expect(d.calls()).toBeLessThanOrEqual(4)
+      fs.rmSync(file, { force: true }); fs.rmSync(file + '.index', { force: true })
+    }
+  })
+
+  it('a booked recording rides out a long outage until its end', async () => {
+    const clock = { t: 1_000_000 }
+    const d = downFor(clock, [LONG])
+    const r = await startRecording({ url: 'u', filePath: file, endAt: clock.t + 120 * MIN, now: () => clock.t, freeBytes: () => 10 * GB, reader: d.reader, checkEveryMs: 5, retryMs: 1 })
+    expect(r.status).toBe('done')
+    expect(d.calls()).toBeGreaterThan(4)
+    expect(r.error).toBeUndefined()
+  })
 })
+
