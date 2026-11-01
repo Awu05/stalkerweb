@@ -75,6 +75,7 @@ import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
 import com.stalkerweb.android.data.repo.nowPlaying
+import com.stalkerweb.android.data.repo.eventAt
 import com.stalkerweb.android.data.repo.progressAt
 import com.stalkerweb.android.data.repo.progressOf
 import com.stalkerweb.android.ui.utils.LiveFocus
@@ -123,6 +124,8 @@ private class LiveControls(
     val isTV: Boolean,
     val statsOpen: Boolean = false,   // the Stats panel over the video
     val stats: StatsRepository? = null,
+    val recordingHere: Boolean = false,   // this player is recording the channel playing (Record stops it)
+    val recordWhat: String = "",          // what Record would record: the programme on now, or the channel
 )
 
 /** What the controls can do. */
@@ -152,6 +155,8 @@ private class LiveActions(
     val onToggleStats: () -> Unit,
     val onGoFullscreen: () -> Unit,
     val onHideControls: () -> Unit,
+    val onRecord: (String) -> Unit,       // a length from RECORD_CHOICES
+    val onStopRecording: () -> Unit,
 )
 
 @OptIn(UnstableApi::class)
@@ -287,6 +292,11 @@ fun PlayerScreen(
         )
     }
 
+    // Record anyway? (the provider's stream limit in use) — asked before recording.
+    state.recordAsk?.let { ask -> RecordAskDialog(ask.message, onYes = viewModel::confirmRecord, onNo = viewModel::dismissRecordAsk) }
+    // What Record records: the channel playing, from now; the programme on now gives the title and the end.
+    val programmeNow = state.guide?.let { eventAt(it, nowSecs) }
+
     // Above the Picture-in-Picture return, so a trip there keeps it open.
     var statsOpen by remember { mutableStateOf(false) }
     if (isInPipMode) {
@@ -302,6 +312,8 @@ fun PlayerScreen(
         isPlaying = isPlaying, isBuffering = isBuffering, playerError = playerError, showControls = showControls,
         nowSecs = nowSecs, audio = trackOptions(tracks, C.TRACK_TYPE_AUDIO), subtitles = trackOptions(tracks, C.TRACK_TYPE_TEXT),
         isTV = isTV, statsOpen = statsOpen, stats = viewModel.stats,
+        recordingHere = state.recording?.first == activeId,
+        recordWhat = programmeNow?.title?.takeIf { it.isNotBlank() }?.let { "\"$it\"" } ?: displayName,
     )
     val actions = LiveActions(
         onBack                 = onBack,
@@ -340,6 +352,8 @@ fun PlayerScreen(
         onExitFullscreen       = { if (!isTV) activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
         onToggleStats          = { statsOpen = !statsOpen },
         onGoFullscreen         = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE },
+        onRecord               = { choice -> viewModel.record(activeId, displayName, programmeNow, choice) },
+        onStopRecording        = viewModel::stopRecording,
     )
 
     if (isLandscape || isTV) LandscapePlayer(controls, actions, viewModel.castManager)
@@ -566,6 +580,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     }
                     Spacer(Modifier.weight(1f))
                     TrackButtons(c.audio, c.subtitles, a)
+                    RecordButton(c.recordingHere, c.recordWhat, Color.White, a.onRecord, a.onStopRecording)
                     TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                         Icon(
                             if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -695,6 +710,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
             SleepTimerChip(s.sleepTimerEndsAt)
             Spacer(Modifier.width(4.dp))
             LiveBadge()
+            RecordButton(c.recordingHere, c.recordWhat, MaterialTheme.colorScheme.onSurface, a.onRecord, a.onStopRecording)
             TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                 Icon(
                     if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,

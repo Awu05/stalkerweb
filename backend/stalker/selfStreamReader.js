@@ -270,4 +270,4 @@ async function followPlaylist(at, text, o) {
   }
 }
 
-module.exports = { readSelfStream, request };
+module.exports = { readSelfStream, request, sleep };

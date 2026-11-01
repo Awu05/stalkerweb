@@ -45,6 +45,8 @@ import com.stalkerweb.android.data.update.UpdateManager
 import com.stalkerweb.android.reminders.ReminderReceiver
 import com.stalkerweb.android.ui.downloads.DownloadsScreen
 import com.stalkerweb.android.ui.downloads.DownloadsViewModel
+import com.stalkerweb.android.ui.recordings.RecordingsScreen
+import com.stalkerweb.android.ui.recordings.RecordingsViewModel
 import com.stalkerweb.android.ui.guide.GuideScreen
 import com.stalkerweb.android.ui.guide.GuideViewModel
 import com.stalkerweb.android.ui.settings.SettingsScreen
@@ -195,7 +197,7 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            PlayerViewModel(application, container.live, container.stats) as T
+                            PlayerViewModel(application, container.live, container.stats, container.recordings) as T
                     }
                 }
                 val updateVmFactory = remember {
@@ -238,7 +240,7 @@ class MainActivity : ComponentActivity() {
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            GuideViewModel(container.guide, container.live, container.reminders, container.viewers) as T
+                            GuideViewModel(container.guide, container.live, container.reminders, container.viewers, container.recordings) as T
                     }
                 }
                 val downloadsVmFactory = remember {
@@ -246,6 +248,13 @@ class MainActivity : ComponentActivity() {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
                             DownloadsViewModel(container.downloads) as T
+                    }
+                }
+                val recordingsVmFactory = remember {
+                    object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            RecordingsViewModel(container.recordings) as T
                     }
                 }
                 val settingsVmFactory = remember {
@@ -435,6 +444,13 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             downloads = { DownloadsScreen(viewModel = viewModel(factory = downloadsVmFactory)) },
+                            recordings = {
+                                RecordingsScreen(
+                                    viewModel = viewModel(factory = recordingsVmFactory),
+                                    // A finished one plays in the VOD player, from the server's file.
+                                    onPlay = { r -> navController.navigate(Screen.VodPlayer.go(PlayerParams(videoId = "", title = r.title.ifBlank { r.channelName }, recordingId = r.id))) },
+                                )
+                            },
                             settings = {
                                 SettingsScreen(
                                     viewModel = viewModel(factory = settingsVmFactory),
@@ -511,7 +527,7 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.AlertDialog(
                         onDismissRequest = { SoloServer.notificationAsked() },
                         title = { androidx.compose.material3.Text("Allow notifications?") },
-                        text = { androidx.compose.material3.Text("While it plays, casts or downloads, StalkerWeb Solo keeps its server running and shows that in a notification. It works the same without.") },
+                        text = { androidx.compose.material3.Text("While it plays, casts, downloads or records, StalkerWeb Solo keeps its server running and shows that in a notification. It works the same without.") },
                         confirmButton = {
                             androidx.compose.material3.Button(onClick = {
                                 SoloServer.notificationAsked()

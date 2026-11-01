@@ -367,6 +367,19 @@ appState.shareToken = access.shareToken;
   appState.castHls = new CastHls({ inputUrlFor: selfStreamUrl, userAgent: appState.internalUA,
     windowSize: config.castWindow, maxSessions: config.castMaxSessions, maxPieceBytes: config.castMaxPieceBytes });
 }
+// Live TV recordings: booked in recordings.json, made by reading this server's
+// own /proxy/stream (the live buffer and restart smoother included), written
+// as .ts files to the recordings folder (recordings/).
+{
+  const RecordingStore = require('./recordings/RecordingStore');
+  const { RecordingScheduler } = require('./recordings/RecordingScheduler');
+  appState.recordingStore = new RecordingStore(config.dataDir);
+  appState.recordings = new RecordingScheduler({
+    store: appState.recordingStore, urlFor: selfStreamUrl, dirFor: () => config.recordingsDir,
+    userAgent: appState.internalUA, timeZone: process.env.TZ || undefined,
+  });
+  appState.recordings.run().catch((e) => log.error('recordings', `couldn't start: ${e.message}`));
+}
 // A channel's format in a line, for the log when a device can't decode it
 // (probing this server's own /proxy/stream, as the cast packager reads it).
 // Without FFmpeg: the stream types the cast packager read, if it's being cast.
@@ -412,6 +425,10 @@ const stremioRoutes   = require('./routes/stremio')(appState, {
 app.use('/api/auth', authRoutes);
 app.use('/api/vod', vodRoutes);
 app.use('/api/downloads', downloadsRoutes);
+app.use('/api/recordings', require('./routes/recordings')(appState, {
+  settings: () => require('./routes/settings').recordingSettings(exportSettingsCache.load() || {}),
+  viewerName: (id) => viewersManager.get(id)?.name ?? '',
+}));
 app.use('/api/channels', channelRoutes);
 app.use('/api/epg', epgRoutes);
 app.use('/api/stream', streamRoutes);
@@ -428,13 +445,16 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/activity', require('./routes/activity')(appState, { viewers: viewersManager, downloads: downloadManager }));
 // Solo (SOLO=1) only: the app tells the server its Wi-Fi address, for cast
 // links (they point at the cast listener, below), and whether a cast is on;
-// and asks what still needs the server (a download, a cast).
+// and asks what still needs the server (a download, a cast, a recording).
 require('./routes/solo').mount(app, config, soloCast, {
   downloadsActive: () => downloadManager.hasActive(),
   castSessions: () => appState.castHls?.size ?? 0,
+  recordingsActive: () => (appState.recordings?.active().length ?? 0) > 0,
+  nextRecordingAt: () => appState.recordingStore?.nextStart() ?? null,
 });
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
+app.use('/proxy', require('./routes/recordingFile')(appState));   // a finished recording, for the players
 app.use('/proxy', proxyRoutes);
 // Xtream Codes API (/player_api.php, /live/…, /movie/…, /series/…) — after
 // /api and /proxy so its catch-all /<user>/<pass>/<id> path never shadows them.
@@ -593,9 +613,12 @@ function shutdown(signal) {
   }
   httpsServer?.close();
   soloCast.disable();   // the cast listener
-  httpServer.close(() => {
-    log.info('server', 'HTTP server closed');
-    process.exit(0);
+  // Recordings first: each one's file finished (renamed from .part) before the server goes.
+  Promise.resolve(appState.recordings?.stopAll()).catch(() => {}).finally(() => {
+    httpServer.close(() => {
+      log.info('server', 'HTTP server closed');
+      process.exit(0);
+    });
   });
   setTimeout(() => { log.error('server', 'forced exit after timeout'); process.exit(1); }, 5000);
 }

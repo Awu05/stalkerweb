@@ -20,6 +20,12 @@
             android:process=":node"
             android:foregroundServiceType="mediaPlayback|dataSync"
             android:exported="false" />
+        <!-- The alarm 15 minutes before a booked recording: starts the server
+             to hold it up for it (SoloAlarmReceiver; an inexact while-idle
+             alarm, so no exact-alarm permission). -->
+        <receiver
+            android:name=".solo.SoloAlarmReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

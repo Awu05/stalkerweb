@@ -48,6 +48,7 @@ class AppContainer(context: Context) {
     val guide = GuideRepository(apis)
     val stats = StatsRepository(apis)
     val downloads = DownloadsRepository(apis, prefs, httpClient)
+    val recordings = RecordingsRepository(apis, prefs)
     val settings = SettingsRepository(apis, prefs)
     val reminders = RemindersRepository(context.applicationContext, prefs)
 

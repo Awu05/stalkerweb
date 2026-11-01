@@ -64,6 +64,34 @@ class AppPrefs(context: Context) {
         get() = prefs.getStringSet(KEY_PUBLISHED_DOWNLOADS, null)?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet(KEY_PUBLISHED_DOWNLOADS, value).apply()
 
+    // Solo: the recordings already copied to the Downloads folder (by id), so each is saved once.
+    var publishedRecordings: Set<String>
+        get() = prefs.getStringSet(KEY_PUBLISHED_RECORDINGS, null)?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_PUBLISHED_RECORDINGS, value).apply()
+
+    // Where each recording was left (seconds), on this device — a recording
+    // isn't a VOD title, so not in the server's Continue Watching (the web keeps its own).
+    fun recordingPosition(id: String): Double? =
+        prefs.getFloat("$KEY_RECORDING_POSITION_PREFIX$id", -1f).toDouble().takeIf { it > 0 }
+
+    // Solo: each recording's copy in Downloads/StalkerWeb (a content:// URI, or
+    // file:// on Android 8-9) — the only copy once it's saved: the app plays it
+    // from there, and deletes it with the recording.
+    fun recordingCopy(id: String): String? = prefs.getString("$KEY_RECORDING_COPY_PREFIX$id", null)
+
+    fun setRecordingCopy(id: String, uri: String?) {
+        if (uri == null) prefs.edit().remove("$KEY_RECORDING_COPY_PREFIX$id").apply()
+        else prefs.edit().putString("$KEY_RECORDING_COPY_PREFIX$id", uri).apply()
+    }
+
+    /** Keeps [position], or forgets it with null (finished). */
+    fun setRecordingPosition(id: String, position: Double?) {
+        val editor = prefs.edit()
+        if (position == null || position <= 0) editor.remove("$KEY_RECORDING_POSITION_PREFIX$id")
+        else editor.putFloat("$KEY_RECORDING_POSITION_PREFIX$id", position.toFloat())
+        editor.apply()
+    }
+
     // Guide reminders on this device (the web keeps its own).
     var reminders: List<com.stalkerweb.android.data.repo.Reminder>
         get() = runCatching {
@@ -282,6 +310,9 @@ class AppPrefs(context: Context) {
         private const val KEY_VOD_SORT        = "vod_sort"
         private const val KEY_FAVORITES_OPEN  = "favorites_open"
         private const val KEY_PUBLISHED_DOWNLOADS = "published_downloads"
+        private const val KEY_PUBLISHED_RECORDINGS = "published_recordings"
+        private const val KEY_RECORDING_POSITION_PREFIX = "recording_position_"
+        private const val KEY_RECORDING_COPY_PREFIX = "recording_copy_"
         private const val KEY_REMINDERS = "guide_reminders"
         private const val KEY_SETTINGS_TAB = "settings_tab"
         private const val KEY_SUBTITLE_CHOICE = "subtitle_choice"

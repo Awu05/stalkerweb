@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { Tv2, Settings, Loader2, Film, LayoutGrid, Download, PanelLeftClose, PanelLeftOpen, LogOut, Server } from 'lucide-react'
+import { Tv2, Settings, Loader2, Film, LayoutGrid, Download, CircleDot, PanelLeftClose, PanelLeftOpen, LogOut, Server } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
@@ -26,6 +26,7 @@ const GuidePage      = lazy(() => import('./pages/GuidePage'))
 const VodPage        = lazy(() => import('./pages/VodPage'))
 const VodPlayerPage  = lazy(() => import('./pages/VodPlayerPage'))
 const DownloadsPage  = lazy(() => import('./pages/DownloadsPage'))
+const RecordingsPage = lazy(() => import('./pages/RecordingsPage'))
 
 // ── Sidebar nav link ──────────────────────────────────────────────────────
 function NavItem({ to, icon: Icon, label, collapsed, onNavigate, state }) {
@@ -117,6 +118,7 @@ function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, vers
       <NavItem to="/channels"  icon={Tv2}         label="Channels"  collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/vod"       icon={Film}        label="VOD"       collapsed={collapsed} onNavigate={onCloseMobile} />
       <NavItem to="/downloads" icon={Download}    label="Downloads" collapsed={collapsed} onNavigate={onCloseMobile} />
+      <NavItem to="/recordings" icon={CircleDot}  label="Recordings" collapsed={collapsed} onNavigate={onCloseMobile} />
       {epgEnabled && <NavItem to="/guide"    icon={LayoutGrid}  label="Guide"    collapsed={collapsed} onNavigate={onCloseMobile} />}
     </nav>
   )
@@ -538,6 +540,14 @@ function AppInner() {
               element={
                 <RequireAuth connected={connected}>
                   <DownloadsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/recordings"
+              element={
+                <RequireAuth connected={connected}>
+                  <RecordingsPage />
                 </RequireAuth>
               }
             />

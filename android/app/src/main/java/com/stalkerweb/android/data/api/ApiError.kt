@@ -16,6 +16,8 @@ sealed class ApiError(message: String) : Exception(message) {
     class ViewerGone : ApiError("This viewer was deleted. Pick who is watching.")
     /** No answer at all: wrong address, server down, no network. */
     class Unreachable(message: String) : ApiError(message)
+    /** Recording now would go past the provider's stream limit (409 with takesStream): ask, then send again with force. */
+    class TakesStream(message: String) : ApiError(message)
     class Failed(message: String) : ApiError(message)
 }
 
@@ -26,6 +28,7 @@ data class ErrorBody(
     val accessRequired: Boolean? = null,
     val viewerGone: Boolean? = null,
     val lockedOut: Boolean? = null,
+    val takesStream: Boolean? = null,
 )
 
 private val errorAdapter = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build().adapter(ErrorBody::class.java)
@@ -38,6 +41,7 @@ fun apiErrorFor(code: Int, body: String?): ApiError {
     val message = b.error?.takeIf { it.isNotBlank() }
     return when {
         code == 409 && b.viewerGone == true -> ApiError.ViewerGone()
+        code == 409 && b.takesStream == true -> ApiError.TakesStream(message ?: "Recording may stop what's playing. Record anyway?")
         code == 401 && b.accessRequired == true -> ApiError.AccessDenied(message ?: "Access key required.")
         // The access lockout (lib/access.js) says so; a 429 from a rate limit (connect, reconnect) is just a failure.
         code == 429 && (b.lockedOut == true || b.accessRequired != null) -> ApiError.LockedOut(message ?: "Too many wrong access keys — try again later.")

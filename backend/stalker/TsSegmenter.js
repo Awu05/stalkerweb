@@ -109,8 +109,15 @@ class TsSegmenter {
    * @param {number} [opts.windowSize]     pieces listed in the playlist
    * @param {() => number} [opts.now]      the clock, for a piece's length when its PTS can't give it
    * @param {number} [opts.maxPieceBytes]  a piece's size cap (tests make it small)
+   * @param {(data: Buffer, seconds: number, afterBreak: boolean) => void} [opts.onPiece]  each piece as it closes
+   * @param {boolean} [opts.keepPieces]     false: closed pieces are only handed to onPiece, none kept
    */
-  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now, maxPieceBytes = MAX_PIECE_BYTES } = {}) {
+  constructor({ targetSeconds = 4, windowSize = 10, now = Date.now, maxPieceBytes = MAX_PIECE_BYTES, onPiece = null, keepPieces = true } = {}) {
+    // Each piece as it closes, (data, seconds, afterBreak) — recordings write them out (recordings/Recorder.js),
+    // and keep none of them here: a long recording would otherwise hold its last pieces for nothing.
+    this.onPiece = onPiece;
+    this.keepPieces = keepPieces;
+    this.closed = 0;               // pieces closed so far (kept or not)
     this.targetSeconds = targetSeconds;
     this.maxPieceBytes = maxPieceBytes;
     this.windowSize = windowSize;
@@ -330,18 +337,27 @@ class TsSegmenter {
    * break: a stall before it would make the piece far too long.
    */
   _break() {
-    const o = this.open;
-    if (o) {
-      const frames = ptsSeconds(o.maxPts, o.startPts) + (this.frameStep || 0);
-      const arrival = (o.lastAt - o.startAt) / 1000;
-      this._close(frames > 0 ? frames : Math.max(arrival, 0.001));
-    }
+    this._closeAsIs();
     this._afterBreak();
+  }
+
+  /** The stream is over (a recording ending): the open piece closes, measured as at a break. */
+  finish() {
+    this._closeAsIs();
+  }
+
+  // Closes the open piece (if any) with no next frame to measure to: the time its frames cover.
+  _closeAsIs() {
+    const o = this.open;
+    if (!o) return;
+    const frames = ptsSeconds(o.maxPts, o.startPts) + (this.frameStep || 0);
+    const arrival = (o.lastAt - o.startAt) / 1000;
+    this._close(frames > 0 ? frames : Math.max(arrival, 0.001));
   }
 
   // Timestamps before a break mean nothing after it.
   _afterBreak() {
-    if (this.pieces.length) this.pendingDisc = true;
+    if (this.closed) this.pendingDisc = true;
     this.lastPts = null;
     this.lastKeyPts = null;
     this.waitFrom = null;
@@ -376,7 +392,9 @@ class TsSegmenter {
     // Cut to size — copied once more when much of the buffer would go unused.
     const data = o.buf.length - o.bytes > o.bytes >> 3 ? Buffer.from(o.buf.subarray(0, o.bytes)) : o.buf.subarray(0, o.bytes);
     this.lastBytes = o.bytes;
-    this.pieces.push({ seq: o.seq, data, dur, disc: o.disc, key: o.key });
+    this.closed++;
+    if (this.keepPieces) this.pieces.push({ seq: o.seq, data, dur, disc: o.disc, key: o.key });
+    this.onPiece?.(data, dur, o.disc);
     // The target may only grow: a player may refuse a playlist whose target changed down.
     this.maxTarget = Math.max(this.maxTarget, Math.ceil(Number(dur.toFixed(3))));
     while (this.pieces.length > this.windowSize + KEEP_EXTRA) {

@@ -30,6 +30,11 @@ import com.stalkerweb.android.data.repo.liveMediaId
 import com.stalkerweb.android.data.repo.playerList
 import com.stalkerweb.android.data.repo.stallTick
 import com.stalkerweb.android.data.repo.LiveRepository
+import com.stalkerweb.android.data.repo.RecordingsRepository
+import com.stalkerweb.android.data.repo.endForChoice
+import com.stalkerweb.android.data.repo.stillRecording
+import com.stalkerweb.android.data.api.ApiError
+import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.service.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -60,6 +65,10 @@ data class PlayerUiState(
     val nowNext: Map<String, NowNextEntry> = emptyMap(),
     /** A channel number being typed on the remote. */
     val jumpDigits: String             = "",
+    /** The recording this player started: (channel, recording id) — Record on that channel stops it. */
+    val recording: Pair<String, String>? = null,
+    /** Recording now would go past the provider's stream limit: asked first. */
+    val recordAsk: RecordAsk?          = null,
 ) {
     val genres: List<String>
         get() = channels.mapNotNull { it.genre }.filter { it.isNotBlank() }.distinct().sorted()
@@ -68,12 +77,17 @@ data class PlayerUiState(
         get() = playerList(channels, query, favoritesOnly, selectedGenre, favoriteIds)
 }
 
+/** "Record anyway?": the server's words, and the recording to start if so. */
+data class RecordAsk(val message: String, val channelId: String, val channelName: String, val programme: EpgEvent?, val choice: String)
+
 @OptIn(UnstableApi::class)
 class PlayerViewModel(
     application: Application,
     private val live: LiveRepository,
     /** The Stats panel's questions for the server. */
     val stats: StatsRepository,
+    /** Record (the server records, so it goes on with the player closed). */
+    private val recordings: RecordingsRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(PlayerUiState())
@@ -329,12 +343,87 @@ class PlayerViewModel(
         nowNextJob?.cancel()
         cancelDigits()
         resetReconnect()
+        // A recording goes on in the server; next time Record starts another (the Recordings screen stops this one).
+        followJob?.cancel()
+        _state.value = _state.value.copy(recording = null, recordAsk = null)
         castManager?.clearSource(castSourceNo)   // what's on the TV carries on
         _player.value?.takeIf { playingLive() }?.let { p ->
             p.stop()
             p.clearMediaItems()
         }
     }
+
+    // ── Record (the web's RecordButton) ──────────────────────────────────────
+
+    /**
+     * Records [channelId] from now: until [programme] ends, for a while, or
+     * until stopped ([choice], RECORD_CHOICES). With the provider's streams in
+     * use the server asks first ([RecordAsk]); [force] is the answer.
+     */
+    fun record(channelId: String, channelName: String, programme: EpgEvent?, choice: String, force: Boolean = false) {
+        val title = programme?.title?.takeIf { it.isNotBlank() } ?: channelName
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            runCatching { recordings.recordNow(channelId, channelName, title, endForChoice(choice, now, programme?.endTime?.times(1000)), force) }
+                .onSuccess { r ->
+                    _state.value = _state.value.copy(recording = channelId to r.id, recordAsk = null)
+                    follow(r.id)
+                    toast("Recording \"$title\" — it's on the Recordings screen")
+                }
+                .onFailure { e ->
+                    val err = e.toApiError()
+                    if (err is ApiError.TakesStream && !force) {
+                        _state.value = _state.value.copy(recordAsk = RecordAsk(err.message ?: "Record anyway?", channelId, channelName, programme, choice))
+                    } else {
+                        _state.value = _state.value.copy(recordAsk = null)
+                        toast(err.message ?: "Couldn't start recording")
+                    }
+                }
+        }
+    }
+
+    private var followJob: Job? = null
+
+    /**
+     * While Record shows "recording": a look at the recording every 30 s —
+     * ended by itself, stopped elsewhere (the Recordings screen, the web),
+     * failed or deleted, the button is Record again (the web's RecordButton).
+     */
+    private fun follow(id: String) {
+        followJob?.cancel()
+        followJob = viewModelScope.launch {
+            while (isActive) {
+                delay(30_000)
+                // Not answering for a moment: asked again next time.
+                val list = runCatching { recordings.list() }.getOrNull() ?: continue
+                if (!stillRecording(list, id)) {
+                    if (_state.value.recording?.second == id) _state.value = _state.value.copy(recording = null)
+                    return@launch
+                }
+            }
+        }
+    }
+
+    /** "Record anyway?" answered yes. */
+    fun confirmRecord() {
+        val ask = _state.value.recordAsk ?: return
+        _state.value = _state.value.copy(recordAsk = null)
+        record(ask.channelId, ask.channelName, ask.programme, ask.choice, force = true)
+    }
+
+    fun dismissRecordAsk() { _state.value = _state.value.copy(recordAsk = null) }
+
+    /** Stops the recording this player started (what it has is kept). */
+    fun stopRecording() {
+        val id = _state.value.recording?.second ?: return
+        viewModelScope.launch {
+            runCatching { recordings.stop(id) }
+                .onSuccess { followJob?.cancel(); _state.value = _state.value.copy(recording = null); toast("Recording stopped — what it has is kept") }
+                .onFailure { toast(it.toApiError().message ?: "Couldn't stop it") }
+        }
+    }
+
+    private fun toast(message: String) = Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()
 
     fun closeChannelList() { _state.value = _state.value.copy(showChannelList = false) }
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }

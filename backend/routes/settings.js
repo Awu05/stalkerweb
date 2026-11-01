@@ -25,6 +25,15 @@ const DEFAULTS = {
   stbemu_firmware: '0.2.18-r14-pub-250',
 };
 
+/** The recording settings, saved or their defaults (also read by routes/recordings.js). */
+function recordingSettings(saved = {}) {
+  return {
+    max_streams:           saved.max_streams ?? 1,
+    record_pad_before_min: saved.record_pad_before_min ?? 2,
+    record_pad_after_min:  saved.record_pad_after_min ?? 5,
+  };
+}
+
 module.exports = function settingsModule(config, appState = null, access = null) {
   const router = express.Router();
   const cache = new CacheManager(config.dataDir);
@@ -48,6 +57,8 @@ module.exports = function settingsModule(config, appState = null, access = null)
       // Live delay buffer, seconds (0 = off): saved, else LIVE_BUFFER_SECONDS.
       live_buffer_seconds:     saved.live_buffer_seconds ?? config.liveBufferSeconds ?? 0,
       live_buffer_default:     config.liveBufferSeconds ?? 0,
+      // Recordings (routes/recordings.js): streams the provider allows at once, and the padding.
+      ...recordingSettings(saved),
       // Online subtitles (lib/subtitles.js). Keys and the password are never
       // sent back — only whether one is saved, and a key's last characters.
       subtitle_provider:       saved.subtitle_provider === 'opensubtitles' ? 'opensubtitles' : 'wyzie',
@@ -97,6 +108,13 @@ module.exports = function settingsModule(config, appState = null, access = null)
       }
       existing.live_buffer_seconds = n;
     }
+    // Recordings: the provider's stream limit (1–10), and the minutes added before and after a booked programme (0–60).
+    for (const [k, lo, hi] of [['max_streams', 1, 10], ['record_pad_before_min', 0, 60], ['record_pad_after_min', 0, 60]]) {
+      if (req.body[k] === undefined) continue;
+      const n = Number(req.body[k]);
+      if (!Number.isInteger(n) || n < lo || n > hi) return res.status(400).json({ error: `${k} must be a whole number from ${lo} to ${hi}` });
+      existing[k] = n;
+    }
     // Online subtitles. A key or password left blank keeps the saved one (they're
     // never sent back); null removes it.
     const b = req.body;
@@ -121,3 +139,4 @@ module.exports = function settingsModule(config, appState = null, access = null)
 
   return router;
 };
+module.exports.recordingSettings = recordingSettings;

@@ -22,6 +22,7 @@ enum class SettingsCard(val tab: String) {
     DeviceProfile("connection"),
     Links("links"),
     PlaybackGuide("playback"),
+    Recordings("playback"),
     ChannelLogos("logos"),
     LogoOverrides("logos"),
     LogoStripWords("logos"),
@@ -114,6 +115,8 @@ object SoloHold {
     const val PLAYING = "playing"
     const val CASTING = "casting"
     const val DOWNLOADING = "downloading"
+    /** A live channel being recorded, or about to be — held by the server itself (SoloServerService, recordingPlan). */
+    const val RECORDING = "recording"
 }
 
 /** How Android is told the server is in use (the foreground service type). */
@@ -121,7 +124,7 @@ enum class SoloForeground { MediaPlayback, DataSync }
 
 /**
  * Playing or casting keeps the server up as media playback, which Android
- * doesn't time-limit; anything else (downloading) as a data sync. Nothing
+ * doesn't time-limit; anything else (downloading, recording) as a data sync. Nothing
  * held: it needn't be kept up.
  */
 fun soloForeground(holds: Set<String>): SoloForeground? = when {
@@ -145,13 +148,45 @@ fun followsDownloads(isSolo: Boolean): Boolean = isSolo
  */
 fun holdsLeftByApp(holds: Set<String>): Set<String> = holds - SoloHold.PLAYING
 
-/** The server's word on what still needs it (GET /api/solo/status). */
-data class SoloStatus(val downloadsActive: Boolean, val castActive: Boolean)
+/**
+ * The server's word on what still needs it (GET /api/solo/status): a download,
+ * a cast, a recording running (anyone's), and when the next booked recording
+ * starts (ms, or null).
+ */
+data class SoloStatus(
+    val downloadsActive: Boolean,
+    val castActive: Boolean,
+    val recordingsActive: Boolean = false,
+    val nextRecordingAt: Long? = null,
+)
 
 /** The server's answer to GET /api/solo/status, or null when it isn't one. */
 fun parseSoloStatus(json: String): SoloStatus? {
     fun flag(name: String) = Regex(""""$name"\s*:\s*(true|false)\b""").find(json)?.groupValues?.get(1)?.toBooleanStrict()
-    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null)
+    val next = Regex(""""nextRecordingAt"\s*:\s*(\d{1,15})\b""").find(json)?.groupValues?.get(1)?.toLongOrNull()
+    // recordingsActive, nextRecordingAt: a server from before recordings has none to keep it up for.
+    return SoloStatus(flag("downloadsActive") ?: return null, flag("castActive") ?: return null, flag("recordingsActive") ?: false, next)
+}
+
+/**
+ * What Solo's server does about recordings, from its own status: [hold] —
+ * keep itself in the foreground (SoloHold.RECORDING) — and [alarmAt], when
+ * to wake to start holding (ms), or null for no alarm.
+ */
+data class RecordingPlan(val hold: Boolean, val alarmAt: Long?)
+
+/**
+ * The server decides, not the app's foreground (SoloServerService): it holds
+ * itself up while a recording runs or one starts within [RECORDING_SOON_MS];
+ * for one later, an alarm [RECORDING_SOON_MS] before it starts the service to
+ * hold it — so a booking far ahead isn't missed when Android stopped the
+ * server meanwhile.
+ */
+fun recordingPlan(status: SoloStatus, nowMs: Long): RecordingPlan {
+    val next = status.nextRecordingAt
+    val soon = next != null && next - nowMs <= RECORDING_SOON_MS
+    val wakeAt = next?.minus(RECORDING_SOON_MS)?.takeIf { it > nowMs }
+    return RecordingPlan(hold = status.recordingsActive || soon, alarmAt = wakeAt)
 }
 
 /**
@@ -163,6 +198,7 @@ fun holdsAfterStatus(left: Set<String>, status: SoloStatus): Set<String> = left.
     when (it) {
         SoloHold.DOWNLOADING -> status.downloadsActive
         SoloHold.CASTING -> status.castActive
+        SoloHold.RECORDING -> status.recordingsActive
         else -> false
     }
 }

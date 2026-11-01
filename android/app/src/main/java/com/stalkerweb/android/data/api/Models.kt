@@ -128,6 +128,10 @@ data class SettingsResponse(
     @param:Json(name = "access_enabled") val accessEnabled: Boolean = false,
     @param:Json(name = "stbemu_stb_model") val stbModel: String = "",
     @param:Json(name = "stbemu_firmware") val firmware: String = "",
+    // Live TV recordings: the streams the provider allows at once, and the minutes added around a booked programme.
+    @param:Json(name = "max_streams") val maxStreams: Int = 1,
+    @param:Json(name = "record_pad_before_min") val recordPadBeforeMin: Int = 2,
+    @param:Json(name = "record_pad_after_min") val recordPadAfterMin: Int = 5,
 )
 
 // ── VOD ───────────────────────────────────────────────────────────────────────

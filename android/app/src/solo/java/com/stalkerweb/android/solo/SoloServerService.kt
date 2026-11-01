@@ -1,5 +1,6 @@
 package com.stalkerweb.android.solo
 
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -19,10 +20,12 @@ import androidx.core.app.ServiceCompat
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.repo.SOLO_STUCK_START_MS
 import com.stalkerweb.android.data.repo.SoloForeground
+import com.stalkerweb.android.data.repo.SoloHold
 import com.stalkerweb.android.data.repo.SoloStatus
 import com.stalkerweb.android.data.repo.holdsAfterStatus
 import com.stalkerweb.android.data.repo.holdsLeftByApp
 import com.stalkerweb.android.data.repo.parseSoloStatus
+import com.stalkerweb.android.data.repo.recordingPlan
 import com.stalkerweb.android.data.repo.restartsNode
 import com.stalkerweb.android.data.repo.soloForeground
 import java.io.File
@@ -41,15 +44,21 @@ import java.util.concurrent.atomic.AtomicBoolean
  * from SoloConfig, not the Intent, so a restart without one works the same.
  * Node's own output goes to logcat, tag "stalkerweb".
  *
- * While the app holds it (SoloServer.hold: playing, casting, downloading) it
+ * While the app holds it (SoloServer.hold: playing, casting, downloading, recording) it
  * runs in the foreground, with a quiet "StalkerWeb Solo is running"
  * notification — shown only if notifications are allowed, it works the same
  * without. Media playback while playing or casting, which Android doesn't
- * time-limit; a data sync while only downloading.
+ * time-limit; a data sync while only downloading or recording.
  *
  * When the app's process ends, a download or a cast it held the server for
- * goes on without it: those holds stay, and the server is asked every 30 s
- * (GET /api/solo/status) until it says each is over.
+ * goes on without it: those holds stay until the server says each is over.
+ *
+ * Recordings are the server's own to hold (recordingPlan): asked every 30 s
+ * (GET /api/solo/status), it stays in the foreground while one records, or
+ * one starts within 15 minutes; for one booked later, an inexact while-idle
+ * alarm 15 minutes before its start (SoloAlarmReceiver) starts this service
+ * again — Node with it, if Android had stopped it — to hold it. Re-armed
+ * whenever the status changes.
  *
  * The app binds to it too while it's on screen (SoloServer.attach), so Android
  * counts the server as part of what's visible.
@@ -68,6 +77,9 @@ class SoloServerService : Service() {
     private var life: IBinder? = null
     private val poller = Executors.newSingleThreadScheduledExecutor()
     private var polling: ScheduledFuture<*>? = null
+    // The server's own word: a recording running or about to (recordingPlan), and the alarm set for the next one.
+    private var recordingHold = false
+    private var alarmAt: Long? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_RESTART && started.get()) {
@@ -88,7 +100,23 @@ class SoloServerService : Service() {
         }
         intent?.getStringArrayExtra(EXTRA_HOLDS)?.let { holds = it.toSet() }
         intent?.extras?.getBinder(EXTRA_LIFE)?.let(::follow)
+        if (intent?.action == ACTION_RECORDING_SOON) {
+            // The alarm for a booked recording: held from now; the next status says how long.
+            Log.i(TAG, "a booked recording starts soon: holding the server up for it")
+            recordingHold = true
+            alarmAt = null
+        }
         applyHolds()
+        // A start in the foreground (the alarm's) must go into the foreground, even for a moment.
+        if (intent?.getBooleanExtra(EXTRA_FOREGROUND, false) == true && foreground == null) {
+            runCatching {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            }
+        }
+        if (polling == null) {
+            polling = poller.scheduleWithFixedDelay({ askStatus() }, STATUS_FIRST_S, STATUS_EVERY_S, TimeUnit.SECONDS)
+        }
         return START_STICKY
     }
 
@@ -107,9 +135,6 @@ class SoloServerService : Service() {
         left = left + holdsLeftByApp(holds)
         holds = emptySet()
         applyHolds()
-        if (left.isNotEmpty() && polling == null) {
-            polling = poller.scheduleWithFixedDelay({ askStatus() }, STATUS_EVERY_S, STATUS_EVERY_S, TimeUnit.SECONDS)
-        }
     }
 
     // On the poller's thread. No answer (the server busy, or still starting): asked again next time.
@@ -120,9 +145,28 @@ class SoloServerService : Service() {
 
     private fun onStatus(status: SoloStatus) {
         left = holdsAfterStatus(left, status)
-        if (left.isEmpty()) { polling?.cancel(false); polling = null }
+        val plan = recordingPlan(status, System.currentTimeMillis())
+        recordingHold = plan.hold
+        arm(plan.alarmAt)
         applyHolds()
     }
+
+    // The alarm for the next booked recording: set, moved or cancelled as the status says.
+    private fun arm(at: Long?) {
+        // Its day's data-sync time used up, the alarm's start couldn't hold the server anyway.
+        val want = at?.takeUnless { dataSyncSpent() }
+        if (want == alarmAt) return
+        alarmAt = want
+        val alarms = getSystemService(AlarmManager::class.java) ?: return
+        val wake = SoloAlarmReceiver.pendingIntent(this)
+        alarms.cancel(wake)
+        // Inexact and allowed while idle: no exact-alarm permission. A few minutes late is still before the start.
+        if (want != null) runCatching { alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, want, wake) }
+            .onFailure { Log.w(TAG, "couldn't set the alarm for the next recording (${it.javaClass.simpleName})") }
+    }
+
+    /** All that holds the server: the app's, what an ended app left, and a recording's (the server's own). */
+    private fun allHolds(): Set<String> = holds + left + (if (recordingHold) setOf(SoloHold.RECORDING) else emptySet())
 
     /** GET /api/solo/status from the server in this process, with its key; null without an answer. */
     private fun fetchStatus(): SoloStatus? {
@@ -132,7 +176,7 @@ class SoloServerService : Service() {
     }
 
     private fun applyHolds() {
-        val want = soloForeground(holds + left)?.takeUnless { it == SoloForeground.DataSync && dataSyncSpent() }
+        val want = soloForeground(allHolds())?.takeUnless { it == SoloForeground.DataSync && dataSyncSpent() }
         if (want == foreground) return
         if (want == null) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -187,7 +231,7 @@ class SoloServerService : Service() {
         dataSyncSpentAt = SystemClock.elapsedRealtime()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         foreground = null
-        if (soloForeground(holds + left) == SoloForeground.MediaPlayback) applyHolds()
+        if (soloForeground(allHolds()) == SoloForeground.MediaPlayback) applyHolds()
         else stopSelf()
     }
 
@@ -210,7 +254,8 @@ class SoloServerService : Service() {
             val entry = ServerInstaller.ensureInstalled(this, { name -> assets.open(name) }, version, File(filesDir, "server"))
             val dataDir = File(filesDir, "data").apply { mkdirs() }
             val downloadDir = SoloEnv.downloadDir(filesDir).apply { mkdirs() }
-            val env = SoloEnv.build(config.port, config.key, dataDir, downloadDir, BuildConfig.VERSION_NAME)
+            val recordingsDir = SoloEnv.recordingsDir(filesDir).apply { mkdirs() }
+            val env = SoloEnv.build(config.port, config.key, dataDir, downloadDir, recordingsDir, BuildConfig.VERSION_NAME)
             Log.i(TAG, "starting the server (version $version) on 127.0.0.1:${config.port}")
             runtime.start(entry, emptyList(), env)
         }.getOrElse {
@@ -263,6 +308,7 @@ class SoloServerService : Service() {
         private const val NOTIFICATION_ID = 4071
         private const val NODE_STACK_BYTES = 8L shl 20
         private const val STATUS_EVERY_S = 30L
+        private const val STATUS_FIRST_S = 5L
 
         /** Start Node again (SoloServer.restart). */
         const val ACTION_RESTART = "com.stalkerweb.android.solo.RESTART"
@@ -270,6 +316,10 @@ class SoloServerService : Service() {
         const val EXTRA_HOLDS = "holds"
         /** A Binder of the app's main process, to see it end. */
         const val EXTRA_LIFE = "life"
+        /** A booked recording starts soon (SoloAlarmReceiver): hold the server up for it. */
+        const val ACTION_RECORDING_SOON = "com.stalkerweb.android.solo.RECORDING_SOON"
+        /** Started with startForegroundService: it must go into the foreground. */
+        const val EXTRA_FOREGROUND = "foreground"
 
         // Once per process: Node can't run twice in one.
         private val started = AtomicBoolean(false)

@@ -147,6 +147,22 @@ jump ahead.
 Look for `live-buffer` in the logs: `buffer ran dry` means a stall was
 longer than the buffer.
 
+## Recording live TV
+
+Record what's on now, or book a programme from the guide. The server does the recording, so it carries on with every app closed. Recordings are listed on the **Recordings** page in the web app and the Android apps, and play there like a movie, with resume.
+
+- **Record now:** the Record button in the live player. It records until the programme ends (the default), for 30 minutes, 1 or 2 hours, or until you stop it.
+- **From the guide:** open a programme and choose **Record**. It starts 2 minutes early and runs 5 minutes over (Settings → Recordings).
+- **Through the live buffer:** recordings go through it, so the provider's restarts and stalls don't stop a recording. A gap is a gap, not the end.
+- **If the server restarts:** what was recorded is kept as "(part 1)", and the rest records as "(part 2)".
+- **Where they go:** each recording is one `.ts` file, with no re-encoding, in `recordings/` in the data folder (or `RECORDINGS_DIR`).
+  - Recordings are kept until you delete them.
+  - A recording needs at least 1 GB free to start, and stops cleanly with what it has if the disk fills.
+- **Your provider's stream limit:** Settings → Recordings → *Streams your provider allows at once* (1 by default). Watching, casting and recording all count.
+  - A booking that would go over is refused, with what it clashes with.
+  - Recording now while the limit is in use asks first.
+- **StalkerWeb Solo:** the phone or TV records itself, and finished recordings go to **Downloads/StalkerWeb**. Solo's server must be running at the time. It keeps itself awake for a recording that's running or about to start, but on Android 12+ a booking far ahead may not wake it.
+
 ## Access key
 
 Without an access key, anyone who can reach StalkerWeb can use it: watch on

@@ -7,11 +7,15 @@ object SoloEnv {
     /** Where the server saves downloads, in the app's private storage. */
     fun downloadDir(filesDir: File): File = File(filesDir, "downloads")
 
+    /** Where the server records live TV, in the app's private storage (finished ones are copied to Downloads). */
+    fun recordingsDir(filesDir: File): File = File(filesDir, "recordings")
+
     fun build(
         port: Int,
         accessKey: String,
         dataDir: File,
         downloadDir: File,
+        recordingsDir: File,
         version: String,
     ): Map<String, String> = mapOf(
         // This device only: the app talks to it on 127.0.0.1, and just the cast
@@ -24,6 +28,7 @@ object SoloEnv {
         // The app's private storage.
         "DATA_DIR" to dataDir.path,
         "DOWNLOAD_DIR" to downloadDir.path,
+        "RECORDINGS_DIR" to recordingsDir.path,
         "APP_VERSION" to version,
         "NODE_ENV" to "production",
     )

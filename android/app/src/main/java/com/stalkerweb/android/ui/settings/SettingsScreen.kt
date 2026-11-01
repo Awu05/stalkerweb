@@ -545,6 +545,35 @@ private fun PlaybackTab(viewModel: SettingsViewModel, state: SettingsState) {
                     idleTimeoutMinutes = idle, liveBufferSeconds = buffer))
             }, enabled = !state.busy) { Text("Save") }
         }
+        if (shows(SettingsCard.Recordings)) RecordingsCard(viewModel, state)
+    }
+}
+
+/**
+ * Live TV recordings (the web's RecordingSettings): how many streams the
+ * provider allows at once, and the minutes added around a programme booked
+ * from the guide. Shared by every viewer; a value set on the web outside the
+ * choices here is kept among them.
+ */
+@Composable
+private fun RecordingsCard(viewModel: SettingsViewModel, state: SettingsState) {
+    val s = state.settings ?: return
+    var streams by remember(s) { mutableStateOf(s.maxStreams) }
+    var before by remember(s) { mutableStateOf(s.recordPadBeforeMin) }
+    var after by remember(s) { mutableStateOf(s.recordPadAfterMin) }
+    fun among(values: List<Int>, v: Int) = (values + v).distinct().sorted()
+    Card("Recordings", "Shared by every viewer.") {
+        Text("Streams your provider allows at once", color = SwColors.Text)
+        ChoiceRow((1..10).toList(), streams, { "$it" }) { streams = it }
+        Text("Start recording early by", color = SwColors.Text)
+        ChoiceRow(among(listOf(0, 1, 2, 5, 10, 15, 30, 60), s.recordPadBeforeMin), before, { "$it min" }) { before = it }
+        Text("Keep recording after the end for", color = SwColors.Text)
+        ChoiceRow(among(listOf(0, 1, 2, 5, 10, 15, 30, 60), s.recordPadAfterMin), after, { "$it min" }) { after = it }
+        Text("Watching, casting and recording all count toward the streams your provider allows. A recording that would go over is refused when you book it; recording now asks first.",
+            style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
+        Button(onClick = {
+            viewModel.saveRecordings(SettingsUpdate(maxStreams = streams, recordPadBeforeMin = before, recordPadAfterMin = after))
+        }, enabled = !state.busy && (streams != s.maxStreams || before != s.recordPadBeforeMin || after != s.recordPadAfterMin)) { Text("Save") }
     }
 }
 

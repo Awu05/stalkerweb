@@ -70,6 +70,9 @@ data class SettingsUpdate(
     @param:Json(name = "download_dir") val downloadDir: String? = null,
     @param:Json(name = "idle_timeout_minutes") val idleTimeoutMinutes: Int? = null,
     @param:Json(name = "live_buffer_seconds") val liveBufferSeconds: Int? = null,
+    @param:Json(name = "max_streams") val maxStreams: Int? = null,
+    @param:Json(name = "record_pad_before_min") val recordPadBeforeMin: Int? = null,
+    @param:Json(name = "record_pad_after_min") val recordPadAfterMin: Int? = null,
 )
 
 @JsonClass(generateAdapter = false)

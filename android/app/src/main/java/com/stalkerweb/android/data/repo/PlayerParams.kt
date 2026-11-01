@@ -28,9 +28,13 @@ data class PlayerParams(
     val description: String = "",
     val director: String = "",
     val actors: String = "",
+    /** A live TV recording (the Recordings screen), played from the server's file — not a VOD title. */
+    val recordingId: String = "",
 ) {
     val isEpisode: Boolean get() = seasonId.isNotEmpty() || episodeId.isNotEmpty()
-    val key: String get() = WatchRules.makeKey(videoId, seasonId, episodeId)
+    val isRecording: Boolean get() = recordingId.isNotEmpty()
+    // A recording's own key: its resume point is kept on this device, not with the VOD titles'.
+    val key: String get() = if (isRecording) "recording:$recordingId" else WatchRules.makeKey(videoId, seasonId, episodeId)
 
     fun toQuery(): String = buildList {
         add("videoId" to videoId); add("title" to title); add("cmd" to cmd); add("series" to series)
@@ -45,6 +49,7 @@ data class PlayerParams(
         if (description.isNotEmpty()) add("description" to encodeURIComponent(description))
         if (director.isNotEmpty()) add("director" to encodeURIComponent(director))
         if (actors.isNotEmpty()) add("actors" to encodeURIComponent(actors))
+        if (recordingId.isNotEmpty()) add("recording" to recordingId)
     }.joinToString("&") { (k, v) -> "$k=${formEncode(v)}" }
 
     companion object {
@@ -60,7 +65,7 @@ data class PlayerParams(
                 seasonId = s("seasonId"), episodeId = s("episodeId"), season = s("season"), episodeTitle = s("episodeTitle"),
                 year = s("year"), durationMin = s("durationMin").toIntOrNull() ?: 0, isHD = s("isHD") == "true",
                 screenshotUrl = inner("screenshotUrl"), description = inner("description"),
-                director = inner("director"), actors = inner("actors"),
+                director = inner("director"), actors = inner("actors"), recordingId = s("recording"),
             )
         }
 
