@@ -71,4 +71,9 @@ describe('RecordingStore', () => {
     store.update(soon.id, { status: 'cancelled' })
     expect(store.nextStart()).toBe(T0 + 598 * MIN)
   })
+
+  it('nextStart() leaves out a booking whose end has already passed', () => {
+    book({ startAt: T0 - 120 * MIN, endAt: T0 - 90 * MIN })   // over before now (a tick was missed)
+    expect(store.nextStart(T0 - 30 * MIN)).toBeNull()
+  })
 })

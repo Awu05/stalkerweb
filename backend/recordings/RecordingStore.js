@@ -92,9 +92,13 @@ class RecordingStore {
   }
 
   /** When the next booked recording starts (anyone's), or null — Solo holds its server up for it (routes/solo.js). */
-  nextStart() {
+  nextStart(now = this._now()) {
     let next = null;
-    for (const r of this._list) if (r.status === 'scheduled' && (next === null || r.startAt < next)) next = r.startAt;
+    for (const r of this._list) {
+      // One whose end has passed (a tick missed) isn't coming: it mustn't hold Solo's server up for good.
+      if (r.status !== 'scheduled' || (r.endAt != null && r.endAt <= now)) continue;
+      if (next === null || r.startAt < next) next = r.startAt;
+    }
     return next;
   }
 
