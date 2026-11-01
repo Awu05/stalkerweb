@@ -10,17 +10,20 @@
 
 const express = require('express');
 const fs = require('fs');
+const { readPieces } = require('../recordings/pieceIndex');
 
-/** A recording's pieces from its index file — [] when it has none. */
+/** A recording's pieces from its index file, those inside the file — [] when it has none. */
 function piecesOf(file) {
-  try {
-    return fs.readFileSync(`${file}.index`, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  } catch { return []; }
+  let size;
+  try { size = fs.statSync(file).size; } catch { return []; }
+  return readPieces(`${file}.index`, size);
 }
 
 /** The VOD playlist of a recording's pieces, each a byte range of `uri`. */
 function playlistOf(pieces, uri) {
-  const target = Math.max(1, ...pieces.map((p) => Math.ceil(p.d)));
+  // A loop, not Math.max(...): a recording of many hours has more pieces than a call takes arguments.
+  let target = 1;
+  for (const p of pieces) if (Math.ceil(p.d) > target) target = Math.ceil(p.d);
   const lines = ['#EXTM3U', '#EXT-X-VERSION:4', `#EXT-X-TARGETDURATION:${target}`, '#EXT-X-PLAYLIST-TYPE:VOD', '#EXT-X-MEDIA-SEQUENCE:0'];
   for (const p of pieces) {
     if (p.disc) lines.push('#EXT-X-DISCONTINUITY');
