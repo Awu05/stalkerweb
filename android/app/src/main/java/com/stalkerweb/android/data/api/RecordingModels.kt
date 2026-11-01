@@ -31,7 +31,11 @@ data class Recording(
 @JsonClass(generateAdapter = false)
 data class RecordingsResponse(val recordings: List<Recording> = emptyList())
 
-/** A guide programme to record (POST /api/recordings): the server adds the padding. */
+/**
+ * A guide programme to record (POST /api/recordings): the server adds the
+ * padding. [force]: one starting within 5 minutes with the stream limit in
+ * use, asked and answered yes.
+ */
 @JsonClass(generateAdapter = false)
 data class ScheduleRecordingRequest(
     val channelId: String,
@@ -39,6 +43,7 @@ data class ScheduleRecordingRequest(
     val title: String,
     val startAt: Long,
     val endAt: Long,
+    val force: Boolean = false,
 )
 
 /** Record a channel from now (POST /api/recordings/now); [endAt] null: until stopped. [force]: past the stream limit, asked. */

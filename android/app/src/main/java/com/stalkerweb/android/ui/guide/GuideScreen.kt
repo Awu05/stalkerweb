@@ -1,5 +1,6 @@
 package com.stalkerweb.android.ui.guide
 
+import com.stalkerweb.android.ui.player.RecordAskDialog
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import android.Manifest
@@ -117,6 +118,9 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     var nowSecs by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); nowSecs = System.currentTimeMillis() / 1000 } }
     LaunchedEffect(viewModel) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
+    val recordAsk by viewModel.recordAsk.collectAsStateWithLifecycle()
+    // A booking that starts within 5 minutes, with the provider's streams in use: asked first.
+    recordAsk?.let { ask -> RecordAskDialog(ask.message, onYes = viewModel::confirmRecord, onNo = viewModel::dismissRecordAsk) }
 
     fun toggleReminder(ch: Channel, e: EpgEvent) {
         val wasSet = reminders.any { it.id == "${ch.uniqueId}:${e.startTime}" }
