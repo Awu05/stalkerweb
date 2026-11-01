@@ -272,7 +272,7 @@ export const cancelDownload   = (id)     => _delete(`/downloads/${encodeURICompo
 
 // ── Live TV recordings (the server's recordings/) ─────────────────────────
 export const getRecordings     = (all = false) => _get(`/recordings${all ? '?all=1' : ''}`)
-export const scheduleRecording = (programme)   => _post('/recordings', programme)            // { channelId, channelName, title, startAt, endAt }
+export const scheduleRecording = (programme)   => _post('/recordings', programme)            // { channelId, channelName, title, startAt, endAt, force? }
 export const recordNow         = (p)           => _post('/recordings/now', p)                // { channelId, channelName, title, endAt | null, force? }
 export const stopRecording     = (id)          => _post(`/recordings/${encodeURIComponent(id)}/stop`, {})
 export const deleteRecording   = (id)          => _delete(`/recordings/${encodeURIComponent(id)}`)

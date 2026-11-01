@@ -138,12 +138,19 @@ const ProgrammeBlock = memo(function ProgrammeBlock({ prog, channel, gridStartMs
 
 // ── Programme detail popup ────────────────────────────────────────────────────
 // Booked on the server (routes/recordings.js): it records with every app closed. A clash past the
-// provider's stream limit is refused with what it clashes with.
-function bookRecording(prog, channel, onClose) {
+// provider's stream limit is refused with what it clashes with. One that starts within 5 minutes
+// while the limit is in use (watching, casting) asks first, like Record now in the player.
+function bookRecording(prog, channel, onClose, force = false) {
   scheduleRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
-    startAt: prog.startTime * 1000, endAt: prog.endTime * 1000 })
+    startAt: prog.startTime * 1000, endAt: prog.endTime * 1000, ...(force ? { force: true } : {}) })
     .then(() => { showToast(`"${prog.title}" will be recorded — see Recordings`); onClose() })
-    .catch((e) => showToast(e.message, 'error'))
+    .catch((e) => {
+      if (e.status === 409 && e.body?.takesStream) {
+        if (window.confirm(e.message)) bookRecording(prog, channel, onClose, true)
+        return
+      }
+      showToast(e.message, 'error')
+    })
 }
 
 function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, hasReminder }) {

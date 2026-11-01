@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { CircleDot, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { recordNow, stopRecording } from '../stalkerApi'
-import { RECORD_CHOICES, endForChoice } from '@/lib/recordings'
+import { getRecordings, recordNow, stopRecording } from '../stalkerApi'
+import { RECORD_CHOICES, endForChoice, stillRecording } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 
 /**
@@ -16,6 +16,16 @@ export default function RecordButton({ channel, programme }) {
   const [recordingId, setRecordingId] = useState(null)
   const box = useRef(null)
   useEffect(() => { setRecordingId(null); setOpen(false) }, [channel?.uniqueId])
+  // While it shows "recording": a look every 30 s — ended by itself, stopped elsewhere or failed, it's Record again.
+  useEffect(() => {
+    if (!recordingId) return
+    let gone = false
+    const look = () => getRecordings()
+      .then((r) => { if (!gone && !stillRecording(r.recordings, recordingId)) setRecordingId((id) => (id === recordingId ? null : id)) })
+      .catch(() => { /* offline for a moment: ask again next time */ })
+    const t = setInterval(look, 30_000)
+    return () => { gone = true; clearInterval(t) }
+  }, [recordingId])
   useEffect(() => {
     if (!open) return
     const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }

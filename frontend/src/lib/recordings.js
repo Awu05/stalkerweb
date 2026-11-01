@@ -20,6 +20,15 @@ export function endForChoice(choice, now, programmeEnd = null) {
   return now + (parseInt(choice, 10) || 60) * MIN
 }
 
+/**
+ * Whether recording `id` is still being made, in the list from GET
+ * /api/recordings — not once it ended by itself, was stopped elsewhere,
+ * failed or was deleted. The player's Record button follows it.
+ */
+export function stillRecording(list, id) {
+  return !!list?.some((r) => r.id === id && r.status === 'recording')
+}
+
 /** { scheduled (soonest first), recording, done (newest first — failed and missed too) }; cancelled ones aren't shown. */
 export function groupRecordings(list) {
   const by = (s) => list.filter((r) => s.includes(r.status))

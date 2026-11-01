@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, stillRecording } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -72,5 +72,16 @@ describe('recording positions (resume, on this device)', () => {
     const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') } }
     expect(loadRecordingPosition('r1', broken)).toBeNull()
     expect(() => saveRecordingPosition('r1', 10, 100, broken)).not.toThrow()
+  })
+})
+
+describe('stillRecording', () => {
+  it('is true only while the recording is listed as recording', () => {
+    const list = [rec({ id: 'a', status: 'recording', startAt: NOW }), rec({ id: 'b', status: 'done', startAt: NOW }), rec({ id: 'c', status: 'failed', startAt: NOW })]
+    expect(stillRecording(list, 'a')).toBe(true)
+    expect(stillRecording(list, 'b')).toBe(false)   // ended by itself, or stopped elsewhere
+    expect(stillRecording(list, 'c')).toBe(false)
+    expect(stillRecording(list, 'gone')).toBe(false)   // deleted
+    expect(stillRecording(null, 'a')).toBe(false)
   })
 })
