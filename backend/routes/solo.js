@@ -10,10 +10,13 @@
 //                                       stop for want of requests (a paused
 //                                       movie), for up to 6 hours without one
 //   GET /api/solo/status                { downloadsActive, castActive,
-//                                       recordingsActive } — what
-//                                       still needs the server, for the app's
-//                                       keep-alive when it comes back after
-//                                       Android stopped it
+//                                       recordingsActive, nextRecordingAt } —
+//                                       what still needs the server, for the
+//                                       app's keep-alive when it comes back
+//                                       after Android stopped it: a recording
+//                                       running (anyone's), and when the next
+//                                       booked one starts (ms, or null), so the
+//                                       app holds the server up for it
 //
 // Behind the access gate like the rest of /api: the app's own key, not the
 // share token.
@@ -41,9 +44,12 @@ function healthProof(key, nonce) {
  * @param {object} [o]
  * @param {() => boolean} [o.downloadsActive]  a download queued or running
  * @param {() => number} [o.castSessions]      channels being cast (stalker/CastHls.js)
- * @param {() => boolean} [o.recordingsActive] a live channel being recorded (recordings/)
+ * @param {() => boolean} [o.recordingsActive] a live channel being recorded, anyone's (recordings/)
+ * @param {() => number|null} [o.nextRecordingAt] when the next booked recording starts, anyone's
  */
-function soloRoutes(soloCast, { downloadsActive = () => false, castSessions = () => 0, recordingsActive = () => false } = {}) {
+function soloRoutes(soloCast, {
+  downloadsActive = () => false, castSessions = () => 0, recordingsActive = () => false, nextRecordingAt = () => null,
+} = {}) {
   const router = express.Router();
 
   router.put('/network', (req, res) => {
@@ -70,6 +76,7 @@ function soloRoutes(soloCast, { downloadsActive = () => false, castSessions = ()
       downloadsActive: !!downloadsActive(),
       castActive: castSessions() > 0 || soloCast.castingActive(),
       recordingsActive: !!recordingsActive(),
+      nextRecordingAt: nextRecordingAt() ?? null,
     });
   });
 

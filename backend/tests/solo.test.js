@@ -599,8 +599,9 @@ describe('PUT /api/solo/casting and GET /api/solo/status', () => {
     let downloads = false
     let sessions = 0
     let recordings = false
-    const s = await serve({ solo: true }, { downloadsActive: () => downloads, castSessions: () => sessions, recordingsActive: () => recordings })
-    const none = { downloadsActive: false, castActive: false, recordingsActive: false }
+    let next = null
+    const s = await serve({ solo: true }, { downloadsActive: () => downloads, castSessions: () => sessions, recordingsActive: () => recordings, nextRecordingAt: () => next })
+    const none = { downloadsActive: false, castActive: false, recordingsActive: false, nextRecordingAt: null }
     try {
       expect(await status(s.base, KEY)).toEqual({ status: 200, body: none })
       downloads = true
@@ -615,6 +616,9 @@ describe('PUT /api/solo/casting and GET /api/solo/status', () => {
       expect((await status(s.base, KEY)).body).toEqual(none)
       recordings = true   // a live channel being recorded (recordings/)
       expect((await status(s.base, KEY)).body).toEqual({ ...none, recordingsActive: true })
+      recordings = false
+      next = Date.UTC(2026, 10, 7, 20, 0)   // the earliest booked start, anyone's
+      expect((await status(s.base, KEY)).body).toEqual({ ...none, nextRecordingAt: next })
     } finally { s.server.close() }
   })
 })

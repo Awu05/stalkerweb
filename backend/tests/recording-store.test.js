@@ -62,4 +62,13 @@ describe('RecordingStore', () => {
     store.update(r.id, { status: 'done' })
     expect(store.overlapping(T0, T0 + 10 * MIN)).toEqual([])   // only what's still to record clashes
   })
+
+  it("nextStart(): the earliest booked start, anyone's, or null", () => {
+    expect(store.nextStart()).toBeNull()
+    book({ viewerId: 'view_b', startAt: T0 + 600 * MIN, endAt: T0 + 660 * MIN })
+    const soon = book({ startAt: T0 + 60 * MIN, endAt: T0 + 120 * MIN })
+    expect(store.nextStart()).toBe(T0 + 58 * MIN)
+    store.update(soon.id, { status: 'cancelled' })
+    expect(store.nextStart()).toBe(T0 + 598 * MIN)
+  })
 })

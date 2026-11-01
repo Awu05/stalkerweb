@@ -91,6 +91,13 @@ class RecordingStore {
     return this._list.filter((r) => PENDING.has(r.status) && r.startAt <= now && (r.endAt == null || now < r.endAt)).map((r) => ({ ...r }));
   }
 
+  /** When the next booked recording starts (anyone's), or null — Solo holds its server up for it (routes/solo.js). */
+  nextStart() {
+    let next = null;
+    for (const r of this._list) if (r.status === 'scheduled' && (next === null || r.startAt < next)) next = r.startAt;
+    return next;
+  }
+
   /** What's still to be made and overlaps [startAt, endAt). */
   overlapping(startAt, endAt) {
     return this._list.filter((r) => PENDING.has(r.status) && r.startAt < endAt && (r.endAt == null || startAt < r.endAt)).map((r) => ({ ...r }));

@@ -450,6 +450,7 @@ require('./routes/solo').mount(app, config, soloCast, {
   downloadsActive: () => downloadManager.hasActive(),
   castSessions: () => appState.castHls?.size ?? 0,
   recordingsActive: () => (appState.recordings?.active().length ?? 0) > 0,
+  nextRecordingAt: () => appState.recordingStore?.nextStart() ?? null,
 });
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
