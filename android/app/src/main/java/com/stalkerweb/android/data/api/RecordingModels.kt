@@ -28,14 +28,18 @@ data class Recording(
     val viewerName: String? = null,
     /** Booked by this device's viewer (the server's word — Solo has no viewer id of its own). */
     val mine: Boolean = false,
-    /** This viewer may delete it: its own, or one whose viewer is gone (the server decides). */
+    /** This viewer may delete it: its own, one whose viewer is gone, or — the admin — anyone's (the server decides). */
     val canDelete: Boolean = false,
     /** Who stopped or cancelled it, when that wasn't its owner. */
     val stoppedBy: String? = null,
 )
 
+/** What every recording takes on the server's disk, and what's free there (null: unknown). */
 @JsonClass(generateAdapter = false)
-data class RecordingsResponse(val recordings: List<Recording> = emptyList())
+data class RecordingDisk(val usedBytes: Long = 0, val freeBytes: Long? = null)
+
+@JsonClass(generateAdapter = false)
+data class RecordingsResponse(val recordings: List<Recording> = emptyList(), val disk: RecordingDisk? = null)
 
 /**
  * A guide programme to record (POST /api/recordings): the server adds the

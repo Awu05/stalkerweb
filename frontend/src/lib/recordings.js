@@ -60,6 +60,14 @@ function size(bytes) {
   return `${Math.max(0, Math.round(bytes / 1024 ** 2))} MB`
 }
 
+/** The Recordings page's disk line, from GET /api/recordings' `disk` (freeBytes null: unknown). */
+export function diskLine(disk) {
+  if (!disk) return ''
+  const free = disk.freeBytes == null ? null : `${size(disk.freeBytes)} free`
+  if (!disk.usedBytes) return free ? `${free} for recordings` : ''
+  return [`Recordings use ${size(disk.usedBytes)}`, free].filter(Boolean).join(' · ')
+}
+
 function length(ms) {
   const m = Math.max(0, Math.round(ms / MIN))
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`

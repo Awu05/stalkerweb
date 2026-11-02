@@ -1,12 +1,13 @@
 // routes/recordings.js — live TV recordings (recordings/)
 // GET    /api/recordings           — this viewer's recordings, newest first (?all=1: everyone's it may see,
-//                                     with viewerName); each row says `mine` and `canDelete` (recordings/visibility.js)
+//                                     with viewerName); each row says `mine` and `canDelete` (recordings/visibility.js);
+//                                     `disk`: { usedBytes (every recording's), freeBytes (null: unknown) }
 // POST   /api/recordings           — book a guide programme { channelId, channelName, title, startAt, endAt, force? }
 // POST   /api/recordings/now       — record a channel now { channelId, channelName, title, endAt | null, force? }
 // POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started — anyone's
 //                                     (someone else's keeps `stoppedBy`: who did it)
 // DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file → { deleted } —
-//                                     one's own, or one whose viewer is gone
+//                                     one's own, one whose viewer is gone, or — the admin — anyone's
 //
 // The provider's stream limit (Settings: max_streams, 1 by default): booking a
 // recording that would have more running at once than that is refused (409
@@ -50,13 +51,16 @@ function peakRunning(recs, from, to, openEnd) {
   return peak;
 }
 
-// viewerOf(id) → the viewer, or null once deleted; channels() → the channel list (a recording's genre, for the viewer's filters).
-module.exports = function recordingsModule(appState, { settings = () => ({}), viewerOf = () => null, channels = () => [], now = Date.now } = {}) {
+// viewerOf(id) → the viewer, or null once deleted; channels() → the channel list (a recording's genre, for the viewer's filters);
+// isAdmin(viewer) → whether it may delete anyone's; freeBytes() → the recordings disk's free space, or null.
+module.exports = function recordingsModule(appState, {
+  settings = () => ({}), viewerOf = () => null, channels = () => [], isAdmin = () => false, freeBytes = () => null, now = Date.now,
+} = {}) {
   const router = express.Router();
   const store = () => appState.recordingStore;
   const limitOf = (s) => Math.max(1, parseInt(s.max_streams, 10) || 1);
   const pad = (s, k, dflt) => { const n = Number(s[k]); return Number.isFinite(n) && n >= 0 ? n : dflt; };
-  const rulesFor = (req) => recordingRules(req.viewer, { viewerOf, channels });
+  const rulesFor = (req) => recordingRules(req.viewer, { viewerOf, channels, isAdmin });
   const streams = (n) => `${n} stream${n === 1 ? '' : 's'}`;
   // The stream limit is in use now: recording may stop what's playing.
   const takesStream = (limit) => ({
@@ -76,6 +80,8 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
         canDelete: rules.canDelete(r),
         ...(all ? { viewerName: rules.ownerName(r) } : {}),
       })),
+      // The disk is shared: every recording counts, whichever list was asked for.
+      disk: { usedBytes: store().list().reduce((n, r) => n + (Number(r.bytes) || 0), 0), freeBytes: freeBytes() ?? null },
     });
   });
 

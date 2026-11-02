@@ -1,6 +1,7 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.Recording
+import com.stalkerweb.android.data.api.RecordingDisk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -104,6 +105,14 @@ class RecordingRulesTest {
         assertEquals(emptyList<String>(), recordingsToPublish(list, setOf("d")).map { it.id })
         assertEquals(emptyList<String>(), recordingsToPublish(list, setOf(goneKey("d"))).map { it.id })
         assertEquals("News 24 – Evening News – 2026-10-31 17.00.ts", publicRecordingName(done))
+    }
+
+    @Test fun `the disk line says what the recordings take and what's free`() {
+        val gb = 1024L * 1024 * 1024
+        assertEquals("Recordings use 38.0 GB · 112.0 GB free", diskLine(RecordingDisk(usedBytes = 38 * gb, freeBytes = 112 * gb)))
+        assertEquals("Recordings use 340 MB", diskLine(RecordingDisk(usedBytes = 340L * 1024 * 1024, freeBytes = null)))
+        assertEquals("5.0 GB free for recordings", diskLine(RecordingDisk(usedBytes = 0, freeBytes = 5 * gb)))
+        assertEquals("", diskLine(null))
     }
 
     @Test fun `the Recordings screen says where they're kept`() {

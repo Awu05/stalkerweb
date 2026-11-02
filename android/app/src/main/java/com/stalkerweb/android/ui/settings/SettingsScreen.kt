@@ -5,6 +5,7 @@ import com.stalkerweb.android.ui.components.TvTextField
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
+import com.stalkerweb.android.data.repo.canRemoveViewer
 import com.stalkerweb.android.data.repo.normalizeMac
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -190,14 +191,17 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                 state.viewers.forEach { v ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ViewerAvatar(v.name, v.color, 32.dp)
-                        Text(v.name + if (v.id == me?.id) "  · you" else "", color = SwColors.Text, modifier = Modifier.weight(1f))
+                        Text(v.name + (if (v.admin) "  · admin" else "") + if (v.id == me?.id) "  · you" else "", color = SwColors.Text, modifier = Modifier.weight(1f))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.widthIn(max = 240.dp)) {
                             items(VIEWER_COLORS) { c ->
                                 Box(Modifier.size(22.dp).tvFocus(CircleShape).background(c.color, CircleShape).clickable { viewModel.recolor(v, c.hex) })
                             }
                         }
                         TipIconButton(label = "Rename ${v.name}", onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
-                        TipIconButton(label = "Delete ${v.name}", onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
+                        // The admin (the first viewer) and the last one can't be deleted (the server refuses too).
+                        if (canRemoveViewer(v, state.viewers)) {
+                            TipIconButton(label = "Delete ${v.name}", onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
+                        }
                     }
                 }
                 OutlinedButton(onClick = { adding = true }) { Icon(Icons.Default.Add, null); Text(" Add viewer") }

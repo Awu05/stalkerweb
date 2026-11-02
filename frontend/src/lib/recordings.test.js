@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, stillRecording } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, stillRecording, diskLine } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -116,5 +116,14 @@ describe('the server decides who may delete', () => {
   it('there is no canDelete of its own here (the list says canDelete)', async () => {
     const lib = await import('./recordings')
     expect(lib.canDelete).toBeUndefined()
+  })
+})
+
+describe('diskLine', () => {
+  it("says what the recordings take and what's free on the server's disk", () => {
+    expect(diskLine({ usedBytes: 38 * 1024 ** 3, freeBytes: 112.4 * 1024 ** 3 })).toBe('Recordings use 38.0 GB · 112.4 GB free')
+    expect(diskLine({ usedBytes: 340 * 1024 ** 2, freeBytes: null })).toBe('Recordings use 340 MB')
+    expect(diskLine({ usedBytes: 0, freeBytes: 5 * 1024 ** 3 })).toBe('5.0 GB free for recordings')
+    expect(diskLine(undefined)).toBe('')
   })
 })

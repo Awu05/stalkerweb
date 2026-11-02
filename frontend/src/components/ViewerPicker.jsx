@@ -84,6 +84,7 @@ export default function ViewerPicker({ viewers, onPick, onCreate, onClose }) {
           >
             <ViewerAvatar viewer={v} size={72} />
             <span className="text-sm text-[var(--color-text)] truncate max-w-full">{v.name}</span>
+            {v.admin && <span className="-mt-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">Admin</span>}
           </button>
         ))}
         {!adding && (

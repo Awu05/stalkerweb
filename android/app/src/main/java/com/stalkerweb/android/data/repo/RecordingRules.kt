@@ -1,6 +1,7 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.Recording
+import com.stalkerweb.android.data.api.RecordingDisk
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -71,6 +72,14 @@ private fun dayLabel(ms: Long, now: Long, zone: ZoneId): String {
 private fun size(bytes: Long): String =
     if (bytes >= 1024L * 1024 * 1024) "%.1f GB".format(Locale.ROOT, bytes / (1024.0 * 1024 * 1024))
     else "${maxOf(0L, Math.round(bytes / (1024.0 * 1024)))} MB"
+
+/** The Recordings screen's disk line (the web's diskLine): what they take, what's free. */
+fun diskLine(disk: RecordingDisk?): String {
+    if (disk == null) return ""
+    val free = disk.freeBytes?.let { "${size(it)} free" }
+    if (disk.usedBytes <= 0) return free?.let { "$it for recordings" } ?: ""
+    return listOfNotNull("Recordings use ${size(disk.usedBytes)}", free).joinToString(" · ")
+}
 
 private fun length(ms: Long): String {
     val m = maxOf(0L, Math.round(ms.toDouble() / MIN))
