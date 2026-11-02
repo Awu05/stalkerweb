@@ -41,12 +41,12 @@ class DownloadsViewModel(private val downloads: DownloadsRepository) : ViewModel
             refresh()
             downloads.events().collect { _state.value = DownloadsState(jobs = it.sortedByDescending { j -> j.createdAt }, loading = false) }
             // The stream ended or failed: poll for a while, then try the stream again.
-            repeat(10) { delay(3_000); refresh() }
+            repeat(10) { delay(3_000); refresh(background = true) }   // a loop's requests (ApiClient.kt Background)
         }
     }
 
-    private suspend fun refresh() {
-        runCatching { downloads.list() }
+    private suspend fun refresh(background: Boolean = false) {
+        runCatching { downloads.list(background) }
             .onSuccess { _state.value = DownloadsState(jobs = it.sortedByDescending { j -> j.createdAt }, loading = false) }
             .onFailure { _state.value = _state.value.copy(loading = false, error = it.toApiError().message) }
     }

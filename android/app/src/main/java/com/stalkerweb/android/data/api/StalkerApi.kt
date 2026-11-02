@@ -4,11 +4,12 @@ import retrofit2.http.*
 
 interface StalkerApi {
 
+    // Every call a timer or poll can make takes a Background tag (ApiClient.kt): it never wakes the server.
     @GET("api/auth/status")
-    suspend fun getStatus(): StatusResponse
+    suspend fun getStatus(@Tag background: Background? = null): StatusResponse
 
     @GET("api/channels")
-    suspend fun getChannels(): ChannelsResponse
+    suspend fun getChannels(@Tag background: Background? = null): ChannelsResponse
 
     @GET("api/logos/map")
     suspend fun getLogoMap(): Map<String, String>
@@ -47,7 +48,7 @@ interface StalkerApi {
     suspend fun reorderFavoriteGroups(@Body body: OrderRequest)
 
     @GET("api/channels/health")
-    suspend fun getChannelHealth(): Map<String, ChannelHealth>
+    suspend fun getChannelHealth(@Tag background: Background? = null): Map<String, ChannelHealth>
 
     @GET("api/logos/check")
     suspend fun checkLogo(@Query("name") name: String): LogoCheck
@@ -56,7 +57,7 @@ interface StalkerApi {
     suspend fun setLogoOverride(@Body body: LogoOverrideRequest)
 
     @GET("api/epg/now")
-    suspend fun getNowNext(): Map<String, NowNextEntry>
+    suspend fun getNowNext(@Tag background: Background? = null): Map<String, NowNextEntry>
 
     // Resolves a channel to its proxy stream URL + engine hint (hls/mpegts/native).
     @GET("api/stream/{channelId}")
@@ -74,15 +75,15 @@ interface StalkerApi {
 
     // What's playing through the server now, whose, and on what (Settings → Activity).
     @GET("api/activity")
-    suspend fun getActivity(): ActivityResponse
+    suspend fun getActivity(@Tag background: Background? = null): ActivityResponse
 
     /** How the server sends this stream to this device (the player's Stats). */
     @GET("api/activity/delivery")
-    suspend fun getStreamDelivery(@Query("kind") kind: String, @Query("id") id: String): DeliveryResponse
+    suspend fun getStreamDelivery(@Query("kind") kind: String, @Query("id") id: String, @Tag background: Background? = null): DeliveryResponse
 
     /** The server answering at all — the player's Stats times it. */
     @GET("api/health")
-    suspend fun health(): retrofit2.Response<Unit>
+    suspend fun health(@Tag background: Background? = null): retrofit2.Response<Unit>
 
     // ── Portal connect / disconnect ───────────────────────────────────────────
     @POST("api/auth/connect")
@@ -221,18 +222,18 @@ interface StalkerApi {
 
     // ── The live player ───────────────────────────────────────────────────────
     @GET("api/epg/{channelId}")
-    suspend fun getChannelEpg(@Path("channelId") channelId: String, @Query("period") period: Int = 6): ChannelEpgResponse
+    suspend fun getChannelEpg(@Path("channelId") channelId: String, @Query("period") period: Int = 6, @Tag background: Background? = null): ChannelEpgResponse
 
     /** Keeps the portal session awake while watching (the web pings it every 10 minutes). */
     @GET("api/stream/keepalive")
-    suspend fun streamKeepalive()
+    suspend fun streamKeepalive(@Tag background: Background? = null)
 
     // ── Part 4: guide, downloads, settings ────────────────────────────────────
     @GET("api/epg")
     suspend fun getEpg(@Query("period") period: Int = 24): EpgResponse
 
     @GET("api/downloads")
-    suspend fun getDownloads(): DownloadsResponse
+    suspend fun getDownloads(@Tag background: Background? = null): DownloadsResponse
 
     @POST("api/downloads")
     suspend fun enqueueDownloads(@Body body: DownloadRequest)
@@ -245,7 +246,7 @@ interface StalkerApi {
 
     // ── Live TV recordings (backend routes/recordings.js) ─────────────────────
     @GET("api/recordings")
-    suspend fun getRecordings(): RecordingsResponse
+    suspend fun getRecordings(@Tag background: Background? = null): RecordingsResponse
 
     /** A guide programme booked; 409 (with clash) when it overlaps past the provider's limit. */
     @POST("api/recordings")

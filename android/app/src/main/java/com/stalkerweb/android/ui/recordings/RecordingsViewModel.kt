@@ -30,11 +30,13 @@ class RecordingsViewModel(private val recordings: RecordingsRepository) : ViewMo
 
     /** Runs while the screen is started (cancelled when it isn't). */
     suspend fun follow() {
-        while (true) { refresh(); delay(REFRESH_MS) }
+        // The first look is opening the screen; the refresh after it is a timer's (ApiClient.kt Background).
+        var again = false
+        while (true) { refresh(background = again); again = true; delay(REFRESH_MS) }
     }
 
-    private suspend fun refresh() {
-        runCatching { recordings.list() }
+    private suspend fun refresh(background: Boolean = false) {
+        runCatching { recordings.list(background) }
             .onSuccess { _state.value = RecordingsState(list = it, loading = false) }
             .onFailure { _state.value = _state.value.copy(loading = false, error = it.toApiError().message) }
     }

@@ -85,6 +85,8 @@ import com.stalkerweb.android.data.repo.viaLabel
 import com.stalkerweb.android.data.repo.FiltersToSave
 import com.stalkerweb.android.data.repo.filtersToSave
 import com.stalkerweb.android.data.repo.shownWith
+import com.stalkerweb.android.data.repo.connectionNote
+import com.stalkerweb.android.data.repo.portalUsable
 import com.stalkerweb.android.data.repo.titleKey
 import com.stalkerweb.android.data.repo.SettingsCard
 import com.stalkerweb.android.data.repo.SettingsField
@@ -379,10 +381,11 @@ private fun ConnectionTab(viewModel: SettingsViewModel, state: SettingsState, se
         if (shows(SettingsCard.Server)) Card("StalkerWeb server", serverUrl ?: "Not set up") {
             OutlinedButton(onClick = onOpenServer) { Icon(Icons.Default.Dns, null); Text(" Change server or access key") }
         }
-        if (shows(SettingsCard.IptvConnections)) Card("IPTV connections", if (state.status?.connected == true) "Connected to ${state.status.portal}" else "Not connected") {
+        if (shows(SettingsCard.IptvConnections)) Card("IPTV connections", if (portalUsable(state.status)) connectionNote(state.status)?.let { "$it (${state.status?.portal})" } ?: "Connected to ${state.status?.portal}" else "Not connected") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = viewModel::reconnect, enabled = !state.busy) { Text("Reconnect") }
-                OutlinedButton(onClick = viewModel::disconnect, enabled = !state.busy && state.status?.connected == true) { Text("Disconnect") }
+                // Asleep too: Disconnect turns off the reconnect on use.
+                OutlinedButton(onClick = viewModel::disconnect, enabled = !state.busy && portalUsable(state.status)) { Text("Disconnect") }
                 OutlinedButton(onClick = { editing = Profile(id = "") }) { Icon(Icons.Default.Add, null); Text(" Add") }
             }
             state.profiles.profiles.forEach { p ->

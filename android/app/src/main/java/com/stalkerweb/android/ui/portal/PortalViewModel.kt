@@ -4,6 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.repo.ServerRepository
+import com.stalkerweb.android.data.repo.PortalActions
+import com.stalkerweb.android.data.repo.connectionNote
+import com.stalkerweb.android.data.repo.portalActions
+import com.stalkerweb.android.data.repo.portalUsable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,6 +18,10 @@ import retrofit2.HttpException
 data class PortalUiState(
     val loading: Boolean = true,
     val connected: Boolean = false,
+    // Connected only as asleep: what to say instead of "Connected" (ConnectionLabel.kt connectionNote).
+    val note: String? = null,
+    // What the screen offers (PortalState.kt): after a failed wake, the portals and Reconnect, plus Disconnect.
+    val actions: PortalActions = PortalActions(portals = true, reconnect = true, disconnect = false),
     val portalUrl: String = "",
     val mac: String = "",
     val busy: Boolean = false,
@@ -38,7 +46,8 @@ class PortalViewModel(private val server: ServerRepository) : ViewModel() {
             val status   = runCatching { server.testConnection() }.getOrNull()
             val config   = server.getPortalConfig()
             val profiles = server.getProfiles().profiles
-            val connected = status?.connected == true
+            // Asleep counts: the next use reconnects it, and Disconnect turns that off.
+            val connected = portalUsable(status)
             _state.value = _state.value.copy(
                 loading         = false,
                 // Every action here (connectProfile / reconnect / disconnect)
@@ -50,6 +59,8 @@ class PortalViewModel(private val server: ServerRepository) : ViewModel() {
                 busy               = false,
                 connectingProfileId = null,
                 connected       = connected,
+                note            = connectionNote(status),
+                actions         = portalActions(status),
                 portalUrl       = (if (connected) status?.portal else config?.portal) ?: config?.portal ?: "",
                 mac             = (if (connected) status?.mac    else config?.mac)    ?: config?.mac    ?: "",
                 hasSavedConfig  = !config?.portal.isNullOrBlank() && !config?.mac.isNullOrBlank(),

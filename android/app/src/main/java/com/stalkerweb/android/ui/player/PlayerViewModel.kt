@@ -395,7 +395,7 @@ class PlayerViewModel(
             while (isActive) {
                 delay(30_000)
                 // Not answering for a moment: asked again next time.
-                val list = runCatching { recordings.list() }.getOrNull() ?: continue
+                val list = runCatching { recordings.list(background = true) }.getOrNull() ?: continue
                 if (!stillRecording(list, id)) {
                     if (_state.value.recording?.second == id) _state.value = _state.value.copy(recording = null)
                     return@launch
@@ -441,9 +441,12 @@ class PlayerViewModel(
         guideJob?.cancel()
         _state.value = _state.value.copy(guide = null)
         guideJob = viewModelScope.launch {
+            // The first ask is the zap; the 10-minute refresh is a timer's (ApiClient.kt Background).
+            var again = false
             while (isActive) {
-                val events = runCatching { live.channelGuide(channelId) }.getOrDefault(emptyList())
+                val events = runCatching { live.channelGuide(channelId, background = again) }.getOrDefault(emptyList())
                 if (_state.value.activeChannelId == channelId) _state.value = _state.value.copy(guide = events)
+                again = true
                 delay(10 * 60_000L)
             }
         }
@@ -451,9 +454,11 @@ class PlayerViewModel(
         // zap (holding Down through 30 channels fetched the whole map 30 times).
         if (nowNextJob?.isActive != true) {
             nowNextJob = viewModelScope.launch {
+                var again = false
                 while (isActive) {
-                    val nowNext = runCatching { live.getNowNext() }.getOrDefault(emptyMap())
+                    val nowNext = runCatching { live.getNowNext(background = again) }.getOrDefault(emptyMap())
                     if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
+                    again = true
                     delay(10 * 60_000L)
                 }
             }

@@ -8,7 +8,7 @@ import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED,
 import LoginPage from './pages/LoginPage'
 import { loadWatch } from '@/lib/vodProgress'
 import { fetchProfiles, getCachedProfiles } from '@/lib/profiles'
-import { connectionLabel } from '@/lib/connection'
+import { connectionLabel, connectionBadge, portalUsable } from '@/lib/connection'
 import ViewerPicker, { ViewerAvatar } from '@/components/ViewerPicker'
 import { getViewerId, setViewerId, chooseViewer } from '@/lib/viewer'
 import { invalidateFavoritesCache } from '@/lib/useFavorites'
@@ -69,13 +69,14 @@ const ago = (iso) => {
   return `${Math.floor(secs / 3600)}h ago`
 }
 
-function useStatusDetails(connected, lastPingAt, idleInfo) {
+function useStatusDetails(badge, lastPingAt, idleInfo) {
   const [, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 30_000)
     return () => clearInterval(id)
   }, [])
-  if (!connected) return { tooltip: 'Not connected to a portal', idle: null }
+  if (badge.tone === 'off') return { tooltip: 'Not connected to a portal', idle: null }
+  if (badge.tone !== 'ok') return { tooltip: badge.text, idle: null }
   const parts = ['Connected to the portal']
   if (lastPingAt) parts.push(`keepalive sent ${ago(lastPingAt)}`)
   let idle = null
@@ -106,9 +107,12 @@ function LogoMark({ collapsed }) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
-function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
+// The badge's dot: connected, asleep (the next use reconnects), a reconnect that failed, disconnected.
+const BADGE_DOT = { ok: 'bg-[var(--color-success)]', asleep: 'bg-[var(--color-muted)]', error: 'bg-[var(--color-warning)]', off: 'bg-[var(--color-surface-3)]' }
+
+function Sidebar({ connected, badge, connection, epgEnabled, lastPingAt, idleInfo, version, accessEnabled, collapsed, onToggle, mobileOpen, onCloseMobile, viewer, onSwitchViewer }) {
   const { reminders, removeReminder } = useReminders()
-  const status = useStatusDetails(connected, lastPingAt, idleInfo)
+  const status = useStatusDetails(badge, lastPingAt, idleInfo)
   // Settings opens as a window over the page you're on (see AppInner).
   const location = useLocation()
   const settingsState = location.pathname === '/settings' ? location.state : { background: location }
@@ -206,10 +210,10 @@ function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, vers
               <span
                 className={cn(
                   'inline-block h-2 w-2 rounded-full shrink-0',
-                  connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-surface-3)]'
+                  BADGE_DOT[badge.tone]
                 )}
               />
-              {!collapsed && <span className="truncate">{connected ? 'Connected' : 'Disconnected'}</span>}
+              {!collapsed && <span className="truncate">{badge.text}</span>}
               {!collapsed && status.idle && (
                 <span className="shrink-0 opacity-70 tabular-nums">· {status.idle}</span>
               )}
@@ -239,13 +243,16 @@ function Sidebar({ connected, connection, epgEnabled, lastPingAt, idleInfo, vers
   )
 }
 
+// connected: the portal is usable — connected, or asleep (lib/connection.js
+// portalUsable): the page's first request wakes the server, nothing bounces.
 function RequireAuth({ connected, children }) {
   if (!connected) return <Navigate to="/settings" replace />
   return children
 }
 
 function AppInner() {
-  const [connected, setConnected] = useState(false)
+  const [connected, setConnected] = useState(false)   // the portal usable: connected or asleep (lib/connection.js)
+  const [badge, setBadge] = useState(() => connectionBadge(null))   // the sidebar's connection badge
   const [statusLoaded, setStatusLoaded] = useState(false)
   const [epgEnabled, setEpgEnabled] = useState(true)
   const [showAdult, setShowAdult]   = useState(false)
@@ -347,13 +354,15 @@ function AppInner() {
       try {
         // Profiles must be fetched (and any leftover localStorage profiles
         // migrated in) before anything reads getActiveProfileId().
+        // The status never waits on a portal handshake: asleep, the first page's request wakes the server.
         const [status, settings, list] = await Promise.all([getStatus(), getSettings(), getViewers(), fetchProfiles().catch(() => {})])
         const pick = chooseViewer(list.viewers, getViewerId())
         setViewerId(pick.id)
         setViewers(list.viewers)
         if (pick.needsPicker) { setPickerRequired(true); setPickerOpen(true) }
         applyViewer(await getMyViewer())
-        setConnected(status.connected)
+        setConnected(portalUsable(status))
+        setBadge(connectionBadge(status))
         setConnection(connectionLabel(status, getCachedProfiles()))
         if (status.version) setVersion(status.version)
         loadWatch()   // what this viewer watched (after the viewer is set above)
@@ -369,8 +378,12 @@ function AppInner() {
     }
     const poll = async () => {
       try {
-        const s = await getStatus()
-        setConnected(s.connected)
+        const s = await getStatus({ background: true })   // the 30 s poll never wakes the server
+        setConnected(portalUsable(s))
+        setBadge(prev => {
+          const next = connectionBadge(s)
+          return prev.text === next.text ? prev : next
+        })
         setConnection(prev => {
           const next = connectionLabel(s, getCachedProfiles())
           return prev && next && prev.name === next.name && prev.host === next.host ? prev : next
@@ -381,6 +394,7 @@ function AppInner() {
         else if (!s.connected) setIdleInfo(null)
       } catch {
         setConnected(false)
+        setBadge(connectionBadge(null))
         setConnection(null)
       }
     }
@@ -409,21 +423,21 @@ function AppInner() {
     : null
 
   const ctxValue = useMemo(
-    () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
+    () => ({ connected, setConnected, badge, portalLive: badge.tone === 'ok', epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
       viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true), connection, refreshConnection,
       // Keeps the current viewer in step with a filter just saved (no reload).
       updateViewerFields: (fields) => setViewer((v) => (v ? { ...v, ...fields } : v)) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the functions only call setters
-    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers, connection]
+    [connected, badge, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers, connection]
   )
 
   // Connecting, switching connection or disconnecting (in Settings) shows in
   // the sidebar at once, not at the next status poll.
   function refreshConnection() {
-    return getStatus().then(s => setConnection(connectionLabel(s, getCachedProfiles()))).catch(() => {})
+    return getStatus().then(s => { setConnection(connectionLabel(s, getCachedProfiles())); setBadge(connectionBadge(s)) }).catch(() => {})
   }
   useEffect(() => {
-    if (!connected) setConnection(null)
+    if (!connected) { setConnection(null); setBadge(connectionBadge(null)) }
     else refreshConnection()
   }, [connected])
 
@@ -450,6 +464,7 @@ function AppInner() {
         )}
         <Sidebar
           connected={connected}
+          badge={badge}
           connection={connection}
           epgEnabled={epgEnabled}
           lastPingAt={lastPingAt}
@@ -476,9 +491,8 @@ function AppInner() {
           <LogoMark collapsed={false} />
           <div className="flex-1" />
           <span
-            className="inline-block h-2 w-2 rounded-full shrink-0"
-            style={{ background: connected ? 'var(--color-success)' : 'var(--color-surface-3)' }}
-            title={connected ? 'Connected' : 'Disconnected'}
+            className={cn('inline-block h-2 w-2 rounded-full shrink-0', BADGE_DOT[badge.tone])}
+            title={badge.text}
           />
         </header>
 

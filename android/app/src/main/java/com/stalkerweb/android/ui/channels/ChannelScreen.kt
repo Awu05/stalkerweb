@@ -130,8 +130,8 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
             viewModel.refreshHistory()
             viewModel.loadFavorites()
             viewModel.refreshHealth()
-            launch { while (true) { delay(5 * 60_000L); viewModel.refreshNowNext() } }
-            while (true) { delay(60_000L); viewModel.refreshHealth() }
+            launch { while (true) { delay(5 * 60_000L); viewModel.refreshNowNext(background = true) } }
+            while (true) { delay(60_000L); viewModel.refreshHealth(background = true) }
         }
     }
     // Number jump: the digits typed, then the channel 1.2 s after the last one.
@@ -185,7 +185,8 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
         if (state.portalNotConnected) {
             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.Router, null, tint = SwColors.Warning)
-                Text("Portal not connected — showing cached channels.", color = SwColors.Text, modifier = Modifier.weight(1f))
+                Text(state.wakeError?.let { "Couldn't reconnect to the portal: $it — showing cached channels." }
+                    ?: "Portal not connected — showing cached channels.", color = SwColors.Text, modifier = Modifier.weight(1f))
                 TextButton(onClick = onOpenPortal) { Text("Connect") }
             }
         }
@@ -255,7 +256,11 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
                     EmptyState(Icons.Default.Tv, "Couldn't load channels", state.error) { Button(onClick = { viewModel.load() }) { Text("Retry") } }
                 }
                 state.portalNotConnected && state.channels.isEmpty() -> full {
-                    EmptyState(Icons.Default.Router, "No portal connected", "Connect a portal to load channels.") { Button(onClick = onOpenPortal) { Text("Connect Portal") } }
+                    if (state.wakeError != null) {
+                        EmptyState(Icons.Default.Router, "Couldn't reconnect to the portal", state.wakeError) { Button(onClick = { viewModel.load() }) { Text("Retry") } }
+                    } else {
+                        EmptyState(Icons.Default.Router, "No portal connected", "Connect a portal to load channels.") { Button(onClick = onOpenPortal) { Text("Connect Portal") } }
+                    }
                 }
                 displayed.isEmpty() -> full { EmptyState(Icons.Default.Search, "No channels found.") }
                 else -> items(displayed, key = { it.uniqueId }) { ch -> tile(ch, false, !focusFavorite && ch.uniqueId == displayed.first().uniqueId) }

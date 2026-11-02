@@ -4,8 +4,22 @@ import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.api.StatusResponse
 import java.net.URI
 
-/** What the app is connected to: the IPTV connection's name and the portal's address. */
-data class ConnectionLabel(val name: String, val host: String)
+/**
+ * What the app is connected to: the IPTV connection's name and the portal's
+ * address; [note] while not connected right now — asleep, or why the
+ * reconnect failed (PortalState.kt).
+ */
+data class ConnectionLabel(val name: String, val host: String, val note: String? = null)
+
+/** The note while the server is asleep. */
+const val ASLEEP_NOTE = "Asleep — reconnects when you use it"
+
+/** Null connected; asleep, or why the reconnect failed; null disconnected. */
+fun connectionNote(status: StatusResponse?): String? = when {
+    status == null || status.connected || !status.asleep -> null
+    !status.wakeError.isNullOrBlank() -> "Couldn't reconnect: ${status.wakeError}"
+    else -> ASLEEP_NOTE
+}
 
 /** A portal address in one form, for comparing: no trailing /c/, then "/c/" added. */
 fun normalizePortal(url: String): String =
@@ -20,16 +34,16 @@ fun hostOf(url: String): String = runCatching {
 
 /**
  * The saved profile for this portal and MAC (else any for this portal), else
- * just the portal's address. Null when not connected. Mirrors
- * frontend/src/lib/connection.js.
+ * just the portal's address. Null when not connected (asleep counts: the
+ * portal the next use reconnects to). Mirrors frontend/src/lib/connection.js.
  */
 fun connectionLabel(status: StatusResponse?, profiles: List<Profile>): ConnectionLabel? {
-    if (status?.connected != true) return null
+    if (status == null || !portalUsable(status)) return null
     val raw = status.portal?.takeIf { it.isNotBlank() } ?: return null
     val host = hostOf(raw)
     val portal = normalizePortal(raw)
     val mac = status.mac.orEmpty().uppercase()
     val match = profiles.firstOrNull { it.portal.isNotBlank() && normalizePortal(it.portal) == portal && it.mac.uppercase() == mac }
         ?: profiles.firstOrNull { it.portal.isNotBlank() && normalizePortal(it.portal) == portal }
-    return ConnectionLabel(match?.name?.trim()?.takeIf { it.isNotEmpty() } ?: host, host)
+    return ConnectionLabel(match?.name?.trim()?.takeIf { it.isNotEmpty() } ?: host, host, connectionNote(status))
 }

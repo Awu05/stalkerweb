@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.data.api.AddFavoriteRequest
 import com.stalkerweb.android.data.api.ChannelHealth
 import com.stalkerweb.android.data.api.FavoritesResponse
@@ -28,19 +29,31 @@ class LiveRepository(
 ) {
     // ── Channels and groups ───────────────────────────────────────────────────
 
-    suspend fun getChannels(): List<Channel> {
+    suspend fun getChannels(): List<Channel> = loadChannels().channels
+
+    /**
+     * The channels, and whether to ask again once the server has loaded them:
+     * an empty list that came with loading: true (right after a reconnect)
+     * keeps the cached one, shown and on disk (ChannelLists.kt).
+     * [background]: asked by a timer (ApiClient.kt Background).
+     */
+    suspend fun loadChannels(background: Boolean = false): ChannelList {
         val filter = viewers.filter()
-        val channels = apis.get().getChannels().channels
+        val res = apis.get().getChannels(background(background))
+        val fresh = res.channels
             .filter(filter::keepsChannel)
             // The channel and player lists key by uniqueId; a portal returning the
             // same id twice would crash them with "Key was already used".
             .distinctBy { it.uniqueId }
-        // Runs off the network list, which is the only place legacyId appears —
-        // the on-disk cache doesn't store it. One-shot; see AppPrefs.
-        prefs.migrateLegacyChannelIds(channels)
-        prefs.cacheChannels(channels)
-        prefs.channelsCacheViewer = prefs.viewerId
-        return channels
+        val channels = keptList(getCachedChannels(), fresh, res.loading)
+        if (channels === fresh) {
+            // Runs off the network list, which is the only place legacyId appears —
+            // the on-disk cache doesn't store it. One-shot; see AppPrefs.
+            prefs.migrateLegacyChannelIds(channels)
+            prefs.cacheChannels(channels)
+            prefs.channelsCacheViewer = prefs.viewerId
+        }
+        return ChannelList(channels, refetchesWhenLoaded(fresh, res.loading))
     }
 
     /** Last-known channel list from disk — lets the UI render instantly on cold
@@ -95,7 +108,8 @@ class LiveRepository(
     suspend fun reorderGroups(order: List<String>) = apis.get().reorderFavoriteGroups(OrderRequest(order))
 
     /** Recent stream failures per channel; empty when unknown. */
-    suspend fun getHealth(): Map<String, ChannelHealth> = runCatching { apis.get().getChannelHealth() }.getOrDefault(emptyMap())
+    suspend fun getHealth(background: Boolean = false): Map<String, ChannelHealth> =
+        runCatching { apis.get().getChannelHealth(background(background)) }.getOrDefault(emptyMap())
 
     /** The logo the server finds for [name], made absolute for Coil; null when none. */
     suspend fun checkLogo(name: String): String? = runCatching { apis.get().checkLogo(name).logo }.getOrNull()
@@ -104,13 +118,15 @@ class LiveRepository(
     suspend fun setLogoOverride(name: String, url: String) = apis.get().setLogoOverride(LogoOverrideRequest(name, url.trim()))
 
     /** The playing channel's programmes for the next hours, in order (the player's guide). */
-    suspend fun channelGuide(channelId: String, hours: Int = 6): List<com.stalkerweb.android.data.api.EpgEvent> =
-        cleanEvents(apis.get().getChannelEpg(channelId, hours).events.mapNotNull { it.toEvent() })
+    suspend fun channelGuide(channelId: String, hours: Int = 6, background: Boolean = false): List<com.stalkerweb.android.data.api.EpgEvent> =
+        cleanEvents(apis.get().getChannelEpg(channelId, hours, background(background)).events.mapNotNull { it.toEvent() })
 
-    suspend fun keepalive() { runCatching { apis.get().streamKeepalive() } }
+    /** Every 10 minutes while playing: a timer's request (ApiClient.kt Background). */
+    suspend fun keepalive() { runCatching { apis.get().streamKeepalive(background(true)) } }
 
-    suspend fun getNowNext(): Map<String, NowNextEntry> =
-        runCatching { apis.get().getNowNext() }.getOrDefault(emptyMap())
+    /** [background]: a timed refresh, which never wakes an asleep server. */
+    suspend fun getNowNext(background: Boolean = false): Map<String, NowNextEntry> =
+        runCatching { apis.get().getNowNext(background(background)) }.getOrDefault(emptyMap())
 
     // ── Streams ───────────────────────────────────────────────────────────────
 

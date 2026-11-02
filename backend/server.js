@@ -195,84 +195,14 @@ const envIdleMinutes   = envIdle.minutes;
 const savedIdleMinutes = parseIdleMinutes(
   new (require('./cache/CacheManager'))(config.dataDir).load()?.idle_timeout_minutes, null);
 
-function destroySession() {
-  appState._idleTimer = null;
-  if (!appState.sessionManager || !appState.idleTimeoutMs) return;
-  // Never tear down while a stream connection is still open — playback is live.
-  // Defer the check by one idle interval so the timer resumes once it closes.
-  if (appState.activeStreams > 0) {
-    log.debug('server', `idle timeout reached but ${appState.activeStreams} stream(s) active — deferring disconnect`);
-    appState._idleTimer = setTimeout(destroySession, appState.idleTimeoutMs);
-    return;
-  }
-  log.info('server', `idle timeout (${appState.idleTimeoutMs / 60000}m) — auto-disconnecting session`);
-  appState.sessionManager.destroy();
-  appState.sessionManager = null;
-  appState.client = null;
-  appState.channelManager = null;
-  appState.guideManager = null;
-  appState.vodManager = null;
-  appState.identity = null;
-}
-
-// (Re)arm the disconnect timer so it fires idleTimeoutMs after the last
-// activity — counting from lastActivityAt, so changing the timeout mid-session
-// keeps the elapsed idle time instead of restarting the countdown.
-function armIdleTimer() {
-  clearTimeout(appState._idleTimer);
-  appState._idleTimer = null;
-  if (!appState.idleTimeoutMs) return;   // 0 = never
-  const idleFor = appState.lastActivityAt ? Date.now() - Date.parse(appState.lastActivityAt) : 0;
-  appState._idleTimer = setTimeout(destroySession, Math.max(0, appState.idleTimeoutMs - idleFor));
-}
-
-appState.idleTimeoutMs   = (savedIdleMinutes ?? envIdleMinutes) * 60 * 1000;
-appState.lastActivityAt  = null;
-appState._idleTimer      = null;
-appState.activeStreams   = 0;      // open proxy stream connections (playback in progress)
-appState._reconnecting   = null;   // serialise concurrent auto-reconnects
-appState.connectPortal   = connectPortal;
+// The idle disconnect, the wake (asleep: the next use reconnects to the last
+// portal that worked) and the startup auto-connect — lib/portalSession.js.
+appState.connectPortal = connectPortal;
 appState.idleTimeoutDefaultMinutes = envIdleMinutes;
-
-// Applies a timeout saved from the Settings page immediately — no restart.
-appState.setIdleTimeoutMinutes = function setIdleTimeoutMinutes(minutes) {
-  appState.idleTimeoutMs = minutes * 60 * 1000;
-  log.info('server', minutes ? `idle timeout set to ${minutes}m` : 'idle auto-disconnect disabled');
-  if (appState.sessionManager) armIdleTimer();
-};
-
-// Reconnects to the saved portal if the session is down (idle auto-disconnect,
-// restart). Called where an outside client arrives without going through the
-// web UI — stream links, playlists, the guide, the Xtream API, the Stremio
-// addon — so those keep working after the idle disconnect. Not called for the
-// web UI's own API polling, which would otherwise keep the session up forever.
-// Concurrent callers share one attempt. Resolves true when connected; throws
-// when there is no saved portal or the reconnect fails.
-appState.ensureSession = async function ensureSession() {
-  if (appState.sessionManager?.isAuthenticated() && appState.channelManager) return true;
-  if (!appState._reconnecting) {
-    const saved = new (require('./cache/CacheManager'))(config.dataDir).load();
-    if (!saved?.portal || !saved?.mac) throw new Error('Not connected to a portal. Configure portal first.');
-    log.info('server', 'session inactive — auto-reconnecting for an incoming request');
-    appState._reconnecting = connectPortal(saved)
-      .then(() => {
-        log.info('server', 'auto-reconnect succeeded');
-        appState.touchActivity();
-      })
-      .catch((e) => {
-        log.error('server', `auto-reconnect failed: ${e.message}`);
-        throw e;
-      })
-      .finally(() => { appState._reconnecting = null; });
-  }
-  await appState._reconnecting;
-  return true;
-};
-
-appState.touchActivity = function touchActivity() {
-  appState.lastActivityAt = new Date().toISOString();
-  armIdleTimer();
-};
+const portalSession = require('./lib/portalSession').installPortalSession(appState, {
+  dataDir: config.dataDir,
+  idleTimeoutMs: (savedIdleMinutes ?? envIdleMinutes) * 60 * 1000,
+});
 
 // Attach a heartbeat to a long-lived proxy response so the idle-disconnect timer
 // keeps resetting for as long as playback is actually flowing — independent of
@@ -513,28 +443,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// ── Auto-reconnect from saved config on startup ────────────────────────────
-// Calls connectPortal() directly — no mock-request hack needed.
-async function tryAutoConnect() {
-  const CacheManager = require('./cache/CacheManager');
-  const cache = new CacheManager(config.dataDir);
-  const saved = cache.load();
-
-  if (!saved?.portal || !saved?.mac) {
-    log.info('server', 'no saved portal config — waiting for POST /api/auth/connect');
-    return;
-  }
-
-  log.info('server', `auto-connecting to ${saved.portal} (${saved.mac})`);
-  try {
-    await connectPortal(saved);
-    log.info('server', 'auto-connect: session established ✓');
-    appState.touchActivity();
-  } catch (e) {
-    log.error('server', `auto-connect failed: ${e.message}`);
-  }
-}
-
 // ── Start server ───────────────────────────────────────────────────────────
 // HOST: 0.0.0.0 (the default) is every address — left to Node, which takes
 // IPv6 as well; anything else (Solo: 127.0.0.1) is that address only.
@@ -546,7 +454,7 @@ const httpServer = listenOn(app, config.port, () => {
   log.info('server', access.enabled
     ? 'access key set — sign-in required for the web UI, links carry a token'
     : 'no ACCESS_KEY — anyone who can reach this server can use it (fine on a home network; set one before exposing it to the internet)');
-  tryAutoConnect();
+  portalSession.autoConnect();
 });
 // The port taken (EADDRINUSE) or not allowed: say so, and stop with an error —
 // a server that can't listen is no use, and Solo's app picks other ports

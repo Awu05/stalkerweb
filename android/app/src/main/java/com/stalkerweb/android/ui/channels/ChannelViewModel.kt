@@ -16,6 +16,8 @@ import com.stalkerweb.android.data.repo.ViewerRepository
 import com.stalkerweb.android.data.repo.filterChannels
 import com.stalkerweb.android.data.repo.flakyCount
 import com.stalkerweb.android.data.repo.moveItem
+import com.stalkerweb.android.data.repo.retriesWhileWaking
+import com.stalkerweb.android.data.repo.wakeErrorOf
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -47,6 +49,8 @@ data class ChannelUiState(
     val error: String? = null,
     // The backend answered 503 "not connected to a portal": point at the Portal screen.
     val portalNotConnected: Boolean = false,
+    // ...because reconnecting the asleep server failed: why (PortalState.kt).
+    val wakeError: String? = null,
 ) {
     val displayed: List<Channel> get() = filterChannels(channels, selectedGroupId, query, hideFlaky, health)
     val flaky: Int get() = flakyCount(channels, health)
@@ -97,31 +101,45 @@ class ChannelViewModel(
         val cachedLogos = live.getCachedLogoMap()
         val haveData = cached.isNotEmpty() || _state.value.channels.isNotEmpty()
         _state.value = _state.value.copy(
-            loading = !haveData, error = null, portalNotConnected = false, recentChannels = live.getWatched(),
+            loading = !haveData, error = null, portalNotConnected = false, wakeError = null, recentChannels = live.getWatched(),
             channels = _state.value.channels.ifEmpty { cached },
             logoMap = _state.value.logoMap.ifEmpty { cachedLogos },
         )
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            runCatching {
-                // coroutineScope: a failing async is rethrown here, where runCatching catches it
-                // (a portal-not-connected 503 becomes the banner, not a crash).
-                coroutineScope {
-                    val channels = async { live.getChannels() }
-                    val logos = async { live.getLogoMap() }
-                    val groups = async { live.getGroups() }
-                    Triple(channels.await(), logos.await(), groups.await())
+            // An asleep server holds these requests while it reconnects to the portal
+            // (they all join one reconnect). Slower than the read timeout: ask again —
+            // the next ask joins the same reconnect (PortalState.kt).
+            var attempt = 0
+            while (true) {
+                val result = runCatching {
+                    // coroutineScope: a failing async is rethrown here, where runCatching catches it
+                    // (a portal-not-connected 503 becomes the banner, not a crash).
+                    coroutineScope {
+                        val channels = async { live.loadChannels() }
+                        val logos = async { live.getLogoMap() }
+                        val groups = async { live.getGroups() }
+                        Triple(channels.await(), logos.await(), groups.await())
+                    }
                 }
-            }.onSuccess { (channels, logos, groups) ->
-                _state.value = _state.value.copy(channels = channels, logoMap = logos, groups = groups, loading = false)
-            }.onFailure { e ->
+                val e = result.exceptionOrNull()
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                val notConnected = e is HttpException && e.code() == 503
-                _state.value = _state.value.copy(
-                    loading = false, portalNotConnected = notConnected,
-                    error = if (!notConnected && _state.value.channels.isEmpty()) e.toApiError().message else null,
-                )
+                if (e != null && retriesWhileWaking(e, attempt)) { attempt++; continue }
+                result.onSuccess { (list, logos, groups) ->
+                    _state.value = _state.value.copy(channels = list.channels, logoMap = logos, groups = groups, loading = false)
+                    if (list.refetch) followLoad()
+                }.onFailure { err ->
+                    val notConnected = err is HttpException && err.code() == 503
+                    val body = if (notConnected) runCatching { (err as HttpException).response()?.errorBody()?.string() }.getOrNull() else null
+                    _state.value = _state.value.copy(
+                        loading = false, portalNotConnected = notConnected, wakeError = wakeErrorOf(body),
+                        error = if (!notConnected && _state.value.channels.isEmpty()) err.toApiError().message else null,
+                    )
+                }
+                break
             }
+            // The lists came after a slow reconnect: now/next and health again (the first asks timed out).
+            if (attempt > 0) { refreshNowNext(); refreshHealth() }
         }
         loadFavorites()
         refreshNowNext()
@@ -142,15 +160,31 @@ class ChannelViewModel(
         }
     }
 
-    fun refreshNowNext() {
+    // The server still loading its list (it came back empty): ask again every
+    // few seconds until it's in — a loop's requests (ApiClient.kt Background).
+    private suspend fun followLoad() {
+        repeat(20) {
+            kotlinx.coroutines.delay(3_000)
+            val list = runCatching { live.loadChannels(background = true) }.getOrNull() ?: return@repeat
+            if (list.channels.isNotEmpty()) _state.value = _state.value.copy(channels = list.channels)
+            if (!list.refetch) {
+                runCatching { live.getGroups() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { _state.value = _state.value.copy(groups = it) }
+                return
+            }
+        }
+    }
+
+    /** @param background a timed refresh — never wakes an asleep server. */
+    fun refreshNowNext(background: Boolean = false) {
         viewModelScope.launch {
-            val nowNext = live.getNowNext()
+            val nowNext = live.getNowNext(background)
             if (nowNext.isNotEmpty()) _state.value = _state.value.copy(nowNext = nowNext)
         }
     }
 
-    fun refreshHealth() {
-        viewModelScope.launch { _state.value = _state.value.copy(health = live.getHealth()) }
+    /** @param background the minute's refresh — never wakes an asleep server. */
+    fun refreshHealth(background: Boolean = false) {
+        viewModelScope.launch { _state.value = _state.value.copy(health = live.getHealth(background)) }
     }
 
     /** Re-read this device's history — after returning from the player (MainActivity.onResume). */
