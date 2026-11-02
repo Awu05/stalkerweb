@@ -43,7 +43,20 @@ function normalizePortal(url) {
   return String(url).trim().replace(/\/c\/?$/, '').replace(/\/?$/, '') + '/c/';
 }
 
-module.exports = function authModule(appState, config) {
+// The connect fields remembered as the last portal that worked (last_good):
+// what a wake reconnects to. Like the saved config, no password.
+const LAST_GOOD_FIELDS = ['mac', 'timezone', 'lang', 'login', 'serial_number',
+  'device_id', 'device_id2', 'send_device_id', 'send_device_id2',
+  'signature', 'portal_signature', 'connection_timeout'];
+
+function lastGoodFrom(body) {
+  const kept = { portal: normalizePortal(body.portal) };
+  for (const key of LAST_GOOD_FIELDS) if (body[key] !== undefined) kept[key] = body[key];
+  return kept;
+}
+
+// connectOnce: tests replace the portal handshake (connectPortalOnce).
+module.exports = function authModule(appState, config, { connectOnce } = {}) {
   const router = express.Router();
   const cache = new CacheManager(config.dataDir);
 
@@ -202,24 +215,47 @@ module.exports = function authModule(appState, config) {
     };
   }
 
-  // Serializes every connectPortal() call — manual /connect, /reconnect, and
-  // stream.js's auto-reconnect (via appState.connectPortal, the same function
-  // reference returned below) all funnel through this queue. Without it, two
-  // concurrent connects (e.g. a manual "Connect" click racing an idle-timeout
-  // auto-reconnect) each build their own SessionManager/watchdog/auth-check
-  // timers; whichever finishes last wins and the loser's session is never
-  // destroyed — its timers keep pinging the portal forever.
+  // Serializes every connectPortal() call — manual /connect, /reconnect, the
+  // startup auto-connect and the wake (appState.connectPortal, the same
+  // function reference returned below) all funnel through this queue. Without
+  // it, two concurrent connects each build their own SessionManager/watchdog/
+  // auth-check timers; whichever finishes last wins and the loser's session is
+  // never destroyed — its timers keep pinging the portal forever.
+  //
+  // appState.connecting is the connect running (or queued) — a wake joins it
+  // instead of starting another (lib/portalSession.js). A success is the last
+  // portal that worked (last_good) and the server is no longer asleep; a failed
+  // connect the user started (byUser) leaves it not asleep either — nothing
+  // reconnects behind their back.
+  const handshake = connectOnce || connectPortalOnce;
   let connectQueue = Promise.resolve();
-  function connectPortal(body) {
-    const run = connectQueue.then(() => connectPortalOnce(body), () => connectPortalOnce(body));
+  function connectPortal(body, { byUser = false } = {}) {
+    const run = connectQueue.then(() => handshake(body), () => handshake(body));
     connectQueue = run.catch(() => {});
-    return run;
+    const tracked = run.then((result) => {
+      const saved = cache.load() || {};
+      delete saved.user_disconnected;
+      cache.save({ ...saved, last_good: lastGoodFrom(body) });
+      appState.asleep = false;
+      appState.wakeError = null;
+      appState.wakeRetryAt = 0;
+      return result;
+    }, (err) => {
+      if (byUser) {
+        appState.asleep = false;
+        appState.wakeError = null;
+      }
+      throw err;
+    });
+    appState.connecting = tracked;
+    tracked.catch(() => {}).then(() => { if (appState.connecting === tracked) appState.connecting = null; });
+    return tracked;
   }
 
   // ── POST /api/auth/connect ─────────────────────────────────────────────────
   router.post('/connect', connectLimiter, connectRules, async (req, res) => {
     try {
-      const result = await connectPortal(req.body);
+      const result = await connectPortal(req.body, { byUser: true });
       appState.touchActivity?.();
       res.json({ success: true, ...result });
     } catch (err) {
@@ -229,29 +265,29 @@ module.exports = function authModule(appState, config) {
   });
 
   // ── GET /api/auth/status ───────────────────────────────────────────────────
-  // ?wake=1: someone opened the app or signed in — the session the idle
-  // timeout dropped comes back first (the last portal connected). The apps'
-  // polling sends no wake, so it never keeps the session up by itself.
-  router.get('/status', async (req, res) => {
-    let wakeError = null;
-    if (req.query.wake === '1' && !appState.sessionManager?.isAuthenticated() && appState.ensureSession) {
-      try { await appState.ensureSession(); } catch (e) { wakeError = e.message; }
-    }
+  // asleep: the idle timeout dropped the session — the next real use (a data
+  // request through the session guard) reconnects to the last portal that
+  // worked, shown as portal/mac. wakeError: why the last wake failed. A status
+  // check never wakes it, or the apps' polling would keep the session up.
+  router.get('/status', (req, res) => {
     const connected = !!(appState.sessionManager?.isAuthenticated());
     const saved = cache.load();
+    const asleep = !connected && !!appState.asleep;
+    const shown = asleep && saved?.last_good ? saved.last_good : saved;
     const watchdog = appState.sessionManager?._watchdog;
     res.json({
       connected,
+      asleep,
+      ...(asleep && appState.wakeError ? { wakeError: appState.wakeError } : {}),
       version: process.env.APP_VERSION || 'dev',
-      portal: saved?.portal || null,
-      mac: saved?.mac || null,
+      portal: shown?.portal || null,
+      mac: shown?.mac || null,
       profile: connected ? appState.sessionManager.getProfile() : null,
       token: connected ? appState.identity?.token : null,
       device: DEVICE_PROFILE,
       watchdog: watchdog ? { lastPingAt: watchdog.lastPingAt, pingCount: watchdog.pingCount } : null,
       lastActivityAt: appState.lastActivityAt || null,
       idleTimeoutMs: appState.idleTimeoutMs || null,
-      ...(wakeError ? { wakeError } : {}),
     });
   });
 
@@ -269,6 +305,13 @@ module.exports = function authModule(appState, config) {
           ? normalizePortal(req.body[key])
           : req.body[key];
       }
+    }
+    // The portal or MAC changed (a connection deleted): the last one that
+    // worked is no longer the saved one — nothing to wake to.
+    const good = existing.last_good;
+    if (good && (normalizePortal(existing.portal || '') !== good.portal || existing.mac !== good.mac)) {
+      delete existing.last_good;
+      if (!appState.sessionManager) { appState.asleep = false; appState.wakeError = null; }
     }
     cache.save(existing);
     res.json({ success: true });
@@ -313,6 +356,12 @@ module.exports = function authModule(appState, config) {
     clearTimeout(appState._idleTimer);
     appState._idleTimer = null;
     appState.lastActivityAt = null;
+    // Turned off on purpose: not asleep, so no request wakes it — and saved,
+    // so a restart doesn't either. The next successful connect clears it.
+    appState.asleep = false;
+    appState.wakeError = null;
+    const saved = cache.load();
+    if (saved) cache.save({ ...saved, user_disconnected: true });
     res.json({ success: true });
   });
 
@@ -323,7 +372,7 @@ module.exports = function authModule(appState, config) {
       return res.status(400).json({ error: 'No saved portal config found' });
     }
     try {
-      const result = await connectPortal(saved);
+      const result = await connectPortal(saved, { byUser: true });
       res.json({ success: true, ...result });
     } catch (err) {
       log.error(TAG, `reconnect failed: ${err.message}`);

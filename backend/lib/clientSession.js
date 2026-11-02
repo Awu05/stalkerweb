@@ -3,7 +3,7 @@
 // Readiness for requests from outside players — playlists, the guide, the
 // Xtream API, the Stremio addon. These arrive without the web UI, often long
 // after the idle auto-disconnect, so the portal session is brought back first
-// (appState.ensureSession, server.js) instead of answering "not connected".
+// (appState.ensureSession, lib/portalSession.js) instead of answering "not connected".
 
 const log = require('../logger');
 const TAG = 'session';

@@ -19,6 +19,8 @@ const TAG = 'channels';
 
 module.exports = function channelRoutes(appState) {
   const guard = sessionMiddleware(appState);
+  // Only ever polled (load progress, stream health): never wakes the portal (middleware/session.js).
+  const pollGuard = sessionMiddleware(appState, { wake: false });
 
   // GET /api/channels
   // Returns immediately with whatever channels are loaded so far.
@@ -54,7 +56,7 @@ module.exports = function channelRoutes(appState) {
   });
 
   // GET /api/channels/progress — channel load progress (poll while loading)
-  router.get('/progress', guard, (req, res) => {
+  router.get('/progress', pollGuard, (req, res) => {
     const { channelManager } = appState;
     if (!channelManager) return res.json({ loading: false, page: 0, totalPages: 0, channelCount: 0 });
     res.json(channelManager.getProgress());
@@ -106,7 +108,7 @@ module.exports = function channelRoutes(appState) {
 
   // GET /api/channels/events — SSE stream of loading progress
   // Pushes a JSON progress object every 400ms until loading completes, then closes.
-  router.get('/events', guard, (req, res) => {
+  router.get('/events', pollGuard, (req, res) => {
     const { channelManager } = appState;
     res.set({
       'Content-Type':  'text/event-stream',
@@ -155,7 +157,7 @@ module.exports = function channelRoutes(appState) {
   });
 
   // GET /api/channels/health — stream error counts per channel
-  router.get('/health', guard, (req, res) => {
+  router.get('/health', pollGuard, (req, res) => {
     const { channelManager } = appState;
     if (!channelManager) return res.json({});
     res.json(channelManager.getHealth());

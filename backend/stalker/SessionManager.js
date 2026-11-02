@@ -30,6 +30,7 @@ class SessionManager {
     this._authTimer = null;
     this._statusCallback = null;    // (status: 'ok'|'lost'|'error') => void
     this._tokenPersistCb = null;    // (newToken) => void — persist a rotated token
+    this._destroyed = false;        // destroy() is final: an authenticate still running starts no timers
 
     // Token rotation is captured centrally in StalkerClient (any response with a
     // js.token). React to it here: keep the cookie/state in sync and persist the
@@ -189,6 +190,12 @@ class SessionManager {
     }
 
     this.isAuthenticating = false;
+    // Destroyed while authenticating (replaced, disconnected): leave it dead —
+    // timers started now would ping the portal forever.
+    if (this._destroyed) {
+      this.authenticated = false;
+      return;
+    }
     if (this._statusCallback) this._statusCallback('ok');
     this._startWatchdog();
     this._startAuthChecker();
@@ -231,6 +238,7 @@ class SessionManager {
   }
 
   destroy() {
+    this._destroyed = true;
     if (this._authTimer) {
       clearInterval(this._authTimer);
       this._authTimer = null;
