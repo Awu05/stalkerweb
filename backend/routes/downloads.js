@@ -14,8 +14,8 @@ const TAG = 'downloads';
 module.exports = function downloadsModule(downloadManager, appState) {
   const router = express.Router();
   const guard = sessionMiddleware(appState);
-  // The live event stream: never wakes the portal (middleware/session.js).
-  const pollGuard = sessionMiddleware(appState, { wake: false });
+  // The event stream can't send X-Background: it never wakes the portal (middleware/session.js).
+  const streamGuard = sessionMiddleware(appState, { wake: false });
 
   router.get('/', guard, (_req, res) => {
     res.json({ downloads: downloadManager.list() });
@@ -25,7 +25,7 @@ module.exports = function downloadsModule(downloadManager, appState) {
   // heartbeat so proxies don't drop an otherwise-idle connection. Unlike
   // /api/channels/events this has no natural "done" state (the queue is
   // long-lived), so it stays open until the client disconnects.
-  router.get('/events', pollGuard, (req, res) => {
+  router.get('/events', streamGuard, (req, res) => {
     res.set({
       'Content-Type':  'text/event-stream',
       'Cache-Control': 'no-cache',

@@ -19,6 +19,7 @@ const CacheManager = require('../cache/CacheManager');
 const log = require('../logger');
 const rateLimit = require('express-rate-limit');
 const { connectRules } = require('../middleware/validate');
+const { dropSession } = require('../lib/portalSession');
 const TAG = 'auth';
 
 // Rate limiters
@@ -43,16 +44,24 @@ function normalizePortal(url) {
   return String(url).trim().replace(/\/c\/?$/, '').replace(/\/?$/, '') + '/c/';
 }
 
-// The connect fields remembered as the last portal that worked (last_good):
-// what a wake reconnects to. Like the saved config, no password.
-const LAST_GOOD_FIELDS = ['mac', 'timezone', 'lang', 'login', 'serial_number',
-  'device_id', 'device_id2', 'send_device_id', 'send_device_id2',
+// A connection's fields: what PUT /config saves, and what is remembered as the
+// last portal that worked (last_good) — everything a wake needs to reconnect,
+// the password included (kept in config.json, as profiles.json keeps the
+// profiles' — never logged, never sent back).
+const CONNECTION_FIELDS = ['portal', 'mac', 'timezone', 'lang', 'login', 'password',
+  'serial_number', 'device_id', 'device_id2', 'send_device_id', 'send_device_id2',
   'signature', 'portal_signature', 'connection_timeout'];
 
 function lastGoodFrom(body) {
-  const kept = { portal: normalizePortal(body.portal) };
-  for (const key of LAST_GOOD_FIELDS) if (body[key] !== undefined) kept[key] = body[key];
+  const kept = {};
+  for (const key of CONNECTION_FIELDS) if (body[key] !== undefined) kept[key] = body[key];
+  kept.portal = normalizePortal(body.portal);
   return kept;
+}
+
+/** Whether a saved portal + MAC is the connection last_good remembers. */
+function isLastGood(portal, mac, good) {
+  return !!(good && portal && normalizePortal(portal) === good.portal && mac === good.mac);
 }
 
 // connectOnce: tests replace the portal handshake (connectPortalOnce).
@@ -89,13 +98,7 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
     // Tear down existing session
     if (appState.sessionManager) {
       log.info(TAG, 'tearing down existing session');
-      appState.sessionManager.destroy();
-      appState.sessionManager = null;
-      appState.client = null;
-      appState.channelManager = null;
-      appState.guideManager = null;
-      appState.vodManager = null;
-      appState.identity = null;
+      dropSession(appState);
     }
 
     // Resolve token: prefer the stalker_HASH entry saved for this portal over
@@ -199,8 +202,9 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
     appState.vodManager     = vodManager;
     appState.identity = identity;
 
+    // A wake answers once these are in (lib/portalSession.js, appState.channelsReady).
     log.info(TAG, 'starting background channel/group pre-load');
-    Promise.all([
+    appState.channelsReady = Promise.all([
       channelManager.loadChannels(),
       channelManager.loadGroups(),
     ]).then(() => {
@@ -225,14 +229,27 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
   // appState.connecting is the connect running (or queued) — a wake joins it
   // instead of starting another (lib/portalSession.js). A success is the last
   // portal that worked (last_good) and the server is no longer asleep; a failed
-  // connect the user started (byUser) leaves it not asleep either — nothing
-  // reconnects behind their back.
+  // connect the user started (byUser) leaves it not asleep either.
+  //
+  // A Disconnect cancels the connects running or queued (cancelPending): one
+  // still to start never starts; one finishing tears its session down instead
+  // of installing it, and leaves user_disconnected, last_good and asleep alone.
   const handshake = connectOnce || connectPortalOnce;
+  const pending = new Set();
   let connectQueue = Promise.resolve();
+  const cancelledError = () => Object.assign(new Error('Disconnected while connecting.'), { cancelled: true });
+
   function connectPortal(body, { byUser = false } = {}) {
-    const run = connectQueue.then(() => handshake(body), () => handshake(body));
-    connectQueue = run.catch(() => {});
-    const tracked = run.then((result) => {
+    const ticket = { cancelled: false };
+    pending.add(ticket);
+    const attempt = async () => {
+      if (ticket.cancelled) throw cancelledError();
+      const result = await handshake(body);
+      if (ticket.cancelled) {
+        dropSession(appState);
+        throw cancelledError();
+      }
+      // Read after the cancel check, nothing awaited in between: a Disconnect can't land in the middle.
       const saved = cache.load() || {};
       delete saved.user_disconnected;
       cache.save({ ...saved, last_good: lastGoodFrom(body) });
@@ -240,16 +257,26 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
       appState.wakeError = null;
       appState.wakeRetryAt = 0;
       return result;
-    }, (err) => {
-      if (byUser) {
+    };
+    const run = connectQueue.then(attempt, attempt);
+    connectQueue = run.catch(() => {});
+    const tracked = run.catch((err) => {
+      if (byUser && !err.cancelled) {
         appState.asleep = false;
         appState.wakeError = null;
       }
       throw err;
     });
     appState.connecting = tracked;
-    tracked.catch(() => {}).then(() => { if (appState.connecting === tracked) appState.connecting = null; });
+    tracked.catch(() => {}).then(() => {
+      pending.delete(ticket);
+      if (appState.connecting === tracked) appState.connecting = null;
+    });
     return tracked;
+  }
+
+  function cancelPending() {
+    for (const ticket of pending) ticket.cancelled = true;
   }
 
   // ── POST /api/auth/connect ─────────────────────────────────────────────────
@@ -295,21 +322,18 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
   // Persist portal config fields WITHOUT initiating a connection.
   router.put('/config', (req, res) => {
     const existing = cache.load() || {};
-    const allowed = ['portal', 'mac', 'timezone', 'lang', 'login',
-                     'serial_number', 'device_id', 'device_id2',
-                     'send_device_id', 'send_device_id2',
-                     'signature', 'connection_timeout'];
-    for (const key of allowed) {
+    const before = { portal: existing.portal, mac: existing.mac };
+    for (const key of CONNECTION_FIELDS) {
       if (req.body[key] !== undefined) {
         existing[key] = key === 'portal'
           ? normalizePortal(req.body[key])
           : req.body[key];
       }
     }
-    // The portal or MAC changed (a connection deleted): the last one that
-    // worked is no longer the saved one — nothing to wake to.
+    // The connection that worked changed or went (deleted): nothing to wake to.
+    // Any other one changing (a failed switch deleted) leaves it alone.
     const good = existing.last_good;
-    if (good && (normalizePortal(existing.portal || '') !== good.portal || existing.mac !== good.mac)) {
+    if (isLastGood(before.portal, before.mac, good) && !isLastGood(existing.portal, existing.mac, good)) {
       delete existing.last_good;
       if (!appState.sessionManager) { appState.asleep = false; appState.wakeError = null; }
     }
@@ -343,23 +367,15 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
 
   // ── DELETE /api/auth/disconnect ────────────────────────────────────────────
   router.delete('/disconnect', (req, res) => {
-    if (appState.sessionManager) {
-      log.info(TAG, 'disconnecting session');
-      appState.sessionManager.destroy();
-      appState.sessionManager = null;
-      appState.client = null;
-      appState.channelManager = null;
-      appState.guideManager = null;
-      appState.vodManager = null;
-      appState.identity = null;
-    }
+    if (appState.sessionManager) log.info(TAG, 'disconnecting session');
+    // Turned off on purpose: a connect still running is cancelled, it is not
+    // asleep (no request wakes it) — and saved, so a restart doesn't either.
+    // The next successful connect clears it.
+    cancelPending();
+    dropSession(appState, { asleep: false });
     clearTimeout(appState._idleTimer);
     appState._idleTimer = null;
     appState.lastActivityAt = null;
-    // Turned off on purpose: not asleep, so no request wakes it — and saved,
-    // so a restart doesn't either. The next successful connect clears it.
-    appState.asleep = false;
-    appState.wakeError = null;
     const saved = cache.load();
     if (saved) cache.save({ ...saved, user_disconnected: true });
     res.json({ success: true });
@@ -371,8 +387,11 @@ module.exports = function authModule(appState, config, { connectOnce } = {}) {
     if (!saved?.portal || !saved?.mac) {
       return res.status(400).json({ error: 'No saved portal config found' });
     }
+    // The saved connection is the one that worked: its password too (last_good).
+    const body = isLastGood(saved.portal, saved.mac, saved.last_good) ? { ...saved, ...saved.last_good } : saved;
     try {
-      const result = await connectPortal(saved, { byUser: true });
+      const result = await connectPortal(body, { byUser: true });
+      appState.touchActivity?.();
       res.json({ success: true, ...result });
     } catch (err) {
       log.error(TAG, `reconnect failed: ${err.message}`);

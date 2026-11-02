@@ -19,8 +19,9 @@ const TAG = 'channels';
 
 module.exports = function channelRoutes(appState) {
   const guard = sessionMiddleware(appState);
-  // Only ever polled (load progress, stream health): never wakes the portal (middleware/session.js).
-  const pollGuard = sessionMiddleware(appState, { wake: false });
+  // The event stream can't send X-Background: it never wakes the portal (middleware/session.js).
+  const streamGuard = sessionMiddleware(appState, { wake: false });
+  const GROUPS_WAIT_MS = 30_000;
 
   // GET /api/channels
   // Returns immediately with whatever channels are loaded so far.
@@ -56,7 +57,7 @@ module.exports = function channelRoutes(appState) {
   });
 
   // GET /api/channels/progress — channel load progress (poll while loading)
-  router.get('/progress', pollGuard, (req, res) => {
+  router.get('/progress', guard, (req, res) => {
     const { channelManager } = appState;
     if (!channelManager) return res.json({ loading: false, page: 0, totalPages: 0, channelCount: 0 });
     res.json(channelManager.getProgress());
@@ -88,8 +89,10 @@ module.exports = function channelRoutes(appState) {
   });
 
   // GET /api/channels/groups/all — MUST be registered before /:id
-  // Returns immediately with whatever groups are loaded (groups load early and fast).
-  router.get('/groups/all', guard, (req, res) => {
+  // Groups load early and fast: none yet, it starts the load or joins the one
+  // running (loadGroups is shared) and answers once it's in — never [] while
+  // one is loading — waiting at most GROUPS_WAIT_MS.
+  router.get('/groups/all', guard, async (req, res) => {
     const { channelManager } = appState;
     const { refresh } = req.query;
     const progress = channelManager.getProgress();
@@ -97,9 +100,13 @@ module.exports = function channelRoutes(appState) {
     if (refresh === '1' && !progress.loading) {
       channelManager.loadGroups()
         .catch(e => log.error(TAG, `groups refresh failed: ${e.message}`));
-    } else if (channelManager.getGroups().length === 0 && !progress.loading) {
-      channelManager.loadGroups()
-        .catch(e => log.error(TAG, `groups load failed: ${e.message}`));
+    } else if (channelManager.getGroups().length === 0) {
+      let timer;
+      await Promise.race([
+        channelManager.loadGroups().catch(e => log.error(TAG, `groups load failed: ${e.message}`)),
+        new Promise((r) => { timer = setTimeout(r, GROUPS_WAIT_MS); }),
+      ]);
+      clearTimeout(timer);
     }
 
     const groups = channelManager.getGroups();
@@ -108,7 +115,7 @@ module.exports = function channelRoutes(appState) {
 
   // GET /api/channels/events — SSE stream of loading progress
   // Pushes a JSON progress object every 400ms until loading completes, then closes.
-  router.get('/events', pollGuard, (req, res) => {
+  router.get('/events', streamGuard, (req, res) => {
     const { channelManager } = appState;
     res.set({
       'Content-Type':  'text/event-stream',
@@ -157,7 +164,7 @@ module.exports = function channelRoutes(appState) {
   });
 
   // GET /api/channels/health — stream error counts per channel
-  router.get('/health', pollGuard, (req, res) => {
+  router.get('/health', guard, (req, res) => {
     const { channelManager } = appState;
     if (!channelManager) return res.json({});
     res.json(channelManager.getHealth());

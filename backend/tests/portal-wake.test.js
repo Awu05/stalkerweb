@@ -7,20 +7,24 @@ import { createRequire } from 'module'
 
 const require = createRequire(import.meta.url)
 const authModule = require('../routes/auth.js')
+const channelRoutes = require('../routes/channels.js')
 const sessionMiddleware = require('../middleware/session.js')
-const { installPortalSession } = require('../lib/portalSession.js')
+const { installPortalSession, dropSession } = require('../lib/portalSession.js')
 const CacheManager = require('../cache/CacheManager.js')
 const SessionManager = require('../stalker/SessionManager.js')
 
 // The idle timeout drops the portal session: the server is asleep. Real use —
 // a data request through the session guard — wakes it (the last portal that
-// worked); the status route and the apps' polling never do, so the idle
-// disconnect still happens. A manual disconnect is not asleep.
+// worked); the status route and anything a timer or poll sends
+// (X-Background: 1) never do, so the idle disconnect still happens. A manual
+// disconnect is not asleep.
 
 const MAC = '00:1A:79:12:34:56'
 const A = 'http://a.portal.example/c/'
 const B = 'http://b.portal.example/c/'
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
+const deferred = () => { let open; const p = new Promise((r) => { open = r }); return { p, open } }
+const settled = async (p) => { let done = false; p.then(() => { done = true }, () => { done = true }); await tick(60); return done }
 
 const running = []
 afterEach(async () => {
@@ -34,39 +38,42 @@ function fakeSessionManager() {
 
 // One server: the real auth routes, guard and idle/wake logic, with the portal
 // handshake (connectPortalOnce) replaced by a fake that counts its calls.
-async function start(dir, clock) {
+// s.lists: the first channel/genre load after a connect (resolves at once unless set).
+async function start(dir, clock, opts = {}) {
   const appState = {}
-  const s = { appState, calls: [], fail: null, gate: null }
+  const s = { appState, calls: [], bodies: [], fail: null, gate: null, lists: null }
   const connectOnce = async (body) => {
     s.calls.push(body.portal)
+    s.bodies.push(body)
     // What the real one does before authenticating: the old session goes, the attempted portal is saved.
-    appState.sessionManager?.destroy()
-    appState.sessionManager = null
-    appState.channelManager = null
+    dropSession(appState)
     const cache = new CacheManager(dir)
     cache.save({ ...(cache.load() || {}), portal: body.portal, mac: body.mac })
     if (s.gate) await s.gate
     if (s.fail) throw new Error(s.fail)
     appState.sessionManager = fakeSessionManager()
     appState.channelManager = {}
+    appState.channelsReady = s.lists ? s.lists.p : Promise.resolve()
     return { token: 't', profile: {} }
   }
   const { authRoutes, connectPortal } = authModule(appState, { dataDir: dir }, { connectOnce })
   appState.connectPortal = connectPortal
-  s.session = installPortalSession(appState, { dataDir: dir, idleTimeoutMs: 30 * 60_000, now: () => clock.t })
+  s.session = installPortalSession(appState, { dataDir: dir, idleTimeoutMs: 30 * 60_000, now: () => clock.t, reauthWaitMs: 100, listsWaitMs: 300, ...opts })
   const app = express()
   app.use(express.json())
   app.use('/api/auth', authRoutes)
   app.get('/api/data', sessionMiddleware(appState), (_req, res) => res.json({ ok: true }))
-  app.get('/api/progress', sessionMiddleware(appState, { wake: false }), (_req, res) => res.json({ ok: true }))
+  app.get('/api/stream-events', sessionMiddleware(appState, { wake: false }), (_req, res) => res.json({ ok: true }))
   const server = await new Promise((r) => { const h = app.listen(0, '127.0.0.1', () => r(h)) })
   const base = `http://127.0.0.1:${server.address().port}/api`
   s.get = async (p, headers = {}) => { const r = await fetch(base + p, { headers }); return { status: r.status, body: await r.json() } }
   s.send = async (method, p, body) => {
     const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
-    return { status: r.status, body: await r.json() }
+    const json = await r.json()
+    return { status: r.status, body: json, text: JSON.stringify(json) }
   }
   s.status = async () => (await s.get('/auth/status')).body
+  s.saved = () => new CacheManager(dir).load()
   s.stop = async () => { clearTimeout(appState._idleTimer); server.closeAllConnections(); await new Promise((r) => server.close(r)) }
   running.push(s)
   return s
@@ -90,24 +97,48 @@ describe('portal wake', () => {
     expect(st.wakeError).toBeUndefined()
   })
 
-  it('a data request wakes it and succeeds', async () => {
+  it('asleep only with something to wake to: the working connection deleted, the idle drop is plain disconnected', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    expect((await s.send('PUT', '/auth/config', { portal: '', mac: '' })).status).toBe(200)   // deleting A, the one that works
+    expect(s.saved().last_good).toBeUndefined()
+    s.session.idleDisconnect()
+    expect(await s.status()).toMatchObject({ connected: false, asleep: false })
+    expect((await s.get('/data')).status).toBe(503)
+    expect(s.calls).toEqual([A])
+  })
+
+  it('a data request wakes it and succeeds — once the channel and genre lists are in', async () => {
     const clock = { t: 1_000_000 }
     const s = await start(dataDir(), clock)
     await s.session.autoConnect()
     s.session.idleDisconnect()
-    const r = await s.get('/data')
-    expect(r).toEqual({ status: 200, body: { ok: true } })
+    s.lists = deferred()
+    const r = s.get('/data')
+    expect(await settled(r)).toBe(false)   // connected, the lists still loading
+    s.lists.open()
+    expect(await r).toEqual({ status: 200, body: { ok: true } })
     expect(s.calls).toEqual([A, A])
     expect(await s.status()).toMatchObject({ connected: true, asleep: false })
   })
 
-  it("the status route and the apps' polling never wake it", async () => {
+  it('a list load that never ends holds the wake only so long', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    s.session.idleDisconnect()
+    s.lists = deferred()   // never opened
+    expect((await s.get('/data')).status).toBe(200)
+  })
+
+  it('the status route and anything a timer or poll sends never wake it', async () => {
     const clock = { t: 1_000_000 }
     const s = await start(dataDir(), clock)
     await s.session.autoConnect()
     s.session.idleDisconnect()
     await s.status()
-    expect((await s.get('/progress')).status).toBe(503)
+    expect((await s.get('/stream-events')).status).toBe(503)
     expect((await s.get('/data', { 'X-Background': '1' })).status).toBe(503)
     expect(s.calls).toEqual([A])
     expect(await s.status()).toMatchObject({ connected: false, asleep: true })
@@ -133,35 +164,65 @@ describe('portal wake', () => {
     expect(again.calls).toEqual([])
   })
 
+  it('a disconnect during a wake cancels it: no session, the flag kept', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    s.session.idleDisconnect()
+    const gate = deferred()
+    s.gate = gate.p
+    const data = s.get('/data')
+    await tick(50)
+    expect((await s.send('DELETE', '/auth/disconnect')).status).toBe(200)
+    gate.open()
+    expect((await data).status).toBe(503)
+    expect(s.appState.sessionManager).toBeNull()
+    expect(s.saved()).toMatchObject({ user_disconnected: true, last_good: { portal: A } })
+    expect(await s.status()).toMatchObject({ connected: false, asleep: false })
+    expect(s.appState.connecting).toBeFalsy()
+  })
+
   it('a wake during a running connect joins it (one handshake)', async () => {
     const clock = { t: 1_000_000 }
     const s = await start(dataDir(), clock)
-    let open
-    s.gate = new Promise((r) => { open = r })
+    const gate = deferred()
+    s.gate = gate.p
     const startup = s.session.autoConnect()   // Solo's cold start: the auto-connect still running
     const data = s.get('/data')
     await tick(50)
-    open()
+    gate.open()
     await startup
     expect(await data).toEqual({ status: 200, body: { ok: true } })
     expect(s.calls).toEqual([A])
   })
 
-  it('never wakes while a SessionManager exists (re-authenticating)', async () => {
+  it('a re-authenticating session is waited for, not replaced', async () => {
     const clock = { t: 1_000_000 }
     const s = await start(dataDir(), clock)
     await s.session.autoConnect()
     const sm = s.appState.sessionManager
     sm.authenticated = false   // the watchdog saw the session expire; the auth checker re-authenticates
-    s.appState.asleep = true   // even if it were marked asleep
-    expect((await s.get('/data')).status).toBe(503)
-    await expect(s.appState.ensureSession()).rejects.toThrow()
+    setTimeout(() => { sm.authenticated = true }, 40)
+    expect((await s.get('/data')).status).toBe(200)
     expect(s.calls).toEqual([A])
     expect(sm.destroyed).toBe(0)
     expect(s.appState.sessionManager).toBe(sm)
   })
 
-  it('wakes to the last portal that worked, not a failed switch', async () => {
+  it('a re-auth that never comes back: one full reconnect, the old session torn down', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    const sm = s.appState.sessionManager
+    sm.authenticated = false
+    const [one, two] = await Promise.all([s.get('/data'), s.get('/data')])
+    expect([one.status, two.status]).toEqual([200, 200])
+    expect(s.calls).toEqual([A, A])
+    expect(sm.destroyed).toBe(1)
+    expect(s.appState.sessionManager).not.toBe(sm)
+  })
+
+  it('wakes to the last portal that worked, not a failed switch; deleting the failed one keeps it', async () => {
     const clock = { t: 1_000_000 }
     const dir = dataDir()
     const s = await start(dir, clock)
@@ -169,7 +230,9 @@ describe('portal wake', () => {
     s.fail = 'portal B refused'
     expect((await s.send('POST', '/auth/connect', { portal: B, mac: MAC })).status).toBe(401)
     expect(await s.status()).toMatchObject({ connected: false, asleep: false })   // a failed connect the user started
-    expect(new CacheManager(dir).load().portal).toBe(B)
+    expect(s.saved().portal).toBe(B)
+    expect((await s.send('PUT', '/auth/config', { portal: '', mac: '' })).status).toBe(200)   // B deleted
+    expect(s.saved().last_good).toMatchObject({ portal: A, mac: MAC })
 
     // Restarted, the network not up yet: the startup connect fails — asleep, backing off.
     await s.stop()
@@ -181,6 +244,23 @@ describe('portal wake', () => {
     again.fail = null
     expect((await again.get('/data')).status).toBe(200)
     expect(again.calls).toEqual([A, A])
+  })
+
+  it('after a failed Reconnect, outside players still reconnect to the portal that worked', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    s.fail = 'portal B refused'
+    expect((await s.send('POST', '/auth/connect', { portal: B, mac: MAC })).status).toBe(401)
+    expect((await s.status()).asleep).toBe(false)
+    s.fail = 'still down'
+    await expect(s.appState.ensureSession()).rejects.toThrow('still down')
+    await expect(s.appState.ensureSession()).rejects.toThrow('still down')   // backing off: no new handshake
+    expect(s.calls).toEqual([A, B, A])
+    clock.t += 61_000
+    s.fail = null
+    await expect(s.appState.ensureSession()).resolves.toBe(true)
+    expect(s.calls).toEqual([A, B, A, A])
   })
 
   it('a failed wake backs off for 60 s, and says why', async () => {
@@ -204,6 +284,69 @@ describe('portal wake', () => {
     expect((await s.get('/data')).status).toBe(200)
     expect(s.calls).toEqual([A, A, A])
     expect((await s.status()).wakeError).toBeUndefined()
+  })
+
+  it('Reconnect from asleep restarts the idle timer', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    await s.session.autoConnect()
+    s.session.idleDisconnect()
+    expect(s.appState._idleTimer).toBeNull()
+    expect((await s.send('POST', '/auth/reconnect')).status).toBe(200)
+    expect(s.appState._idleTimer).not.toBeNull()
+  })
+
+  it('a password portal: the wake sends its password; no answer carries it', async () => {
+    const clock = { t: 1_000_000 }
+    const s = await start(dataDir(), clock)
+    const r = await s.send('POST', '/auth/connect', { portal: A, mac: MAC, login: 'viewer', password: 'pw-for-tests' })
+    expect(r.status).toBe(200)
+    expect(r.text).not.toContain('pw-for-tests')
+    expect(s.saved().last_good).toMatchObject({ login: 'viewer', password: 'pw-for-tests' })
+    s.session.idleDisconnect()
+    expect((await s.get('/data')).status).toBe(200)
+    expect(s.bodies.at(-1)).toMatchObject({ portal: A, login: 'viewer', password: 'pw-for-tests' })
+    expect(JSON.stringify(await s.status())).not.toContain('pw-for-tests')
+    expect(JSON.stringify((await s.get('/auth/config')).body)).not.toContain('pw-for-tests')
+  })
+})
+
+describe('dropSession', () => {
+  it('tears everything down once; asleep only when told', () => {
+    const sm = fakeSessionManager()
+    const appState = { sessionManager: sm, client: {}, channelManager: {}, guideManager: {}, vodManager: {}, identity: {}, asleep: true, wakeError: 'x' }
+    dropSession(appState)
+    expect(sm.destroyed).toBe(1)
+    expect(appState).toMatchObject({ sessionManager: null, client: null, channelManager: null, guideManager: null, vodManager: null, identity: null, asleep: true, wakeError: 'x' })
+    dropSession(appState, { asleep: false })
+    expect(appState).toMatchObject({ asleep: false, wakeError: null })
+  })
+})
+
+describe('GET /api/channels/groups/all while the genres load', () => {
+  it('joins the load instead of answering []', async () => {
+    let groups = []
+    const load = deferred()
+    const appState = {
+      sessionManager: fakeSessionManager(),
+      channelManager: {
+        getProgress: () => ({ loading: true }),
+        getGroups: () => groups,
+        loadGroups: () => load.p.then(() => { groups = [{ id: '1', name: 'News' }] }),
+        getChannels: () => [],
+      },
+    }
+    const app = express()
+    app.use('/api/channels', channelRoutes(appState))
+    const server = await new Promise((r) => { const h = app.listen(0, '127.0.0.1', () => r(h)) })
+    try {
+      const r = fetch(`http://127.0.0.1:${server.address().port}/api/channels/groups/all`).then((x) => x.json())
+      expect(await settled(r)).toBe(false)
+      load.open()
+      expect(await r).toEqual({ total: 1, groups: [{ id: '1', name: 'News' }] })
+    } finally {
+      server.closeAllConnections(); server.close()
+    }
   })
 })
 

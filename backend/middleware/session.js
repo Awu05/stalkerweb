@@ -2,12 +2,13 @@
 // Attaches the active Stalker session to every request as req.session.
 // Returns 503 if the portal is not connected.
 //
-// Asleep (the idle timeout dropped the session) or a connect running: real
-// use wakes it — the request waits for the reconnect to the last portal that
-// worked (appState.ensureSession, lib/portalSession.js) and goes on. The apps'
-// polling never wakes it, or the session would never go idle: routes only ever
-// polled pass { wake: false }, and the apps mark their timed refreshes with
-// the X-Background: 1 header.
+// Real use brings the session back: asleep (the idle timeout dropped it), a
+// connect running, or a session re-authenticating — the request waits for
+// appState.ensureSession (lib/portalSession.js) and goes on. What a timer or
+// a poll sends never does, or the session would never go idle: the apps mark
+// every such request with the X-Background: 1 header (one rule, in their
+// fetch helpers), and the event streams, which can't send headers, pass
+// { wake: false }.
 
 'use strict';
 
@@ -17,8 +18,7 @@ module.exports = function sessionMiddleware(appState, { wake = true } = {}) {
   return async function (req, res, next) {
     if (!up(appState)) {
       const background = !wake || req.get('X-Background') === '1';
-      // A SessionManager still there is re-authenticating — never replaced from here.
-      if (!background && !appState.sessionManager && (appState.asleep || appState.connecting) && appState.ensureSession) {
+      if (!background && (appState.sessionManager || appState.asleep || appState.connecting) && appState.ensureSession) {
         try {
           await appState.ensureSession();
         } catch (e) {
