@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, recordingOn, diskLine } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, recordingOn, diskLine, sourceLabel } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -38,6 +38,19 @@ describe('recordingLabel', () => {
   })
   it('one stopped early shows how long it really ran', () => {
     expect(recordingLabel(rec({ status: 'done', startAt: NOW - 120 * MIN, endAt: NOW + 60 * MIN, endedAt: NOW - 100 * MIN, bytes: 200 * 1024 ** 2 }), o)).toBe('Recorded 31 Oct · 20 min · 200 MB')
+  })
+  it('a scheduled one says how long it was booked for', () => {
+    const s = (o) => rec({ source: 'scheduled', startAt: NOW - 12 * MIN, endAt: NOW - 12 * MIN + 67 * MIN, ...o })
+    expect(recordingLabel(s({ status: 'scheduled', startAt: NOW + 120 * MIN, endAt: NOW + 187 * MIN }), o)).toBe('Today 20:00–21:07 · 1 h 07')
+    expect(recordingLabel(s({ status: 'recording', bytes: 340 * 1024 ** 2 }), o)).toBe('Recording · 12 min of 1 h 07 · 340 MB')
+    expect(recordingLabel(s({ status: 'done', endedAt: NOW - 12 * MIN + 65 * MIN, bytes: 2.1 * 1024 ** 3 }), o)).toBe('Recorded 31 Oct · 1 h 05 of 1 h 07 · 2.1 GB')
+    // Record now keeps its lines as they were, a set length or not.
+    expect(recordingLabel(rec({ source: 'manual', status: 'recording', startAt: NOW - 12 * MIN, endAt: NOW + 18 * MIN, bytes: 340 * 1024 ** 2 }), o)).toBe('Recording · 12 min · 340 MB')
+  })
+  it('names how it was started', () => {
+    expect(sourceLabel({ source: 'manual' })).toBe('Manual')
+    expect(sourceLabel({ source: 'scheduled' })).toBe('Scheduled')
+    expect(sourceLabel({})).toBe('')
   })
   it('failed and missed say why', () => {
     expect(recordingLabel(rec({ status: 'failed', startAt: NOW, endAt: NOW, error: 'Less than 1 GB free on the disk — the recording didn\'t start.' }), o)).toBe('Failed — Less than 1 GB free on the disk — the recording didn\'t start.')

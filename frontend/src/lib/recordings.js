@@ -78,16 +78,24 @@ function length(ms) {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
 }
 
+/** How a recording was started (GET /api/recordings' `source`), for its label: Manual or Scheduled. */
+export function sourceLabel(r) {
+  return r.source === 'manual' ? 'Manual' : r.source === 'scheduled' ? 'Scheduled' : ''
+}
+
 /** The line under a recording's title. `timeZone`: for tests; else the browser's. */
 export function recordingLabel(r, { now = Date.now(), timeZone } = {}) {
   const o = { now, timeZone }
+  // A booked one says how long it was booked for (with its padding).
+  const booked = r.source === 'scheduled' && r.endAt ? length(r.endAt - r.startAt) : null
+  const of = booked ? ` of ${booked}` : ''
   switch (r.status) {
     case 'scheduled':
-      return `${dayLabel(r.startAt, o)} ${time(r.startAt, timeZone)}${r.endAt ? `–${time(r.endAt, timeZone)}` : ''}`
+      return `${dayLabel(r.startAt, o)} ${time(r.startAt, timeZone)}${r.endAt ? `–${time(r.endAt, timeZone)}` : ''}${booked ? ` · ${booked}` : ''}`
     case 'recording':
-      return `Recording · ${length(now - r.startAt)} · ${size(r.bytes || 0)}`
+      return `Recording · ${length(now - r.startAt)}${of} · ${size(r.bytes || 0)}`
     case 'done':
-      return `Recorded ${shortDate(r.startAt, timeZone)} · ${length((r.endedAt ?? r.endAt ?? now) - r.startAt)} · ${size(r.bytes || 0)}${r.stoppedBy ? ` · Stopped by ${r.stoppedBy}` : ''}`
+      return `Recorded ${shortDate(r.startAt, timeZone)} · ${length((r.endedAt ?? r.endAt ?? now) - r.startAt)}${of} · ${size(r.bytes || 0)}${r.stoppedBy ? ` · Stopped by ${r.stoppedBy}` : ''}`
     case 'failed':
       return `Failed — ${r.error || 'the recording didn\'t work'}`
     case 'missed':

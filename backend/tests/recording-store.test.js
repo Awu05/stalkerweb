@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import RecordingStore from '../recordings/RecordingStore.js'
+import { sourceOf } from '../recordings/RecordingStore.js'
 
 const MIN = 60_000
 const T0 = Date.UTC(2026, 9, 31, 20, 0)   // a programme from 20:00 to 21:00
@@ -26,6 +27,14 @@ describe('RecordingStore', () => {
     expect(r.startAt).toBe(T0 - 2 * MIN)
     expect(r.endAt).toBe(T0 + 65 * MIN)
     expect(typeof r.id).toBe('string')
+    expect(r.source).toBe('scheduled')
+    expect(book({ source: 'manual' }).source).toBe('manual')
+  })
+
+  it('says how one was started: saved with it, or — older ones — guessed from when it was made', () => {
+    expect(sourceOf({ source: 'manual', startAt: T0, createdAt: T0 - 60 * MIN })).toBe('manual')
+    expect(sourceOf({ startAt: T0, createdAt: T0 + 200 })).toBe('manual')                 // Record now: made as it started
+    expect(sourceOf({ startAt: T0 - 2 * MIN, createdAt: T0 - 60 * MIN })).toBe('scheduled') // booked ahead
   })
 
   it('lists newest first, per viewer or all', () => {

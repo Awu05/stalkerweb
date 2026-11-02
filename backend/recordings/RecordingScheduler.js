@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { startRecording } = require('./Recorder');
 const { readPieces, indexText } = require('./pieceIndex');
+const { sourceOf } = require('./RecordingStore');
 const log = require('../logger');
 const TAG = 'recordings';
 
@@ -166,7 +167,7 @@ class RecordingScheduler {
       this._store.update(r.id, { status: more ? 'cancelled' : 'failed', bytes: 0, error: 'The server restarted during this recording.' });
     }
     if (more) {
-      const two = this._store.schedule({ ...r, title: size > 0 ? `${r.title} (part 2)` : r.title, startAt: now, endAt: r.endAt,
+      const two = this._store.schedule({ ...r, source: sourceOf(r), title: size > 0 ? `${r.title} (part 2)` : r.title, startAt: now, endAt: r.endAt,
         padBeforeMin: 0, padAfterMin: 0, partOf: r.id, status: 'scheduled' });
       try { this._begin(two); } catch { /* marked failed, with why */ }
     }
@@ -225,7 +226,7 @@ class RecordingScheduler {
 
   /** Records `channelId` from now — until `endAt`, or until stopped (null). Throws why when it can't start. */
   startNow({ viewerId, channelId, channelName, title, endAt = null }) {
-    const r = this._store.schedule({ viewerId, channelId, channelName, title, startAt: this._now(), endAt });
+    const r = this._store.schedule({ viewerId, channelId, channelName, title, startAt: this._now(), endAt, source: 'manual' });
     return this._begin(r);
   }
 
