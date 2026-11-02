@@ -2,6 +2,7 @@ package com.stalkerweb.android.ui.recordings
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,6 +54,7 @@ import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.repo.groupRecordings
 import com.stalkerweb.android.data.repo.recordingLabel
 import com.stalkerweb.android.data.repo.recordingsHint
+import com.stalkerweb.android.data.repo.sourceLabel
 import com.stalkerweb.android.data.repo.showsEveryoneSwitch
 import com.stalkerweb.android.ui.components.EmptyState
 import com.stalkerweb.android.ui.components.TipIconButton
@@ -146,6 +148,10 @@ private fun RecordingRow(r: Recording, everyone: Boolean, published: Set<String>
                     // The title gives way; who booked it is its own label, never ellipsized away.
                     Text(r.title.ifBlank { r.channelName }, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false))
+                    sourceLabel(r).takeIf { it.isNotEmpty() }?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = SwColors.Muted, maxLines = 1, softWrap = false,
+                            modifier = Modifier.border(1.dp, SwColors.Surface3, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp))
+                    }
                     if (everyone && !r.viewerName.isNullOrBlank()) {
                         Text(r.viewerName, style = MaterialTheme.typography.labelSmall, color = SwColors.Muted, maxLines = 1, softWrap = false,
                             modifier = Modifier.background(SwColors.Surface3, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp))

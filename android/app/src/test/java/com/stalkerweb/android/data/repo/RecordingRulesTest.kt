@@ -54,6 +54,20 @@ class RecordingRulesTest {
             recordingLabel(rec(status = "done", startAt = now - 1440 * min, endAt = now - 1440 * min + 65 * min, bytes = (2.1 * gb).toLong()), now, utc))
     }
 
+    @Test fun `a scheduled one says how long it was booked for`() {
+        fun s(status: String, startAt: Long = now - 12 * min, endAt: Long = now - 12 * min + 67 * min) = rec(status = status, startAt = startAt, endAt = endAt).copy(source = "scheduled")
+        assertEquals("Today 20:00–21:07 · 1 h 07", recordingLabel(s("scheduled", now + 120 * min, now + 187 * min), now, utc))
+        assertEquals("Recording · 12 min of 1 h 07 · 340 MB", recordingLabel(s("recording").copy(bytes = 340 * mb), now, utc))
+        assertEquals("Recorded 31 Oct · 1 h 05 of 1 h 07 · 2.1 GB",
+            recordingLabel(s("done").copy(endedAt = now - 12 * min + 65 * min, bytes = (2.1 * gb).toLong()), now, utc))
+        // Record now keeps its lines as they were, a set length or not.
+        assertEquals("Recording · 12 min · 340 MB",
+            recordingLabel(rec(status = "recording", startAt = now - 12 * min, endAt = now + 18 * min, bytes = 340 * mb).copy(source = "manual"), now, utc))
+        assertEquals("Manual", sourceLabel(rec(status = "done", startAt = now, endAt = now).copy(source = "manual")))
+        assertEquals("Scheduled", sourceLabel(s("done")))
+        assertEquals("", sourceLabel(rec(status = "done", startAt = now, endAt = now)))
+    }
+
     @Test fun `one stopped early shows how long it really ran`() {
         assertEquals("Recorded 31 Oct · 20 min · 200 MB",
             recordingLabel(rec(status = "done", startAt = now - 120 * min, endAt = now + 60 * min, endedAt = now - 100 * min, bytes = 200 * mb), now, utc))

@@ -371,6 +371,17 @@ describe('/api/recordings — who owns one, and who may see it', () => {
     expect(h.store.get(a.id)).toBeNull()
   })
 
+  it('every row says how it was started — older ones too', async () => {
+    const booked = h.finished({ viewerId: h.ids.andy })   // made well before its start: booked
+    const now = await h.send('POST', '/api/recordings/now', { channelId: '7', channelName: 'News 24', title: 'Now', endAt: null, force: true }, h.ids.andy)
+    const old = h.store.schedule({ viewerId: h.ids.andy, channelId: '7', channelName: 'News 24', title: 'Old', startAt: h.clock.t, endAt: null })
+    h.store.update(old.id, { source: undefined })
+    const list = await h.send('GET', '/api/recordings', null, h.ids.andy)
+    expect(row(list, booked.id).source).toBe('scheduled')
+    expect(row(list, now.body.id).source).toBe('manual')
+    expect(row(list, old.id).source).toBe('manual')
+  })
+
   it("someone else's failed one stays undeletable for me; once its viewer is gone, it isn't", async () => {
     const f = h.store.schedule({ viewerId: h.ids.andy, channelId: '7', channelName: 'News 24', title: 'Broken', startAt: T0 - 60 * MIN, endAt: T0 - 30 * MIN })
     h.store.update(f.id, { status: 'failed', error: 'no signal' })

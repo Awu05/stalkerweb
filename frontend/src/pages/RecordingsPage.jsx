@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CircleDot, Clock, CheckCircle2, AlertCircle, Play, Square, X, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, stopRecording, deleteRecording } from '../stalkerApi'
-import { groupRecordings, recordingLabel, keepRecordingsResult } from '@/lib/recordings'
+import { groupRecordings, recordingLabel, keepRecordingsResult, sourceLabel } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 import { Switch } from '@/components/ui/switch'
 
@@ -26,7 +26,10 @@ function Row({ r, onPlay, onStop, onDelete, everyone }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <p className="text-sm font-medium text-[var(--color-text)] truncate">{r.title || r.channelName}</p>
-          {/* Who booked it: its own label, never cut off by a long title. */}
+          {/* How it was started, and who booked it: their own labels, never cut off by a long title. */}
+          {sourceLabel(r) && (
+            <span className="shrink-0 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-muted)]">{sourceLabel(r)}</span>
+          )}
           {everyone && r.viewerName && (
             <span className="shrink-0 rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-xs text-[var(--color-muted)]">{r.viewerName}</span>
           )}

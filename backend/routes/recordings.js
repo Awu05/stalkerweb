@@ -1,6 +1,7 @@
 // routes/recordings.js — live TV recordings (recordings/)
 // GET    /api/recordings           — this viewer's recordings, newest first (?all=1: everyone's it may see,
 //                                     with viewerName); each row says `mine` and `canDelete` (recordings/visibility.js)
+//                                     and `source` ('manual' | 'scheduled', recordings/RecordingStore.js)
 // POST   /api/recordings           — book a guide programme { channelId, channelName, title, startAt, endAt, force? }
 // POST   /api/recordings/now       — record a channel now { channelId, channelName, title, endAt | null, force? }
 // POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started — anyone's
@@ -21,6 +22,7 @@ const fs = require('fs');
 const { inUse } = require('../lib/streamLimit');
 const log = require('../logger');
 const { recordingRules } = require('../recordings/visibility');
+const { sourceOf } = require('../recordings/RecordingStore');
 const TAG = 'recordings';
 
 const MIN = 60_000;
@@ -72,6 +74,7 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
     res.json({
       recordings: list.map((r) => ({
         ...r,
+        source: sourceOf(r),
         mine: rules.mine(r),
         canDelete: rules.canDelete(r),
         ...(all ? { viewerName: rules.ownerName(r) } : {}),

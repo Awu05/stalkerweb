@@ -77,11 +77,24 @@ private fun length(ms: Long): String {
     return if (m < 60) "$m min" else "${m / 60} h ${"%02d".format(Locale.ROOT, m % 60)}"
 }
 
-/** The line under a recording's title. [zone]: for tests; else the device's. */
-fun recordingLabel(r: Recording, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String = when (r.status) {
-    "scheduled" -> "${dayLabel(r.startAt, now, zone)} ${time(r.startAt, zone)}${r.endAt?.let { "–${time(it, zone)}" } ?: ""}"
-    "recording" -> "Recording · ${length(now - r.startAt)} · ${size(r.bytes)}"
-    "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)} · ${size(r.bytes)}" +
+/** How a recording was started, for its label (the web's sourceLabel): Manual or Scheduled. */
+fun sourceLabel(r: Recording): String = when (r.source) {
+    "manual" -> "Manual"
+    "scheduled" -> "Scheduled"
+    else -> ""
+}
+
+/** The line under a recording's title. [zone]: for tests; else the device's. A booked one says how long it was booked for. */
+fun recordingLabel(r: Recording, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String {
+    val booked = if (r.source == "scheduled") r.endAt?.let { length(it - r.startAt) } else null
+    val of = booked?.let { " of $it" } ?: ""
+    return recordingLine(r, now, zone, booked, of)
+}
+
+private fun recordingLine(r: Recording, now: Long, zone: ZoneId, booked: String?, of: String): String = when (r.status) {
+    "scheduled" -> "${dayLabel(r.startAt, now, zone)} ${time(r.startAt, zone)}${r.endAt?.let { "–${time(it, zone)}" } ?: ""}${booked?.let { " · $it" } ?: ""}"
+    "recording" -> "Recording · ${length(now - r.startAt)}$of · ${size(r.bytes)}"
+    "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)}$of · ${size(r.bytes)}" +
         (r.stoppedBy?.takeIf { it.isNotBlank() }?.let { " · Stopped by $it" } ?: "")
     "failed" -> "Failed — ${r.error?.takeIf { it.isNotBlank() } ?: "the recording didn't work"}"
     "missed" -> "Missed — the server wasn't running"

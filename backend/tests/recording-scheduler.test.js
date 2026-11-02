@@ -74,7 +74,7 @@ describe('RecordingScheduler', () => {
     expect(one.title).toBe('Evening News (part 1)')
     expect(fs.existsSync(one.filePath)).toBe(true)
     const two = store.list().find((x) => x.partOf === r.id)
-    expect(two).toMatchObject({ status: 'recording', title: 'Evening News (part 2)', endAt: T0 + 65 * MIN })
+    expect(two).toMatchObject({ status: 'recording', title: 'Evening News (part 2)', endAt: T0 + 65 * MIN, source: 'scheduled' })
     expect(started.map((s) => s.o.endAt)).toEqual([T0 + 65 * MIN])
     expect(store.get(late.id).status).toBe('missed')
   })
@@ -103,6 +103,7 @@ describe('RecordingScheduler', () => {
 
   it('records now, until a given end or until stopped', async () => {
     const r = sched.startNow({ viewerId: 'view_a', channelId: '9', channelName: 'Sports 1', title: 'Match', endAt: null })
+    expect(store.get(r.id).source).toBe('manual')
     expect(r.status).toBe('recording')
     expect(started[0].o).toMatchObject({ endAt: null, url: 'http://127.0.0.1:8983/proxy/stream/9' })
     expect(started[0].o.filePath).toMatch(/Sports 1 – Match – 2026-10-31 19.30.ts$/)

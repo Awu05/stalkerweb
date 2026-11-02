@@ -32,6 +32,8 @@ data class Recording(
     val canDelete: Boolean = false,
     /** Who stopped or cancelled it, when that wasn't its owner. */
     val stoppedBy: String? = null,
+    /** How it was started: "manual" (Record now) or "scheduled" (booked from the guide). */
+    val source: String? = null,
 )
 
 @JsonClass(generateAdapter = false)

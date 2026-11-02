@@ -7,8 +7,9 @@
 // move later — what was booked stays, recordings/RecordingScheduler.js).
 //
 // A recording: { id, viewerId, channelId, channelName, title, startAt,
-// endAt, status, filePath?, bytes, error?, partOf?, createdAt }, status one
-// of scheduled · recording · done · failed · missed · cancelled.
+// endAt, status, source, filePath?, bytes, error?, partOf?, createdAt }, status one
+// of scheduled · recording · done · failed · missed · cancelled; source how it
+// was started: 'manual' (Record now) or 'scheduled' (booked from the guide).
 
 const fs = require('fs');
 const path = require('path');
@@ -18,6 +19,16 @@ const log = require('../logger');
 const TAG = 'recordings';
 
 const MIN = 60_000;
+const MADE_AS_IT_STARTED_MS = 5_000;
+
+/**
+ * How recording `r` was started: 'manual' or 'scheduled'. One saved before
+ * `source` was: Record now makes it as it starts; a booking is made ahead.
+ */
+function sourceOf(r) {
+  if (r.source === 'manual' || r.source === 'scheduled') return r.source;
+  return Math.abs(Number(r.startAt) - Number(r.createdAt)) < MADE_AS_IT_STARTED_MS ? 'manual' : 'scheduled';
+}
 // Still to be made: what clashes, and what the scheduler starts.
 const PENDING = new Set(['scheduled', 'recording']);
 
@@ -51,7 +62,7 @@ class RecordingStore {
   }
 
   /** A recording booked for a programme (its own start and end — the padding is added here). */
-  schedule({ viewerId, channelId, channelName = '', title = '', startAt, endAt, padBeforeMin = 0, padAfterMin = 0, status = 'scheduled', partOf }) {
+  schedule({ viewerId, channelId, channelName = '', title = '', startAt, endAt, padBeforeMin = 0, padAfterMin = 0, status = 'scheduled', source = 'scheduled', partOf }) {
     const r = {
       id: crypto.randomBytes(8).toString('hex'),
       viewerId: viewerId ?? null,
@@ -61,6 +72,7 @@ class RecordingStore {
       startAt: Number(startAt) - padBeforeMin * MIN,
       endAt: endAt == null ? null : Number(endAt) + padAfterMin * MIN,   // null: until stopped
       status,
+      source: source === 'manual' ? 'manual' : 'scheduled',
       bytes: 0,
       createdAt: this._now(),
       ...(partOf ? { partOf } : {}),
@@ -109,3 +121,4 @@ class RecordingStore {
 }
 
 module.exports = RecordingStore;
+module.exports.sourceOf = sourceOf;
