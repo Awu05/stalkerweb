@@ -71,7 +71,8 @@ export async function disconnect() {
   invalidateFavoritesCache()
   return result
 }
-export const getStatus = () => _get('/auth/status')
+// wake: the app was just opened or signed into — the server reconnects to the last portal if the idle timeout dropped it (lib/wake.js).
+export const getStatus = ({ wake = false } = {}) => _get(`/auth/status${wake ? '?wake=1' : ''}`)
 // Languages offered for the per-profile hide filter — union of channel genres
 // and VOD categories, so portal spelling variants are each togglable.
 export const getLanguages = () => _get('/channels/languages')

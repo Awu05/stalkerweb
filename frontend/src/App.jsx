@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { AppContext } from '@/lib/appContext'
 import { getStatus, getSettings, getAccessStatus, accessLogout, ACCESS_REQUIRED, VIEWER_GONE, getViewers, createViewer, getMyViewer } from './stalkerApi'
 import LoginPage from './pages/LoginPage'
+import { wakesOnReturn } from '@/lib/wake'
 import { loadWatch } from '@/lib/vodProgress'
 import { fetchProfiles, getCachedProfiles } from '@/lib/profiles'
 import { connectionLabel } from '@/lib/connection'
@@ -347,7 +348,7 @@ function AppInner() {
       try {
         // Profiles must be fetched (and any leftover localStorage profiles
         // migrated in) before anything reads getActiveProfileId().
-        const [status, settings, list] = await Promise.all([getStatus(), getSettings(), getViewers(), fetchProfiles().catch(() => {})])
+        const [status, settings, list] = await Promise.all([getStatus({ wake: true }), getSettings(), getViewers(), fetchProfiles().catch(() => {})])
         const pick = chooseViewer(list.viewers, getViewerId())
         setViewerId(pick.id)
         setViewers(list.viewers)
@@ -367,9 +368,9 @@ function AppInner() {
       }
       return true
     }
-    const poll = async () => {
+    const poll = async (wake = false) => {
       try {
-        const s = await getStatus()
+        const s = await getStatus({ wake })
         setConnected(s.connected)
         setConnection(prev => {
           const next = connectionLabel(s, getCachedProfiles())
@@ -385,8 +386,16 @@ function AppInner() {
       }
     }
     let cancelled = false
-    load().then(ok => { if (ok && !cancelled) id = setInterval(poll, 30_000) })
-    return () => { cancelled = true; clearInterval(id) }
+    load().then(ok => { if (ok && !cancelled) id = setInterval(() => poll(), 30_000) })
+    // Back on the tab after a while away: the server may have gone idle — ask it to reconnect.
+    let hiddenAt = null
+    const onVisible = () => {
+      if (document.hidden) { hiddenAt = Date.now(); return }
+      if (wakesOnReturn(hiddenAt)) poll(true)
+      hiddenAt = null
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { cancelled = true; clearInterval(id); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
 
   // Memoize so consumers don't re-render just because AppInner re-rendered
