@@ -227,4 +227,9 @@ class SoloRulesTest {
         assertEquals(RecordingPlan(hold = true, alarmAt = now + 45 * min),
             recordingPlan(idle.copy(recordingsActive = true, nextRecordingAt = now + 60 * min), now))
     }
+
+    @Test fun `Solo has one viewer, so no Everyone's recordings switch`() {
+        assertFalse(showsEveryoneSwitch(isSolo = true))
+        assertTrue(showsEveryoneSwitch(isSolo = false))
+    }
 }

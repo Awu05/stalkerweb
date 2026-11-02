@@ -25,8 +25,9 @@ class RecordingsRepository(private val apis: ApiProvider, private val prefs: App
     suspend fun list(everyone: Boolean = false): List<Recording> =
         apis.get().getRecordings(if (everyone) "1" else null).recordings.also { seen(it) }
 
-    // Told every list the app reads: Solo saves finished recordings to the
-    // Downloads folder from it (DownloadPublisher).
+    // Told this device's own recordings from every list the app reads (never
+    // another viewer's, from Everyone's recordings): Solo saves finished ones
+    // to the Downloads folder from it (DownloadPublisher).
     @Volatile var onList: ((List<Recording>) -> Unit)? = null
 
     // The recordings already saved to the Downloads folder, for the screen to say so.
@@ -76,7 +77,7 @@ class RecordingsRepository(private val apis: ApiProvider, private val prefs: App
     fun keepCopy(id: String, uri: String) = prefs.setRecordingCopy(id, uri)
 
     private fun seen(list: List<Recording>) {
-        onList?.invoke(list)
+        onList?.invoke(ownRecordings(list))
         if (recordingNeedsServer(list, System.currentTimeMillis())) watch()
     }
 
@@ -97,7 +98,7 @@ class RecordingsRepository(private val apis: ApiProvider, private val prefs: App
         var misses = 0
         while (true) {
             val list = runCatching { apis.get().getRecordings().recordings }.getOrNull()
-            list?.let { onList?.invoke(it) }
+            list?.let { onList?.invoke(ownRecordings(it)) }
             if (list != null && !recordingNeedsServer(list, System.currentTimeMillis())) return
             // The server not answering for about two minutes: let go, it isn't recording.
             misses = if (list == null) misses + 1 else 0

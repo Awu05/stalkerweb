@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.api.toApiError
+import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.repo.RecordingsRepository
+import com.stalkerweb.android.data.repo.keepRecordingsResult
+import com.stalkerweb.android.data.repo.showsEveryoneSwitch
 import com.stalkerweb.android.data.prefs.AppPrefs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,7 +25,8 @@ private const val REFRESH_MS = 5_000L
 
 /** This viewer's recordings, or everyone's (the web's RecordingsPage): booked, recording now, done. */
 class RecordingsViewModel(private val recordings: RecordingsRepository, private val prefs: AppPrefs) : ViewModel() {
-    private val _state = MutableStateFlow(RecordingsState(everyone = prefs.recordingsEveryone))
+    // Solo has one viewer: no switch, only its own.
+    private val _state = MutableStateFlow(RecordingsState(everyone = showsEveryoneSwitch(BuildConfig.IS_SOLO) && prefs.recordingsEveryone))
     val state: StateFlow<RecordingsState> = _state.asStateFlow()
     val published: StateFlow<Set<String>> = recordings.published
 
@@ -34,9 +38,6 @@ class RecordingsViewModel(private val recordings: RecordingsRepository, private 
         while (true) { refresh(); delay(REFRESH_MS) }
     }
 
-    /** The viewer this device is — whose recordings it may delete (canDelete). */
-    val viewerId: String? get() = prefs.viewerId
-
     /** Everyone's recordings, or just this viewer's — remembered on this device. */
     fun setEveryone(on: Boolean) {
         prefs.recordingsEveryone = on
@@ -46,7 +47,10 @@ class RecordingsViewModel(private val recordings: RecordingsRepository, private 
 
     private suspend fun refresh() {
         val everyone = _state.value.everyone
-        runCatching { recordings.list(everyone) }
+        val result = runCatching { recordings.list(everyone) }
+        // The switch changed while this was asked: its answer is the other mode's — dropped.
+        if (!keepRecordingsResult(everyone, _state.value.everyone)) return
+        result
             .onSuccess { _state.value = RecordingsState(list = it, loading = false, everyone = everyone) }
             .onFailure { _state.value = _state.value.copy(loading = false, error = it.toApiError().message) }
     }

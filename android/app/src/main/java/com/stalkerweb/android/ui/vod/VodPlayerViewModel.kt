@@ -347,7 +347,7 @@ class VodPlayerViewModel(
         loadJob = viewModelScope.launch {
             links.ensureShareToken()
             if (_state.value.params?.key != params.key) return@launch
-            val server = "${links.base()}/proxy/recording/${android.net.Uri.encode(params.recordingId)}/index.m3u8"
+            val server = com.stalkerweb.android.data.repo.recordingServerUrl(links.base(), params.recordingId, prefs.viewerId)
             // Solo: its copy in Downloads once saved there (the only copy then); else the server's HLS.
             val url = com.stalkerweb.android.data.repo.recordingPlayUrl(com.stalkerweb.android.BuildConfig.IS_SOLO, prefs.recordingCopy(params.recordingId), server)
             val play = { startPlayback(url, params) }

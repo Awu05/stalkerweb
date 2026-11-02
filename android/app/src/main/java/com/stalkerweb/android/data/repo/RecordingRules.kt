@@ -35,13 +35,18 @@ data class RecordingGroups(val scheduled: List<Recording>, val recording: List<R
     val isEmpty: Boolean get() = scheduled.isEmpty() && recording.isEmpty() && done.isEmpty()
 }
 
-/** Scheduled (soonest first), recording, and done (newest first — failed and missed too); cancelled ones aren't shown. */
+/**
+ * Scheduled (soonest first), recording, and done (newest first — failed and
+ * missed too). Cancelled ones aren't shown — unless someone else cancelled it
+ * ([Recording.stoppedBy]), so its owner sees who.
+ */
 fun groupRecordings(list: List<Recording>): RecordingGroups {
     fun by(vararg s: String) = list.filter { it.status in s }
     return RecordingGroups(
         scheduled = by("scheduled").sortedBy { it.startAt },
         recording = by("recording"),
-        done = by("done", "failed", "missed").sortedByDescending { it.startAt },
+        done = list.filter { it.status in setOf("done", "failed", "missed") || (it.status == "cancelled" && !it.stoppedBy.isNullOrBlank()) }
+            .sortedByDescending { it.startAt },
     )
 }
 
@@ -76,9 +81,11 @@ private fun length(ms: Long): String {
 fun recordingLabel(r: Recording, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String = when (r.status) {
     "scheduled" -> "${dayLabel(r.startAt, now, zone)} ${time(r.startAt, zone)}${r.endAt?.let { "–${time(it, zone)}" } ?: ""}"
     "recording" -> "Recording · ${length(now - r.startAt)} · ${size(r.bytes)}"
-    "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)} · ${size(r.bytes)}"
+    "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)} · ${size(r.bytes)}" +
+        (r.stoppedBy?.takeIf { it.isNotBlank() }?.let { " · Stopped by $it" } ?: "")
     "failed" -> "Failed — ${r.error?.takeIf { it.isNotBlank() } ?: "the recording didn't work"}"
     "missed" -> "Missed — the server wasn't running"
+    "cancelled" -> r.stoppedBy?.takeIf { it.isNotBlank() }?.let { "Cancelled by $it" } ?: "Cancelled"
     else -> ""
 }
 
@@ -143,5 +150,28 @@ fun recordingsHint(isSolo: Boolean): String =
     if (isSolo) "Live TV recorded on this device while StalkerWeb Solo's server is running. Finished ones are saved to Downloads/StalkerWeb. Kept until you delete them."
     else "Live TV recorded on the server — even with every app closed. Kept until you delete them."
 
-/** Whether this viewer may delete a recording: only its own (anyone may stop or cancel one — the server's routes/recordings.js). */
-fun canDelete(r: Recording, viewerId: String?): Boolean = r.viewerId == viewerId
+/**
+ * Solo: the recordings that are this device's own ([Recording.mine], the
+ * server's word) — the only ones it saves to Downloads/StalkerWeb, whatever
+ * list it was handed.
+ */
+fun ownRecordings(list: List<Recording>): List<Recording> = list.filter { it.mine }
+
+/**
+ * Whether a list asked for with Everyone's recordings [asked] may be shown now
+ * the switch is [current]: one asked for before it changed is dropped, so it
+ * never overwrites the other mode's. (Who may delete one is the server's word:
+ * [Recording.canDelete].)
+ */
+fun keepRecordingsResult(asked: Boolean, current: Boolean): Boolean = asked == current
+
+/**
+ * A finished recording's HLS on the server (routes/recordingFile.js), naming
+ * this device's viewer — the player sends no X-Viewer, and the server applies
+ * the viewer's channel filters to someone else's recording. Solo has no viewer id.
+ */
+fun recordingServerUrl(base: String, id: String, viewerId: String?): String {
+    fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+    val viewer = viewerId?.takeIf { it.isNotBlank() }?.let { "?viewer=${enc(it)}" } ?: ""
+    return "$base/proxy/recording/${enc(id)}/index.m3u8$viewer"
+}
