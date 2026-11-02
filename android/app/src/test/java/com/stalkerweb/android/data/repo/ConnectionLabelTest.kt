@@ -25,6 +25,14 @@ class ConnectionLabelTest {
         assertNull(connectionLabel(null, listOf(home)))
     }
 
+    @Test fun showsAsleepAndWhyAReconnectFailed() {
+        val asleep = status.copy(connected = false, asleep = true)
+        assertEquals(ConnectionLabel("Home IPTV", "tv.example.com:8080", ASLEEP_NOTE), connectionLabel(asleep, listOf(home)))
+        assertEquals("Asleep — reconnects when you use it", ASLEEP_NOTE)
+        assertEquals("Couldn't reconnect: portal unreachable", connectionLabel(asleep.copy(wakeError = "portal unreachable"), listOf(home))?.note)
+        assertNull(connectionLabel(status, listOf(home))?.note)
+    }
+
     @Test fun normalizesPortals() {
         assertEquals("http://x/c/", normalizePortal("http://x"))
         assertEquals("http://x/c/", normalizePortal(" http://x/c "))
