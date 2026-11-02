@@ -109,8 +109,9 @@ class LiveRepository(
 
     suspend fun keepalive() { runCatching { apis.get().streamKeepalive() } }
 
-    suspend fun getNowNext(): Map<String, NowNextEntry> =
-        runCatching { apis.get().getNowNext() }.getOrDefault(emptyMap())
+    /** [background]: a timed refresh, which never wakes an asleep server. */
+    suspend fun getNowNext(background: Boolean = false): Map<String, NowNextEntry> =
+        runCatching { apis.get().getNowNext(if (background) "1" else null) }.getOrDefault(emptyMap())
 
     // ── Streams ───────────────────────────────────────────────────────────────
 

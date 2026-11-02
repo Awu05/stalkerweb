@@ -172,10 +172,11 @@ fun AppShell(
                 }
                 state.connection?.let { c ->
                     Text(
-                        c.name,
+                        // Asleep, or why the reconnect failed, under the name (ConnectionLabel.note).
+                        c.note?.let { "${c.name}\n$it" } ?: c.name,
                         style = MaterialTheme.typography.labelSmall,
                         color = SwColors.Muted,
-                        maxLines = 2,
+                        maxLines = if (c.note != null) 4 else 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.tvFocus().clickable(onClick = onOpenConnection).padding(6.dp),
                     )
@@ -194,7 +195,7 @@ fun AppShell(
         Column(Modifier.fillMaxSize()) {
             // Phone top row: the connection on the left, the viewer's menu on the right.
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(state.connection?.name ?: "", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
+                Text(state.connection?.let { c -> c.note?.let { "${c.name} · $it" } ?: c.name } ?: "", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 RemindersBell(reminders, onCancelReminder)
                 var menu by remember { mutableStateOf(false) }

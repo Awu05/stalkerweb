@@ -90,7 +90,7 @@ fun PortalScreen(
                                 )
                                 Column {
                                     Text(
-                                        if (state.connected) "Connected" else "Disconnected",
+                                        if (state.connected) state.note ?: "Connected" else "Disconnected",
                                         style = MaterialTheme.typography.titleSmall,
                                         color = if (state.connected) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant,

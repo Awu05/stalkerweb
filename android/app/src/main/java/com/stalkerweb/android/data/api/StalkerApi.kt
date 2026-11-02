@@ -55,8 +55,9 @@ interface StalkerApi {
     @POST("api/logos")
     suspend fun setLogoOverride(@Body body: LogoOverrideRequest)
 
+    /** [background] "1": a timed refresh — it never wakes an asleep server (backend middleware/session.js). */
     @GET("api/epg/now")
-    suspend fun getNowNext(): Map<String, NowNextEntry>
+    suspend fun getNowNext(@Header("X-Background") background: String? = null): Map<String, NowNextEntry>
 
     // Resolves a channel to its proxy stream URL + engine hint (hls/mpegts/native).
     @GET("api/stream/{channelId}")

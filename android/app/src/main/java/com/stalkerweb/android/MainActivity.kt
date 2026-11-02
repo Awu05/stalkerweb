@@ -41,6 +41,7 @@ import com.stalkerweb.android.solo.DownloadPublisher
 import com.stalkerweb.android.data.api.AppEvent
 import com.stalkerweb.android.data.repo.PlayerParams
 import com.stalkerweb.android.data.repo.mayRestartForAccess
+import com.stalkerweb.android.data.repo.startupOpensPortal
 import com.stalkerweb.android.data.update.UpdateManager
 import com.stalkerweb.android.reminders.ReminderReceiver
 import com.stalkerweb.android.ui.downloads.DownloadsScreen
@@ -300,8 +301,9 @@ class MainActivity : ComponentActivity() {
                     if (!soloUp) return@LaunchedEffect
                     if (container.server.getServerUrl() == null || container.guard.blocked) return@LaunchedEffect
                     if (!BuildConfig.IS_SOLO && container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
+                    // Asleep isn't disconnected: the channel list's own request wakes the server (PortalState.kt).
                     val status = runCatching { container.server.testConnection() }.getOrNull()
-                    if (status?.connected == false) navController.navigate(Screen.Portal.route)
+                    if (startupOpensPortal(status)) navController.navigate(Screen.Portal.route)
                 }
 
                 // A reminder came due while the app is open: say so here too, with Watch.

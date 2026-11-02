@@ -42,6 +42,10 @@ data class StatusResponse(
     val connected: Boolean,
     val portal: String? = null,
     val mac: String? = null,
+    /** The idle timeout dropped the session: the next use reconnects (portal/mac: the one it reconnects to). */
+    val asleep: Boolean = false,
+    /** Why the last reconnect failed (asleep only); the server tries again on use after a minute. */
+    val wakeError: String? = null,
 )
 
 @JsonClass(generateAdapter = false)

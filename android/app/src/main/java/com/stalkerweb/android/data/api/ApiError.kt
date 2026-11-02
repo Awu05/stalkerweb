@@ -29,6 +29,8 @@ data class ErrorBody(
     val viewerGone: Boolean? = null,
     val lockedOut: Boolean? = null,
     val takesStream: Boolean? = null,
+    /** A 503 from the session guard: why reconnecting to the portal failed. */
+    val wakeError: String? = null,
 )
 
 private val errorAdapter = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build().adapter(ErrorBody::class.java)

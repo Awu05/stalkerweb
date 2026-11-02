@@ -44,10 +44,10 @@ class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
     suspend fun testServerUrl(url: String, accessKey: String? = null): StatusResponse =
         StalkerApi.create(url.trimEnd('/'), accessKey?.trim()?.ifEmpty { null }).getStatus()
 
-    /** Told the portal in use whenever a status check finds one connected (reminders follow it). */
+    /** Told the portal in use whenever a status check finds one connected or asleep (reminders follow it). */
     var onPortal: (String?) -> Unit = {}
 
-    suspend fun testConnection(): StatusResponse = apis.get().getStatus().also { if (it.connected) onPortal(it.portal) }
+    suspend fun testConnection(): StatusResponse = apis.get().getStatus().also { if (portalUsable(it)) onPortal(it.portal) }
 
     // ── Portal management ─────────────────────────────────────────────────────
 
