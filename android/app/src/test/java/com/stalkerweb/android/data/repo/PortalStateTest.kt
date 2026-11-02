@@ -40,3 +40,23 @@ class PortalStateTest {
         assertFalse(retriesWhileWaking(IOException("no route"), attempt = 0))
     }
 }
+
+// The Portal screen: a failed wake offers what disconnected does (the portals,
+// Reconnect), plus Disconnect, which stops the reconnect on use.
+class PortalActionsTest {
+    private val off = StatusResponse(connected = false, portal = "http://a.portal.example/c/", mac = "00:1A:79:12:34:56")
+
+    @Test fun `connected or asleep - Disconnect`() {
+        assertEquals(PortalActions(portals = false, reconnect = false, disconnect = true), portalActions(off.copy(connected = true)))
+        assertEquals(PortalActions(portals = false, reconnect = false, disconnect = true), portalActions(off.copy(asleep = true)))
+    }
+
+    @Test fun `a failed wake - the portals, Reconnect and Disconnect`() {
+        assertEquals(PortalActions(portals = true, reconnect = true, disconnect = true), portalActions(off.copy(asleep = true, wakeError = "portal unreachable")))
+    }
+
+    @Test fun `disconnected - the portals and Reconnect`() {
+        assertEquals(PortalActions(portals = true, reconnect = true, disconnect = false), portalActions(off))
+        assertEquals(PortalActions(portals = true, reconnect = true, disconnect = false), portalActions(null))
+    }
+}
