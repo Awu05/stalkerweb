@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CircleDot, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, recordNow, stopRecording } from '../stalkerApi'
-import { RECORD_CHOICES, endForChoice, stillRecording } from '@/lib/recordings'
+import { recordChoices, endForChoice, stillRecording } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 
 /**
@@ -69,7 +69,7 @@ export default function RecordButton({ channel, programme }) {
       {open && (
         <div role="menu" className="absolute bottom-full right-0 mb-2 w-56 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-xl z-50">
           <p className="px-3 py-1.5 text-xs text-[var(--color-muted)]">Record {programme?.title ? `"${programme.title}"` : channel.name}</p>
-          {RECORD_CHOICES.map((c) => (
+          {recordChoices(programme?.endTime ? programme.endTime * 1000 : null, Date.now()).map((c) => (
             <button key={c.id} role="menuitem" onClick={() => start(c.id)}
               className="block w-full text-left px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]">
               {c.label}

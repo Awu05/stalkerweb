@@ -21,20 +21,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.stalkerweb.android.data.repo.RECORD_CHOICES
+import com.stalkerweb.android.data.repo.RecordChoice
 import com.stalkerweb.android.ui.components.TipIconButton
 import com.stalkerweb.android.ui.theme.SwColors
 
 /**
  * Record, among the live player's controls (the web's RecordButton): the
  * channel playing, from now — until the programme ends, for a while, or until
- * stopped (RECORD_CHOICES). The server records it, so it goes on with the
+ * stopped ([choices], recordChoices). The server records it, so it goes on with the
  * player closed. [recording]: this player started one on this channel —
  * pressed again, it stops it. A focusable button like the others, so the
  * remote reaches it along the row; its lengths are a menu the D-pad walks.
  */
 @Composable
-internal fun RecordButton(recording: Boolean, what: String, tint: Color, onRecord: (String) -> Unit, onStop: () -> Unit) {
+internal fun RecordButton(recording: Boolean, what: String, choices: List<RecordChoice>, tint: Color, onRecord: (String) -> Unit, onStop: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         if (recording) {
@@ -45,7 +45,7 @@ internal fun RecordButton(recording: Boolean, what: String, tint: Color, onRecor
         DropdownMenu(expanded = open && !recording, onDismissRequest = { open = false }) {
             Text("Record $what", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-            RECORD_CHOICES.forEach { c ->
+            choices.forEach { c ->
                 DropdownMenuItem(text = { Text(c.label) }, onClick = { open = false; onRecord(c.id) })
             }
         }

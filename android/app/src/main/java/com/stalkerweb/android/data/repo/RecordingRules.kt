@@ -23,6 +23,10 @@ val RECORD_CHOICES = listOf(
     RecordChoice("stop", "Until I stop it"),
 )
 
+/** The lengths offered: "until the programme ends" only with a guide end ([programmeEnd], ms) still to come. */
+fun recordChoices(programmeEnd: Long?, now: Long): List<RecordChoice> =
+    if (programmeEnd != null && programmeEnd > now) RECORD_CHOICES else RECORD_CHOICES.filter { it.id != "programme" }
+
 /** When a recording started [now] ends: ms, or null for "until stopped". No guide end (or one gone by): an hour. */
 fun endForChoice(choice: String, now: Long, programmeEnd: Long? = null): Long? = when (choice) {
     "stop" -> null
