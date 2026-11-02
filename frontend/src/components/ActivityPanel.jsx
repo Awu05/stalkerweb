@@ -14,13 +14,14 @@ export default function ActivityPanel() {
 
   useEffect(() => {
     let off = false
-    const load = () => {
+    // background: the refresh every few seconds (and on coming back to the tab) never wakes the server.
+    const load = (background = true) => {
       if (document.hidden) return
-      getActivity()
+      getActivity({ background: background === true })
         .then((d) => { if (!off) { setData(d); setError('') } })
         .catch((e) => { if (!off) setError(e.message || 'Could not load the activity') })
     }
-    load()
+    load(false)
     const id = setInterval(load, REFRESH_MS)
     document.addEventListener('visibilitychange', load)
     return () => { off = true; clearInterval(id); document.removeEventListener('visibilitychange', load) }

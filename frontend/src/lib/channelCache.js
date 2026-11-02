@@ -17,6 +17,21 @@ function notify(data) {
   listeners.forEach(fn => fn(data))
 }
 
+// Right after the server reconnects its lists can come back empty with
+// loading: true — a list already shown is kept until the real one arrives.
+// Only the lists `next` carries are looked at.
+export function keepLists(prev, next) {
+  const out = { ...next }
+  for (const key of ['channels', 'groups']) {
+    if (!(key in next)) continue
+    if (next.loading && !next[key]?.length && prev?.[key]?.length) out[key] = prev[key]
+  }
+  return out
+}
+
+// What the poller asks: never wakes an asleep server (stalkerApi.js).
+const BG = { background: true }
+
 // Opens a Server-Sent Events connection to /api/channels/events and re-fetches
 // the channel list every time the backend's page count grows — so the grid
 // fills in page-by-page instead of sitting empty until the whole load
@@ -30,10 +45,16 @@ function startPolling(gen) {
   // Re-fetches the channel list if the backend's count moved since our last
   // fetch (skips redundant re-fetches on ticks where nothing new landed).
   const refetch = async (loading) => {
-    const chRes = await getChannels()
+    const chRes = await getChannels(null, false, BG)
     if (gen !== generation) return
     if (chRes?.channels) {
-      cache = { ...cache, channels: chRes.channels, loading }
+      cache = { ...cache, ...keepLists(cache, { channels: chRes.channels, loading }) }
+      // The genres came back empty while loading: ask again once it's done.
+      if (!loading && !cache.groups?.length) {
+        const grpRes = await getGroups(false, BG).catch(() => null)
+        if (gen !== generation) return
+        if (grpRes?.groups?.length) cache = { ...cache, groups: grpRes.groups }
+      }
       notify(cache)
     }
   }
@@ -77,23 +98,23 @@ async function _pollOnce(gen) {
     while (true) {
       await new Promise(r => setTimeout(r, 1500))
       if (gen !== generation) break
-      const prog = await getChannelProgress()
+      const prog = await getChannelProgress(BG)
       if (gen !== generation) break
       if (!prog.loading) {
-        const chRes = await getChannels()
+        const [chRes, grpRes] = await Promise.all([getChannels(null, false, BG), cache?.groups?.length ? null : getGroups(false, BG).catch(() => null)])
         if (gen !== generation) break
         if (chRes?.channels) {
-          cache = { ...cache, channels: chRes.channels, loading: false }
+          cache = { ...cache, channels: chRes.channels, loading: false, ...(grpRes?.groups?.length ? { groups: grpRes.groups } : {}) }
           notify(cache)
         }
         break
       }
       if (prog.channelCount !== lastCount) {
         lastCount = prog.channelCount
-        const chRes = await getChannels()
+        const chRes = await getChannels(null, false, BG)
         if (gen !== generation) break
         if (chRes?.channels) {
-          cache = { ...cache, channels: chRes.channels, loading: true }
+          cache = { ...cache, ...keepLists(cache, { channels: chRes.channels, loading: true }) }
           notify(cache)
         }
       }

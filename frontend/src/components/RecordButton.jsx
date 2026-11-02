@@ -20,7 +20,8 @@ export default function RecordButton({ channel, programme }) {
   useEffect(() => {
     if (!recordingId) return
     let gone = false
-    const look = () => getRecordings()
+    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
+    const look = () => getRecordings(false, { background: true })
       .then((r) => { if (!gone && !stillRecording(r.recordings, recordingId)) setRecordingId((id) => (id === recordingId ? null : id)) })
       .catch(() => { /* offline for a moment: ask again next time */ })
     const t = setInterval(look, 30_000)

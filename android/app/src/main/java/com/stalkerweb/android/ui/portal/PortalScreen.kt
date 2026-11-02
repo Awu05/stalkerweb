@@ -90,7 +90,7 @@ fun PortalScreen(
                                 )
                                 Column {
                                     Text(
-                                        if (state.connected) "Connected" else "Disconnected",
+                                        if (state.connected) state.note ?: "Connected" else "Disconnected",
                                         style = MaterialTheme.typography.titleSmall,
                                         color = if (state.connected) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -109,7 +109,7 @@ fun PortalScreen(
                         // Saved profiles — one-tap connect, same list the web
                         // UI shows. Portal setup itself is a web-UI job, so
                         // there's deliberately no manual portal/MAC entry here.
-                        if (!state.connected) {
+                        if (state.actions.portals) {
                             if (state.profiles.isNotEmpty()) {
                                 Text(
                                     "Available portals",
@@ -148,14 +148,14 @@ fun PortalScreen(
 
                         // Action buttons. Both act on config the backend already
                         // holds — nothing here composes a connection by hand.
-                        if (state.connected) {
+                        if (state.actions.disconnect) {
                             OutlinedButton(
                                 onClick = viewModel::disconnect,
                                 enabled = !state.busy,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp)
-                                    .focusRequester(firstFocusRequester),
+                                    .then(if (!state.actions.portals) Modifier.focusRequester(firstFocusRequester) else Modifier),
                                 colors = ButtonDefaults.outlinedButtonColors(
                                     contentColor = MaterialTheme.colorScheme.error,
                                 ),
@@ -170,7 +170,8 @@ fun PortalScreen(
                                 }
                                 Text("Disconnect")
                             }
-                        } else if (state.hasSavedConfig) {
+                        }
+                        if (state.actions.reconnect && state.hasSavedConfig) {
                             OutlinedButton(
                                 onClick = viewModel::reconnect,
                                 enabled = !state.busy,

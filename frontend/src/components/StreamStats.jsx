@@ -74,7 +74,8 @@ export function StreamStats({ open, onClose, videoRef, sources, kind, id, classN
     // round trip isn't time spent queueing.
     let next = null
     const network = async () => {
-      const [ms, d] = await Promise.all([pingServer(), id ? getStreamDelivery(kind, id).catch(() => null) : null])
+      // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
+      const [ms, d] = await Promise.all([pingServer({ background: true }), id ? getStreamDelivery(kind, id, { background: true }).catch(() => null) : null])
       if (!live) return
       setPing(ms)
       setDelivery(d?.delivery ?? null)

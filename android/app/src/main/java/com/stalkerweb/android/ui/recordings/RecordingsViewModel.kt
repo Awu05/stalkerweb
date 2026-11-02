@@ -35,7 +35,9 @@ class RecordingsViewModel(private val recordings: RecordingsRepository, private 
 
     /** Runs while the screen is started (cancelled when it isn't). */
     suspend fun follow() {
-        while (true) { refresh(); delay(REFRESH_MS) }
+        // The first look is opening the screen; the refresh after it is a timer's (ApiClient.kt Background).
+        var again = false
+        while (true) { refresh(background = again); again = true; delay(REFRESH_MS) }
     }
 
     /** Everyone's recordings, or just this viewer's — remembered on this device. */
@@ -45,9 +47,9 @@ class RecordingsViewModel(private val recordings: RecordingsRepository, private 
         viewModelScope.launch { refresh() }
     }
 
-    private suspend fun refresh() {
+    private suspend fun refresh(background: Boolean = false) {
         val everyone = _state.value.everyone
-        val result = runCatching { recordings.list(everyone) }
+        val result = runCatching { recordings.list(everyone, background) }
         // The switch changed while this was asked: its answer is the other mode's — dropped.
         if (!keepRecordingsResult(everyone, _state.value.everyone)) return
         result

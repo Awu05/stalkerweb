@@ -18,6 +18,25 @@ fun requestHeaders(accessKey: String?, viewerId: String?): Map<String, String> =
     if (!viewerId.isNullOrBlank()) put("X-Viewer", viewerId)
 }
 
+/**
+ * A request a timer or a poll makes, not someone using the app — the one rule
+ * for it: tag the call with [Background] (`background(true)`) and
+ * [backgroundInterceptor] sends X-Background: 1, so it never wakes the server's
+ * portal session (asleep after the idle timeout, backend middleware/session.js).
+ */
+object Background
+
+/** [Background] for a call a timer or poll makes, else nothing. */
+fun background(on: Boolean): Background? = if (on) Background else null
+
+/** Adds X-Background: 1 to the requests tagged [Background]. */
+val backgroundInterceptor = Interceptor { chain ->
+    val request = chain.request()
+    chain.proceed(
+        if (request.tag(Background::class.java) != null) request.newBuilder().header("X-Background", "1").build() else request,
+    )
+}
+
 object ApiClient {
     private val CHECKED_CODES = setOf(401, 403, 409, 429)
 
@@ -43,6 +62,7 @@ object ApiClient {
         onConnectFailed: (() -> Unit)? = null,
         keyAllowed: (HttpUrl) -> Boolean = { true },
     ): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(backgroundInterceptor)
         .addInterceptor(Interceptor { chain ->
             val request = chain.request()
             if (!sameServer(request.url, serverUrl())) return@Interceptor chain.proceed(request)

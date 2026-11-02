@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.api.RecordNowRequest
@@ -21,9 +22,9 @@ import kotlinx.coroutines.launch
  */
 class RecordingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
 
-    /** This viewer's recordings — or, [everyone], every viewer's (each with its viewerName). */
-    suspend fun list(everyone: Boolean = false): List<Recording> =
-        apis.get().getRecordings(if (everyone) "1" else null).recordings.also { seen(it) }
+    /** This viewer's recordings — or, [everyone], every viewer's (each with its viewerName). [background]: asked by a timer or loop (ApiClient.kt Background). */
+    suspend fun list(everyone: Boolean = false, background: Boolean = false): List<Recording> =
+        apis.get().getRecordings(if (everyone) "1" else null, background(background)).recordings.also { seen(it) }
 
     // Told this device's own recordings from every list the app reads (never
     // another viewer's, from Everyone's recordings): Solo saves finished ones
@@ -97,7 +98,7 @@ class RecordingsRepository(private val apis: ApiProvider, private val prefs: App
     private suspend fun followUntilIdle() {
         var misses = 0
         while (true) {
-            val list = runCatching { apis.get().getRecordings().recordings }.getOrNull()
+            val list = runCatching { apis.get().getRecordings(background = background(true)).recordings }.getOrNull()
             list?.let { onList?.invoke(ownRecordings(it)) }
             if (list != null && !recordingNeedsServer(list, System.currentTimeMillis())) return
             // The server not answering for about two minutes: let go, it isn't recording.

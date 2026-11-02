@@ -80,10 +80,11 @@ export default function RecordingsPage() {
   const mode = useRef(everyone)
   useEffect(() => { mode.current = everyone }, [everyone])
 
-  const load = useCallback(() => getRecordings(everyone)
+  const load = useCallback((background = false) => getRecordings(everyone, { background })
     .then((r) => { if (keepRecordingsResult(everyone, mode.current)) { setList(r.recordings || []); setError('') } })
     .catch((e) => { if (keepRecordingsResult(everyone, mode.current)) setError(e.message) }), [everyone])
-  useEffect(() => { load(); const t = setInterval(load, REFRESH_MS); return () => clearInterval(t) }, [load])
+  // The refresh every few seconds never wakes an asleep server (stalkerApi.js).
+  useEffect(() => { load(); const t = setInterval(() => load(true), REFRESH_MS); return () => clearInterval(t) }, [load])
 
   const act = (p, done) => p.then(done).catch((e) => showToast(e.message, 'error')).finally(load)
   const onPlay = (r) => navigate(`/vod-player?recording=${encodeURIComponent(r.id)}&title=${encodeURIComponent(r.title || r.channelName)}`)

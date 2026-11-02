@@ -16,7 +16,7 @@ const TAG = 'stream';
 module.exports = function streamRoutes(appState) {
 
   // ── Ensure an authenticated session exists, reconnecting if needed ─────────
-  // Shared with the other outside-client entry points (see server.js).
+  // Shared with the other outside-client entry points (lib/portalSession.js).
   async function ensureSession() {
     if (appState.ensureSession) return appState.ensureSession();
     if (!appState.sessionManager?.isAuthenticated()) throw new Error('Not connected to a portal. Configure portal first.');
