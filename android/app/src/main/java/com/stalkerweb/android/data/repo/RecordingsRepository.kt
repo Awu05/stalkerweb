@@ -3,6 +3,7 @@ package com.stalkerweb.android.data.repo
 import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Recording
+import com.stalkerweb.android.data.api.RecordingsResponse
 import com.stalkerweb.android.data.api.RecordNowRequest
 import com.stalkerweb.android.data.api.ScheduleRecordingRequest
 import com.stalkerweb.android.data.prefs.AppPrefs
@@ -23,8 +24,11 @@ import kotlinx.coroutines.launch
 class RecordingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
 
     /** This viewer's recordings — or, [everyone], every viewer's (each with its viewerName). [background]: asked by a timer or loop (ApiClient.kt Background). */
-    suspend fun list(everyone: Boolean = false, background: Boolean = false): List<Recording> =
-        apis.get().getRecordings(if (everyone) "1" else null, background(background)).recordings.also { seen(it) }
+    suspend fun list(everyone: Boolean = false, background: Boolean = false): List<Recording> = listing(everyone, background).recordings
+
+    /** [list], with what the recordings take on the server's disk. */
+    suspend fun listing(everyone: Boolean = false, background: Boolean = false): RecordingsResponse =
+        apis.get().getRecordings(if (everyone) "1" else null, background(background)).also { seen(it.recordings) }
 
     // Told this device's own recordings from every list the app reads (never
     // another viewer's, from Everyone's recordings): Solo saves finished ones

@@ -102,13 +102,25 @@ describe('viewers', () => {
     expect(viewers.update(a.id, { color: COLORS[3] }).color).toBe(COLORS[3])
   })
 
-  it('never deletes the last viewer, and moves the default when it is deleted', () => {
+  it('never deletes the admin (the first viewer) or the last one', () => {
     const def = viewers.getDefault()
     const a = viewers.create({ name: 'Andy' })
-    viewers.remove(def.id)
-    expect(viewers.getDefault().id).toBe(a.id)
-    expect(statusOf(() => viewers.remove(a.id))).toBe(409)
+    expect(statusOf(() => viewers.remove(def.id))).toBe(409)
+    expect(() => viewers.remove(def.id)).toThrow("The admin profile can't be removed.")
+    viewers.remove(a.id)
+    expect(viewers.getDefault().id).toBe(def.id)
     expect(statusOf(() => viewers.remove('view_missing'))).toBe(404)
+  })
+
+  it('the first viewer is the admin: marked in the list, and only it', () => {
+    const def = viewers.getDefault()
+    const a = viewers.create({ name: 'Andy' })
+    expect(viewers.isAdmin(def.id)).toBe(true)
+    expect(viewers.isAdmin(a.id)).toBe(false)
+    expect(viewers.isAdmin(null)).toBe(false)
+    const listed = viewers.list().viewers
+    expect(listed.find((v) => v.id === def.id).admin).toBe(true)
+    expect(listed.find((v) => v.id === a.id).admin).toBe(false)
   })
 
   it('finds a viewer by name or id, ignoring case', () => {

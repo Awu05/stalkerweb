@@ -8,6 +8,13 @@ class ViewerChoiceTest {
     private val a = ViewerSummary("view_a", "Andy")
     private val b = ViewerSummary("view_b", "Sam")
 
+    @Test fun theAdminAndTheLastViewerCantBeDeleted() {
+        val admin = ViewerSummary("view_a", "Andy", admin = true)
+        assertEquals(true, canRemoveViewer(b, listOf(admin, b)))
+        assertEquals(false, canRemoveViewer(admin, listOf(admin, b)))
+        assertEquals(false, canRemoveViewer(b, listOf(b)))
+    }
+
     @Test fun keepsTheSavedViewerWhileItExists() {
         assertEquals(ViewerChoice("view_b", false), chooseViewer(listOf(a, b), "view_b"))
     }

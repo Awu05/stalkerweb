@@ -4,11 +4,13 @@ import { cn } from '@/lib/utils'
 import { useApp } from '@/lib/appContext'
 import { createViewer, updateViewer, deleteViewer } from '../stalkerApi'
 import { ViewerAvatar } from './ViewerPicker'
+import { canRemoveViewer } from '@/lib/viewerAdmin'
 
 import { VIEWER_COLORS as COLORS } from '@/lib/theme.generated'
 
 // Settings → Viewers: the people who watch here, each with their own
-// favorites and channel filters. Everything else on this page is shared.
+// favorites and channel filters. Everything else on this page is shared. The
+// first is the admin (lib/viewerAdmin.js): it can't be deleted.
 export default function ViewersCard() {
   const { viewer, viewers, refreshViewers, switchViewer } = useApp()
   const [editing, setEditing] = useState(null) // { id, name, color } | { id: null, name: '', color } for a new one
@@ -78,10 +80,11 @@ export default function ViewersCard() {
           <div key={v.id} className="flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-1.5 hover:bg-[var(--color-surface-2)]/60">
             <ViewerAvatar viewer={v} size={28} />
             <span className="text-sm text-[var(--color-text)] truncate">{v.name}</span>
+            {v.admin && <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">Admin</span>}
             {v.id === viewer?.id && <span className="text-[11px] text-[var(--color-muted)]">· you</span>}
             <div className="ml-auto flex gap-1">
               <button onClick={() => setEditing({ id: v.id, name: v.name, color: v.color })} className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-text)]" title="Rename or recolor" aria-label={`Edit ${v.name}`}><Pencil size={14} /></button>
-              {viewers.length > 1 && (
+              {canRemoveViewer(v, viewers) && (
                 <button onClick={() => remove(v)} className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-live)]" title="Delete" aria-label={`Delete ${v.name}`}><Trash2 size={14} /></button>
               )}
             </div>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CircleDot, Clock, CheckCircle2, AlertCircle, Play, Square, X, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, stopRecording, deleteRecording } from '../stalkerApi'
-import { groupRecordings, recordingLabel, keepRecordingsResult } from '@/lib/recordings'
+import { groupRecordings, recordingLabel, keepRecordingsResult, diskLine } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 import { Switch } from '@/components/ui/switch'
 
@@ -70,6 +70,7 @@ export default function RecordingsPage() {
   const navigate = useNavigate()
   const [list, setList] = useState(null)
   const [error, setError] = useState('')
+  const [disk, setDisk] = useState(null)   // what the recordings take, and what's free (the server's disk)
   // Everyone's recordings (each with who booked it) — remembered on this device.
   const [everyone, setEveryone] = useState(() => { try { return localStorage.getItem(EVERYONE_KEY) === '1' } catch { return false } })
   const toggleEveryone = (on) => {
@@ -81,7 +82,7 @@ export default function RecordingsPage() {
   useEffect(() => { mode.current = everyone }, [everyone])
 
   const load = useCallback((background = false) => getRecordings(everyone, { background })
-    .then((r) => { if (keepRecordingsResult(everyone, mode.current)) { setList(r.recordings || []); setError('') } })
+    .then((r) => { setDisk(r.disk ?? null); if (keepRecordingsResult(everyone, mode.current)) { setList(r.recordings || []); setError('') } })
     .catch((e) => { if (keepRecordingsResult(everyone, mode.current)) setError(e.message) }), [everyone])
   // The refresh every few seconds never wakes an asleep server (stalkerApi.js).
   useEffect(() => { load(); const t = setInterval(() => load(true), REFRESH_MS); return () => clearInterval(t) }, [load])
@@ -103,6 +104,7 @@ export default function RecordingsPage() {
         <p className="text-sm text-[var(--color-muted)] mt-1">
           Live TV recorded on the server — even with every app closed. Kept until you delete them.
         </p>
+        {diskLine(disk) && <p className="text-xs text-[var(--color-muted)] mt-1">{diskLine(disk)}</p>}
         <label className="mt-3 inline-flex items-center gap-2 text-sm text-[var(--color-text)] cursor-pointer">
           <Switch checked={everyone} onCheckedChange={toggleEveryone} aria-label="Everyone's recordings" />
           Everyone&rsquo;s recordings

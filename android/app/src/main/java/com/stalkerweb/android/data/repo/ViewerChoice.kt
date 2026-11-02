@@ -2,6 +2,9 @@ package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.ViewerSummary
 
+/** Whether Settings offers to delete [v]: never the admin (the first viewer), never the last one (the web's viewerAdmin.js). */
+fun canRemoveViewer(v: ViewerSummary, viewers: List<ViewerSummary>): Boolean = !v.admin && viewers.size > 1
+
 /** Which viewer to start as: [id] when known, otherwise ask ([needsPicker]). */
 data class ViewerChoice(val id: String?, val needsPicker: Boolean)
 
