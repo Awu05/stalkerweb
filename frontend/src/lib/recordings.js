@@ -100,3 +100,8 @@ export function saveRecordingPosition(id, position, duration, storage = browserS
     else storage.setItem(POS_KEY(id), String(Math.floor(position)))
   } catch { /* storage refused: no resume, nothing else lost */ }
 }
+
+/** Whether this viewer may delete a recording: only its own (anyone may stop or cancel one — routes/recordings.js). */
+export function canDelete(r, viewerId) {
+  return (r.viewerId ?? null) === (viewerId ?? null)
+}

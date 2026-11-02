@@ -2,7 +2,7 @@
 // GET    /api/recordings           — this viewer's recordings, newest first (?all=1: everyone's, with viewerName)
 // POST   /api/recordings           — book a guide programme { channelId, channelName, title, startAt, endAt, force? }
 // POST   /api/recordings/now       — record a channel now { channelId, channelName, title, endAt | null, force? }
-// POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started
+// POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started — anyone's
 // DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file → { deleted }
 //
 // The provider's stream limit (Settings: max_streams, 1 by default): booking a
@@ -109,9 +109,10 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
     res.status(201).json(r);
   });
 
+  // Anyone in the household may stop or cancel one (to clear a clash, or free the stream); only its owner deletes it.
   router.post('/:id/stop', (req, res) => {
     const r = store().get(req.params.id);
-    if (!mine(req, r)) return res.status(404).json({ error: 'No such recording.' });
+    if (!r) return res.status(404).json({ error: 'No such recording.' });
     appState.recordings.stop(r.id);
     res.json(store().get(r.id));
   });

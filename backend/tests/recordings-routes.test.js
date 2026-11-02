@@ -38,7 +38,7 @@ describe('/api/recordings', () => {
     const app = express()
     app.use(express.json())
     app.use(createViewerContext(viewers).middleware)
-    app.use('/api/recordings', recordingsModule(appState, { settings: () => settings, viewerName: (id) => viewers.get?.(id)?.name ?? (id === andy ? 'Andy' : id === bea ? 'Bea' : '') }))
+    app.use('/api/recordings', recordingsModule(appState, { now: () => clock.t, settings: () => settings, viewerName: (id) => viewers.get?.(id)?.name ?? (id === andy ? 'Andy' : id === bea ? 'Bea' : '') }))
     app.use('/proxy', proxyRecording(appState))
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}`
@@ -143,6 +143,16 @@ describe('/api/recordings', () => {
     expect(all.length).toBeGreaterThan(0)
     expect(all[0]).toHaveProperty('viewerName', 'Andy')
     expect((await call('DELETE', `/api/recordings/${all[0].id}`, null, bea)).status).toBe(404)   // not hers to delete
+  })
+
+  it("anyone can stop or cancel a household recording (to clear a clash), but only its owner deletes it", async () => {
+    const booked = await call('POST', '/api/recordings', programme({ channelId: '20', title: 'Late Show', startAt: T0 + 300 * MIN, endAt: T0 + 360 * MIN }))
+    expect(booked.status).toBe(201)
+    const cancelled = await call('POST', `/api/recordings/${booked.body.id}/stop`, null, bea)
+    expect(cancelled.status).toBe(200)
+    expect(cancelled.body.status).toBe('cancelled')
+    expect((await call('DELETE', `/api/recordings/${booked.body.id}`, null, bea)).status).toBe(404)
+    expect((await call('POST', '/api/recordings/nope/stop', null, bea)).status).toBe(404)
   })
 })
 

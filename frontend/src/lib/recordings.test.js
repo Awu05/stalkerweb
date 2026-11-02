@@ -85,3 +85,12 @@ describe('stillRecording', () => {
     expect(stillRecording(null, 'a')).toBe(false)
   })
 })
+
+describe('canDelete', () => {
+  it("is only for the recording's own viewer; anyone may still stop or cancel", async () => {
+    const { canDelete } = await import('./recordings')
+    expect(canDelete({ viewerId: 'view_a' }, 'view_a')).toBe(true)
+    expect(canDelete({ viewerId: 'view_b' }, 'view_a')).toBe(false)
+    expect(canDelete({ viewerId: null }, null)).toBe(true)   // no viewers set up: the one default viewer
+  })
+})
