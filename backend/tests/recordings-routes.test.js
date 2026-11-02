@@ -38,7 +38,7 @@ describe('/api/recordings', () => {
     const app = express()
     app.use(express.json())
     app.use(createViewerContext(viewers).middleware)
-    app.use('/api/recordings', recordingsModule(appState, { settings: () => settings, viewerName: (id) => viewers.get?.(id)?.name ?? (id === andy ? 'Andy' : id === bea ? 'Bea' : '') }))
+    app.use('/api/recordings', recordingsModule(appState, { now: () => clock.t, settings: () => settings, viewerName: (id) => viewers.get?.(id)?.name ?? (id === andy ? 'Andy' : id === bea ? 'Bea' : '') }))
     app.use('/proxy', proxyRecording(appState))
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}`

@@ -229,7 +229,14 @@ module.exports = function authModule(appState, config) {
   });
 
   // ── GET /api/auth/status ───────────────────────────────────────────────────
-  router.get('/status', (req, res) => {
+  // ?wake=1: someone opened the app or signed in — the session the idle
+  // timeout dropped comes back first (the last portal connected). The apps'
+  // polling sends no wake, so it never keeps the session up by itself.
+  router.get('/status', async (req, res) => {
+    let wakeError = null;
+    if (req.query.wake === '1' && !appState.sessionManager?.isAuthenticated() && appState.ensureSession) {
+      try { await appState.ensureSession(); } catch (e) { wakeError = e.message; }
+    }
     const connected = !!(appState.sessionManager?.isAuthenticated());
     const saved = cache.load();
     const watchdog = appState.sessionManager?._watchdog;
@@ -244,6 +251,7 @@ module.exports = function authModule(appState, config) {
       watchdog: watchdog ? { lastPingAt: watchdog.lastPingAt, pingCount: watchdog.pingCount } : null,
       lastActivityAt: appState.lastActivityAt || null,
       idleTimeoutMs: appState.idleTimeoutMs || null,
+      ...(wakeError ? { wakeError } : {}),
     });
   });
 
