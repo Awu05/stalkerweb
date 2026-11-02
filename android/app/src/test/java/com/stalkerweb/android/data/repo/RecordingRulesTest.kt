@@ -134,4 +134,10 @@ class RecordingRulesTest {
         assertNull(copyToDelete(isSolo = true, copy = null))
         assertNull(copyToDelete(isSolo = false, copy = copy))
     }
+
+    @Test fun `only its own viewer deletes a recording; anyone stops or cancels one`() {
+        assertTrue(canDelete(Recording(id = "a", viewerId = "view_a"), "view_a"))
+        assertFalse(canDelete(Recording(id = "b", viewerId = "view_b"), "view_a"))
+        assertTrue(canDelete(Recording(id = "c", viewerId = null), null))   // no viewers set up: the one default viewer
+    }
 }

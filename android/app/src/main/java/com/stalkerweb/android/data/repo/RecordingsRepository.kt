@@ -21,7 +21,9 @@ import kotlinx.coroutines.launch
  */
 class RecordingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
 
-    suspend fun list(): List<Recording> = apis.get().getRecordings().recordings.also { seen(it) }
+    /** This viewer's recordings — or, [everyone], every viewer's (each with its viewerName). */
+    suspend fun list(everyone: Boolean = false): List<Recording> =
+        apis.get().getRecordings(if (everyone) "1" else null).recordings.also { seen(it) }
 
     // Told every list the app reads: Solo saves finished recordings to the
     // Downloads folder from it (DownloadPublisher).

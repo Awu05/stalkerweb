@@ -1,6 +1,7 @@
 package com.stalkerweb.android.ui.recordings
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,10 +49,12 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.repo.groupRecordings
+import com.stalkerweb.android.data.repo.canDelete
 import com.stalkerweb.android.data.repo.recordingLabel
 import com.stalkerweb.android.data.repo.recordingsHint
 import com.stalkerweb.android.ui.components.EmptyState
 import com.stalkerweb.android.ui.components.TipIconButton
+import com.stalkerweb.android.ui.components.tvFocus
 import com.stalkerweb.android.ui.theme.SwColors
 
 /**
@@ -73,6 +77,12 @@ fun RecordingsScreen(viewModel: RecordingsViewModel, onPlay: (Recording) -> Unit
         Text("Recordings", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp))
         Text(recordingsHint(BuildConfig.IS_SOLO), style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        // Everyone's recordings: each with who booked it; any can be stopped or cancelled, only one's own deleted.
+        Row(Modifier.fillMaxWidth().tvFocus(RoundedCornerShape(8.dp)).clickable { viewModel.setEveryone(!state.everyone) }.padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Everyone's recordings", color = SwColors.Text, modifier = Modifier.weight(1f))
+            Switch(checked = state.everyone, onCheckedChange = null)
+        }
         state.error?.takeIf { state.list.isNotEmpty() }?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, color = SwColors.Live, modifier = Modifier.padding(horizontal = 16.dp))
         }
@@ -81,9 +91,9 @@ fun RecordingsScreen(viewModel: RecordingsViewModel, onPlay: (Recording) -> Unit
             g.isEmpty -> EmptyState(Icons.Default.FiberManualRecord, "No recordings yet",
                 state.error ?: "Press Record in the live player, or pick Record on a programme in the guide.")
             else -> LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                section("Recording now", g.recording, published, onPlay, viewModel::stop) { deleting = it }
-                section("Scheduled", g.scheduled, published, onPlay, viewModel::stop) { deleting = it }
-                section("Recorded", g.done, published, onPlay, viewModel::stop) { deleting = it }
+                section("Recording now", state.everyone, viewModel.viewerId, g.recording, published, onPlay, viewModel::stop) { deleting = it }
+                section("Scheduled", state.everyone, viewModel.viewerId, g.scheduled, published, onPlay, viewModel::stop) { deleting = it }
+                section("Recorded", state.everyone, viewModel.viewerId, g.done, published, onPlay, viewModel::stop) { deleting = it }
             }
         }
     }
@@ -103,18 +113,18 @@ fun RecordingsScreen(viewModel: RecordingsViewModel, onPlay: (Recording) -> Unit
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.section(
-    title: String, list: List<Recording>, published: Set<String>,
+    title: String, everyone: Boolean, viewerId: String?, list: List<Recording>, published: Set<String>,
     onPlay: (Recording) -> Unit, onStop: (Recording) -> Unit, onDelete: (Recording) -> Unit,
 ) {
     if (list.isEmpty()) return
     item(key = "h-$title") {
         Text("$title  ${list.size}", style = MaterialTheme.typography.labelLarge, color = SwColors.Text, modifier = Modifier.padding(top = 8.dp))
     }
-    items(list, key = { it.id }) { r -> RecordingRow(r, published, onPlay, onStop, onDelete) }
+    items(list, key = { it.id }) { r -> RecordingRow(r, everyone, viewerId, published, onPlay, onStop, onDelete) }
 }
 
 @Composable
-private fun RecordingRow(r: Recording, published: Set<String>, onPlay: (Recording) -> Unit, onStop: (Recording) -> Unit, onDelete: (Recording) -> Unit) {
+private fun RecordingRow(r: Recording, everyone: Boolean, viewerId: String?, published: Set<String>, onPlay: (Recording) -> Unit, onStop: (Recording) -> Unit, onDelete: (Recording) -> Unit) {
     val failed = r.status == "failed" || r.status == "missed"
     Surface(color = SwColors.Surface, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -125,7 +135,8 @@ private fun RecordingRow(r: Recording, published: Set<String>, onPlay: (Recordin
                 else -> Icon(Icons.Default.ErrorOutline, null, Modifier.size(18.dp), tint = SwColors.Live)
             }
             Column(Modifier.weight(1f)) {
-                Text(r.title.ifBlank { r.channelName }, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(r.title.ifBlank { r.channelName } + (if (everyone && !r.viewerName.isNullOrBlank()) " · ${r.viewerName}" else ""),
+                    color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val line = buildString {
                     if (r.channelName.isNotBlank()) append(r.channelName).append(" · ")
                     append(recordingLabel(r))
@@ -139,7 +150,7 @@ private fun RecordingRow(r: Recording, published: Set<String>, onPlay: (Recordin
                 "recording" -> TipIconButton(label = "Stop recording", onClick = { onStop(r) }) { Icon(Icons.Default.Stop, "Stop recording", tint = SwColors.Live) }
                 "scheduled" -> TipIconButton(label = "Cancel", onClick = { onStop(r) }) { Icon(Icons.Default.Close, "Cancel") }
             }
-            if (r.status != "scheduled" && r.status != "recording") {
+            if (r.status != "scheduled" && r.status != "recording" && canDelete(r, viewerId)) {
                 TipIconButton(label = "Delete", onClick = { onDelete(r) }) { Icon(Icons.Default.Delete, "Delete", tint = SwColors.Live) }
             }
         }

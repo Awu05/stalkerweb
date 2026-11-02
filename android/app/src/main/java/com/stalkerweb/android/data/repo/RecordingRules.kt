@@ -142,3 +142,6 @@ fun publicRecordingName(r: Recording): String =
 fun recordingsHint(isSolo: Boolean): String =
     if (isSolo) "Live TV recorded on this device while StalkerWeb Solo's server is running. Finished ones are saved to Downloads/StalkerWeb. Kept until you delete them."
     else "Live TV recorded on the server — even with every app closed. Kept until you delete them."
+
+/** Whether this viewer may delete a recording: only its own (anyone may stop or cancel one — the server's routes/recordings.js). */
+fun canDelete(r: Recording, viewerId: String?): Boolean = r.viewerId == viewerId
