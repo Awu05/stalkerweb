@@ -1,10 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CircleDot, Clock, CheckCircle2, AlertCircle, Play, Square, X, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, stopRecording, deleteRecording } from '../stalkerApi'
-import { groupRecordings, recordingLabel, canDelete } from '@/lib/recordings'
-import { getViewerId } from '@/lib/viewer'
+import { groupRecordings, recordingLabel, keepRecordingsResult } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 import { Switch } from '@/components/ui/switch'
 
@@ -25,10 +24,13 @@ function Row({ r, onPlay, onStop, onDelete, everyone }) {
     <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       {icon}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[var(--color-text)] truncate">
-          {r.title || r.channelName}
-          {everyone && r.viewerName && <span className="ml-2 text-xs font-normal text-[var(--color-muted)]">· {r.viewerName}</span>}
-        </p>
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-sm font-medium text-[var(--color-text)] truncate">{r.title || r.channelName}</p>
+          {/* Who booked it: its own label, never cut off by a long title. */}
+          {everyone && r.viewerName && (
+            <span className="shrink-0 rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-xs text-[var(--color-muted)]">{r.viewerName}</span>
+          )}
+        </div>
         <p className={cn('text-xs mt-0.5 truncate', failed ? 'text-[var(--color-live)]' : 'text-[var(--color-muted)]')}>
           {r.channelName}{r.channelName ? ' · ' : ''}{recordingLabel(r)}{r.status === 'done' && r.error ? ` · ${r.error}` : ''}
         </p>
@@ -44,7 +46,7 @@ function Row({ r, onPlay, onStop, onDelete, everyone }) {
           {r.status === 'recording' ? <Square size={14} /> : <X size={14} />}
         </button>
       )}
-      {r.status !== 'scheduled' && r.status !== 'recording' && canDelete(r, getViewerId()) && (
+      {r.status !== 'scheduled' && r.status !== 'recording' && r.canDelete && (
         <button onClick={() => onDelete(r)} data-tooltip="Delete" aria-label="Delete" className={cn(iconButton, 'hover:text-[var(--color-live)] hover:bg-[var(--color-live)]/10')}>
           <Trash2 size={14} />
         </button>
@@ -70,9 +72,17 @@ export default function RecordingsPage() {
   const [error, setError] = useState('')
   // Everyone's recordings (each with who booked it) — remembered on this device.
   const [everyone, setEveryone] = useState(() => { try { return localStorage.getItem(EVERYONE_KEY) === '1' } catch { return false } })
-  const toggleEveryone = () => setEveryone((v) => { try { localStorage.setItem(EVERYONE_KEY, v ? '0' : '1') } catch { /* not kept */ } return !v })
+  const toggleEveryone = (on) => {
+    try { localStorage.setItem(EVERYONE_KEY, on ? '1' : '0') } catch { /* not kept */ }
+    setEveryone(on)
+  }
+  // The mode the switch is in now: an answer to a request made in the other one is dropped.
+  const mode = useRef(everyone)
+  useEffect(() => { mode.current = everyone }, [everyone])
 
-  const load = useCallback(() => getRecordings(everyone).then((r) => { setList(r.recordings || []); setError('') }).catch((e) => setError(e.message)), [everyone])
+  const load = useCallback(() => getRecordings(everyone)
+    .then((r) => { if (keepRecordingsResult(everyone, mode.current)) { setList(r.recordings || []); setError('') } })
+    .catch((e) => { if (keepRecordingsResult(everyone, mode.current)) setError(e.message) }), [everyone])
   useEffect(() => { load(); const t = setInterval(load, REFRESH_MS); return () => clearInterval(t) }, [load])
 
   const act = (p, done) => p.then(done).catch((e) => showToast(e.message, 'error')).finally(load)

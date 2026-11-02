@@ -29,13 +29,18 @@ export function stillRecording(list, id) {
   return !!list?.some((r) => r.id === id && r.status === 'recording')
 }
 
-/** { scheduled (soonest first), recording, done (newest first — failed and missed too) }; cancelled ones aren't shown. */
+/**
+ * { scheduled (soonest first), recording, done (newest first — failed and
+ * missed too) }. Cancelled ones aren't shown — unless someone else cancelled
+ * it (stoppedBy), so its owner sees who.
+ */
 export function groupRecordings(list) {
   const by = (s) => list.filter((r) => s.includes(r.status))
   return {
     scheduled: by(['scheduled']).sort((a, b) => a.startAt - b.startAt),
     recording: by(['recording']),
-    done: by(['done', 'failed', 'missed']).sort((a, b) => b.startAt - a.startAt),
+    done: list.filter((r) => ['done', 'failed', 'missed'].includes(r.status) || (r.status === 'cancelled' && r.stoppedBy))
+      .sort((a, b) => b.startAt - a.startAt),
   }
 }
 
@@ -69,11 +74,13 @@ export function recordingLabel(r, { now = Date.now(), timeZone } = {}) {
     case 'recording':
       return `Recording · ${length(now - r.startAt)} · ${size(r.bytes || 0)}`
     case 'done':
-      return `Recorded ${shortDate(r.startAt, timeZone)} · ${length((r.endedAt ?? r.endAt ?? now) - r.startAt)} · ${size(r.bytes || 0)}`
+      return `Recorded ${shortDate(r.startAt, timeZone)} · ${length((r.endedAt ?? r.endAt ?? now) - r.startAt)} · ${size(r.bytes || 0)}${r.stoppedBy ? ` · Stopped by ${r.stoppedBy}` : ''}`
     case 'failed':
       return `Failed — ${r.error || 'the recording didn\'t work'}`
     case 'missed':
       return 'Missed — the server wasn\'t running'
+    case 'cancelled':
+      return r.stoppedBy ? `Cancelled by ${r.stoppedBy}` : 'Cancelled'
     default:
       return ''
   }
@@ -101,7 +108,12 @@ export function saveRecordingPosition(id, position, duration, storage = browserS
   } catch { /* storage refused: no resume, nothing else lost */ }
 }
 
-/** Whether this viewer may delete a recording: only its own (anyone may stop or cancel one — routes/recordings.js). */
-export function canDelete(r, viewerId) {
-  return (r.viewerId ?? null) === (viewerId ?? null)
+/**
+ * Whether a list asked for with Everyone's recordings [asked] may be shown now
+ * the switch is [current]: one asked for before it changed is dropped, so it
+ * never overwrites the other mode's. (Who may delete one is the server's
+ * word: each row's canDelete.)
+ */
+export function keepRecordingsResult(asked, current) {
+  return asked === current
 }
