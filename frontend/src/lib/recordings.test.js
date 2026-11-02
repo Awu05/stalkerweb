@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, stillRecording } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, stillRecording } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -53,6 +53,14 @@ describe('endForChoice', () => {
     expect(endForChoice('30', NOW)).toBe(NOW + 30 * MIN)
     expect(endForChoice('120', NOW)).toBe(NOW + 120 * MIN)
     expect(endForChoice('stop', NOW)).toBeNull()
+  })
+})
+
+describe('recordChoices', () => {
+  it('offers "until the programme ends" only when the guide has an end still to come', () => {
+    expect(recordChoices(NOW + 25 * MIN, NOW).map((c) => c.id)).toEqual(['programme', '30', '60', '120', 'stop'])
+    expect(recordChoices(null, NOW).map((c) => c.id)).toEqual(['30', '60', '120', 'stop'])
+    expect(recordChoices(NOW - MIN, NOW).map((c) => c.id)).toEqual(['30', '60', '120', 'stop'])
   })
 })
 
