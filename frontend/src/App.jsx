@@ -378,7 +378,7 @@ function AppInner() {
     }
     const poll = async () => {
       try {
-        const s = await getStatus()
+        const s = await getStatus({ background: true })   // the 30 s poll never wakes the server
         setConnected(portalUsable(s))
         setBadge(prev => {
           const next = connectionBadge(s)
@@ -423,12 +423,12 @@ function AppInner() {
     : null
 
   const ctxValue = useMemo(
-    () => ({ connected, setConnected, epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
+    () => ({ connected, setConnected, badge, portalLive: badge.tone === 'ok', epgEnabled, setEpgEnabled, showAdult, setShowAdult, disabledGenres, setDisabledGenres, disabledLanguages, setDisabledLanguages, setLastPingAt, setIdleInfo,
       viewer, viewers, refreshViewers, switchViewer, applyViewer, openViewerPicker: () => setPickerOpen(true), connection, refreshConnection,
       // Keeps the current viewer in step with a filter just saved (no reload).
       updateViewerFields: (fields) => setViewer((v) => (v ? { ...v, ...fields } : v)) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the functions only call setters
-    [connected, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers, connection]
+    [connected, badge, epgEnabled, showAdult, disabledGenres, disabledLanguages, viewer, viewers, connection]
   )
 
   // Connecting, switching connection or disconnecting (in Settings) shows in

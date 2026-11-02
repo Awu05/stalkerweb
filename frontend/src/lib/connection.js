@@ -30,3 +30,12 @@ export function connectionBadge(status) {
   if (status?.asleep) return { text: 'Asleep — reconnects when you use it', tone: 'asleep' }
   return { text: 'Disconnected', tone: 'off' }
 }
+
+// Settings → IPTV connection: { portals, reconnect, disconnect } — whether it
+// offers the portals to pick and Reconnect (disconnected, or a wake that
+// failed), and Disconnect (connected or asleep: it stops the reconnect on use).
+export function connectionActions(status) {
+  const failedWake = !!(status?.asleep && status.wakeError && !status.connected)
+  const usable = portalUsable(status)
+  return { portals: !usable || failedWake, reconnect: !usable || failedWake, disconnect: usable }
+}

@@ -22,7 +22,7 @@ import {
 import { invalidateChannelCache } from '../lib/channelCache'
 import { invalidateFavoritesCache } from '../lib/useFavorites'
 import { useApp } from '@/lib/appContext'
-import { portalUsable } from '@/lib/connection'
+import { portalUsable, connectionActions } from '@/lib/connection'
 import {
   fetchProfiles, createProfile, updateProfile, deleteProfile,
   normalizePortal, DEFAULT_FORM,
@@ -477,7 +477,8 @@ function StbImportPicker({ candidates, onImport, onClose }) {
 
 // ── Profile card ──────────────────────────────────────────────────────────────
 
-function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onDelete, connecting }) {
+// badge: the current connection's (lib/connection.js connectionBadge) — asleep, or why its reconnect failed.
+function ProfileCard({ profile, isConnected, badge, onConnect, onEdit, onDuplicate, onDelete, connecting }) {
   const label = profile.name || new URL(profile.portal).hostname || profile.portal
   const busy  = connecting === profile.id
 
@@ -493,7 +494,7 @@ function ProfileCard({ profile, isConnected, onConnect, onEdit, onDuplicate, onD
       {isConnected && (
         <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-semibold text-[var(--color-primary-light)] bg-[var(--color-primary)]/15 rounded-full px-2 py-0.5">
           <Wifi size={10} />
-          Connected
+          {!badge || badge.tone === 'ok' ? 'Connected' : badge.tone === 'error' ? "Couldn't reconnect" : 'Asleep'}
         </span>
       )}
 
@@ -561,7 +562,9 @@ export default function SetupPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { connected, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer, connection, refreshConnection } = useApp()
+  const { connected, portalLive, badge, setConnected, setEpgEnabled, setLastPingAt, setIdleInfo, viewer, connection, refreshConnection } = useApp()
+  // What the connection offers (lib/connection.js): Disconnect while connected or asleep — a failed wake too.
+  const actions = connectionActions({ connected: badge.tone === 'ok', asleep: badge.tone === 'asleep' || badge.tone === 'error', wakeError: badge.tone === 'error' ? badge.text : null })
 
   // ── Profiles ────────────────────────────────────────────────────────────────
   const [profiles, setProfiles]     = useState([])
@@ -680,14 +683,16 @@ export default function SetupPage() {
     })()
   }, [])
 
+  // The channels without a logo — only while really connected: opening
+  // Settings never wakes an asleep server.
   useEffect(() => {
-    if (!connected) return
+    if (!portalLive) return
     Promise.all([getChannels(), getLogoMap()]).then(([chRes, logoMap]) => {
       const channels   = chRes.channels ?? []
       const unmatched  = channels.filter(ch => !logoMap[String(ch.uniqueId)]).map(ch => ({ name: ch.name, number: ch.number })).filter(ch => ch.name).sort((a, b) => a.number - b.number)
       setUnmatchedChannels(unmatched)
     }).catch(() => {})
-  }, [connected])
+  }, [portalLive])
 
   useEffect(() => {
     if (!logoSearchOpen) return
@@ -1006,12 +1011,15 @@ export default function SetupPage() {
             <p className="text-sm text-[var(--color-muted)] mt-1">Viewers, IPTV connections, links and app preferences.</p>
             {connected && connection && (
               <p className="flex items-center gap-2 text-sm text-[var(--color-muted)] mt-2" title={connection.host}>
-                <span className="inline-block h-2 w-2 rounded-full shrink-0 bg-[var(--color-success)]" />
-                <span className="truncate">Connected to <span className="font-medium text-[var(--color-text)]">{connection.name}</span>{connection.name !== connection.host && <> · {connection.host}</>}</span>
+                {/* The sidebar badge's words (lib/connection.js connectionBadge): green only when really connected. */}
+                <span className={cn('inline-block h-2 w-2 rounded-full shrink-0', badge.tone === 'ok' ? 'bg-[var(--color-success)]' : badge.tone === 'error' ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-muted)]')} />
+                {badge.tone === 'ok'
+                  ? <span className="truncate">Connected to <span className="font-medium text-[var(--color-text)]">{connection.name}</span>{connection.name !== connection.host && <> · {connection.host}</>}</span>
+                  : <span className="truncate">{badge.text} · <span className="font-medium text-[var(--color-text)]">{connection.name}</span></span>}
               </p>
             )}
           </div>
-          {connected && (
+          {actions.disconnect && (
             <button
               onClick={handleDisconnect}
               className="flex items-center gap-1.5 text-xs text-[var(--color-muted)] hover:text-[var(--color-live)] transition-colors border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5 hover:border-[var(--color-live)]/40 mt-1"
@@ -1067,6 +1075,7 @@ export default function SetupPage() {
               key={p.id}
               profile={p}
               isConnected={isConnectedProfile(p)}
+              badge={isConnectedProfile(p) ? badge : null}
               onConnect={handleConnect}
               onEdit={prof => setSheet(prof)}
               onDuplicate={handleDuplicateProfile}
@@ -1481,6 +1490,9 @@ export default function SetupPage() {
           )}
           <form onSubmit={handleAddOverride} className="flex flex-col gap-2">
             <p className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wide">Add Override</p>
+            {connected && !portalLive && (
+              <p className="text-xs text-[var(--color-muted)]">Channels without a logo: connect to see this — the portal is asleep, and reconnects when you open a page.</p>
+            )}
             <div className="flex gap-2">
               <div ref={logoSearchRef} className="relative flex-1">
                 <Input

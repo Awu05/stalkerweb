@@ -62,7 +62,7 @@ function AllNone({ onAll, onNone }) {
 
 export default function ChannelFilters() {
   const {
-    connected, viewer, showAdult, setShowAdult, disabledGenres, setDisabledGenres,
+    connected, portalLive, viewer, showAdult, setShowAdult, disabledGenres, setDisabledGenres,
     disabledLanguages, setDisabledLanguages, applyViewer, updateViewerFields,
   } = useApp()
   const [genres, setGenres]       = useState(null)   // live categories, null while loading
@@ -84,8 +84,9 @@ export default function ChannelFilters() {
   useEffect(() => { setHiddenVod(toHiddenMap(viewer?.disabledVodCategories)) }, [viewer?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The lists. While the portal is still loading its channel groups, try again.
+  // Only while really connected: opening Settings never wakes an asleep server.
   useEffect(() => {
-    if (!connected) return
+    if (!portalLive) return
     let cancelled = false
     let timer = null
     let tries = 0
@@ -97,7 +98,7 @@ export default function ChannelFilters() {
     }).catch(() => { if (!cancelled) { setGenres((g) => g ?? []); setVodTitles((v) => v ?? []) } })
     load()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [connected])
+  }, [portalLive])
 
   // ── What's hidden ────────────────────────────────────────────────────────
   const oldLanguages = useMemo(() => toLanguageSet([...disabledLanguages]), [disabledLanguages])
@@ -166,6 +167,8 @@ export default function ChannelFilters() {
 
       {!connected ? (
         <p className="text-sm text-[var(--color-muted)]">Connect to a portal to choose which categories you see.</p>
+      ) : !portalLive ? (
+        <p className="text-sm text-[var(--color-muted)]">Connect to see this — the portal is asleep, and reconnects when you open a page.</p>
       ) : genres === null || vodTitles === null ? (
         <div className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
           <Loader2 size={14} className="animate-spin" /> Loading categories…

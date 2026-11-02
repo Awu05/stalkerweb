@@ -152,7 +152,7 @@ export default function ChannelsPage() {
     let cancelled = false
     const refresh = (background) => getNowNext({ background }).then(d => { if (!cancelled) setNowNext(d) }).catch(() => {})
     refresh(false)
-    // The timed refresh never wakes an asleep server (stalkerApi.js).
+    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
     const id = setInterval(() => refresh(true), 5 * 60 * 1000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
@@ -160,9 +160,10 @@ export default function ChannelsPage() {
   // Poll channel stream-health and refresh periodically (it self-heals on success).
   useEffect(() => {
     let cancelled = false
-    const refresh = () => getChannelHealth().then(h => { if (!cancelled) setHealth(h || {}) }).catch(() => {})
-    refresh()
-    const id = setInterval(refresh, 60_000)
+    const refresh = (background) => getChannelHealth({ background }).then(h => { if (!cancelled) setHealth(h || {}) }).catch(() => {})
+    refresh(false)
+    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
+    const id = setInterval(() => refresh(true), 60_000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 

@@ -29,8 +29,10 @@ async function _fetch(path, opts = {}) {
   }
 }
 
-// background: a timed refresh, not someone using the app — it never wakes the
-// server's portal session (asleep after the idle timeout, backend middleware/session.js).
+// { background: true }: asked by a timer or a poll, not by someone using the
+// app — the one rule for that: it goes with X-Background: 1 and never wakes the
+// server's portal session (asleep after the idle timeout, backend
+// middleware/session.js). Every interval and polling loop passes it.
 async function _get(path, { background = false } = {}) {
   return _fetch(path, background ? { headers: { 'X-Background': '1' } } : {})
 }
@@ -73,7 +75,7 @@ export async function disconnect() {
   invalidateFavoritesCache()
   return result
 }
-export const getStatus = () => _get('/auth/status')
+export const getStatus = (opts) => _get('/auth/status', opts)
 // Languages offered for the per-profile hide filter — union of channel genres
 // and VOD categories, so portal spelling variants are each togglable.
 export const getLanguages = () => _get('/channels/languages')
@@ -104,21 +106,21 @@ export const deleteProfileRemote    = (id)        => _delete(`/profiles/${id}`)
 export const setActiveProfileRemote = (id)        => _put('/profiles/active', { id })
 
 // ── Channels & Groups ─────────────────────────────────────────────────────
-export const getChannels = (group = null, refresh = false) => {
+export const getChannels = (group = null, refresh = false, opts) => {
   const params = new URLSearchParams()
   if (group) params.set('group', group)
   if (refresh) params.set('refresh', '1')
-  return _get(`/channels?${params}`)
+  return _get(`/channels?${params}`, opts)
 }
 
-export const getGroups = (refresh = false) =>
-  _get(`/channels/groups/all${refresh ? '?refresh=1' : ''}`)
+export const getGroups = (refresh = false, opts) =>
+  _get(`/channels/groups/all${refresh ? '?refresh=1' : ''}`, opts)
 
 // ── EPG ───────────────────────────────────────────────────────────────────
 export const getEpg = (period = 24) => _get(`/epg?period=${period}`)
-export const getChannelEpg = (channelId, period = 24) =>
-  _get(`/epg/${channelId}?period=${period}`)
-export const getNowNext = ({ background = false } = {}) => _get('/epg/now', { background })
+export const getChannelEpg = (channelId, period = 24, opts) =>
+  _get(`/epg/${channelId}?period=${period}`, opts)
+export const getNowNext = (opts) => _get('/epg/now', opts)
 
 // ── Logos ─────────────────────────────────────────────────────────────────
 export const getLogos = () => _get('/logos')
@@ -164,12 +166,12 @@ export async function downloadStbEmuBackup(profile) {
 }
 
 // ── Channel progress ──────────────────────────────────────────────────────
-export const getChannelProgress = () => _get('/channels/progress')
+export const getChannelProgress = (opts) => _get('/channels/progress', opts)
 
 // ── Channel stream health ───────────────────────────────────────────────────
 // { [uniqueId]: { errors, lastError } } — recent stream-resolution failures,
 // self-healing (cleared on a successful play). In-memory per server process.
-export const getChannelHealth = () => _get('/channels/health')
+export const getChannelHealth = (opts) => _get('/channels/health', opts)
 
 // ── Favorites order ───────────────────────────────────────────────────────
 export const reorderFavoriteChannels = (order) => _put('/favorites/channels/order', { order })
@@ -178,13 +180,13 @@ export const reorderFavoriteGroups   = (order) => _put('/favorites/groups/order'
 // ── Stream ────────────────────────────────────────────────────────────────
 export const getStreamUrl = (channelId) => _get(`/stream/${channelId}`)
 // What's playing through this server now, whose, and on what (Settings → Activity).
-export const getActivity = () => _get('/activity')
+export const getActivity = (opts) => _get('/activity', opts)
 // How the server sends this stream to this device: { delivery: { mode, detail } | null } (the player's Stats).
-export const getStreamDelivery = (kind, id) => _get(`/activity/delivery?kind=${kind}&id=${encodeURIComponent(id)}`)
+export const getStreamDelivery = (kind, id, opts) => _get(`/activity/delivery?kind=${kind}&id=${encodeURIComponent(id)}`, opts)
 // The round trip to the server, in ms (the player's Stats); null when it doesn't answer.
-export async function pingServer() {
+export async function pingServer(opts) {
   const t0 = performance.now()
-  try { await _get('/health'); return Math.round(performance.now() - t0) } catch { return null }
+  try { await _get('/health', opts); return Math.round(performance.now() - t0) } catch { return null }
 }
 // The links a cast device (Chromecast, Apple TV) opens itself: { url, contentType, live, reachable }.
 export const getChannelCastLink = (channelId) => _get(`/stream/${encodeURIComponent(channelId)}/cast`)
@@ -198,7 +200,7 @@ export const getVodCastLink = ({ videoId, cmd = '', series = 0, seasonId = '', e
   if (episodeId) p.set('episodeId', String(episodeId))
   return _get(`/vod/cast?${p}`)
 }
-export const streamKeepalive = () => _get('/stream/keepalive')
+export const streamKeepalive = (opts) => _get('/stream/keepalive', opts)
 
 // ── VOD progress (Continue Watching) ─────────────────────────────────────
 // What the current viewer watched (backend viewers/WatchStore.js).
@@ -273,7 +275,7 @@ export const enqueueDownloads = (items)  => _post('/downloads', { items })
 export const cancelDownload   = (id)     => _delete(`/downloads/${encodeURIComponent(id)}`)
 
 // ── Live TV recordings (the server's recordings/) ─────────────────────────
-export const getRecordings     = (all = false) => _get(`/recordings${all ? '?all=1' : ''}`)
+export const getRecordings     = (all = false, opts) => _get(`/recordings${all ? '?all=1' : ''}`, opts)
 export const scheduleRecording = (programme)   => _post('/recordings', programme)            // { channelId, channelName, title, startAt, endAt, force? }
 export const recordNow         = (p)           => _post('/recordings/now', p)                // { channelId, channelName, title, endAt | null, force? }
 export const stopRecording     = (id)          => _post(`/recordings/${encodeURIComponent(id)}/stop`, {})

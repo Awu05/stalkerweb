@@ -157,11 +157,12 @@ function NowPlayingGuide({ channelId }) {
     if (!channelId) return
     let cancelled = false
     setEvents(null)
-    const load = () => getChannelEpg(channelId, 6)
+    const load = (background) => getChannelEpg(channelId, 6, { background })
       .then(d => { if (!cancelled) setEvents(d?.events || []) })
       .catch(() => { if (!cancelled) setEvents([]) })
-    load()
-    const id = setInterval(load, 10 * 60 * 1000)
+    load(false)
+    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
+    const id = setInterval(() => load(true), 10 * 60 * 1000)
     return () => { cancelled = true; clearInterval(id) }
   }, [channelId])
 
@@ -648,7 +649,7 @@ export default function PlayerPage() {
     let cancelled = false
     const refresh = (background) => getNowNext({ background }).then(d => { if (!cancelled) setNowNext(d) }).catch(() => {})
     refresh(false)
-    // The timed refresh never wakes an asleep server (stalkerApi.js).
+    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
     const id = setInterval(() => refresh(true), 5 * 60 * 1000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
@@ -1131,7 +1132,7 @@ export default function PlayerPage() {
   // during playback, whatever idle timeout is configured in Settings.
   useEffect(() => {
     if (status !== 'playing') return
-    const id = setInterval(() => { streamKeepalive().catch(() => {}) }, 10 * 60 * 1000)
+    const id = setInterval(() => { streamKeepalive({ background: true }).catch(() => {}) }, 10 * 60 * 1000)
     return () => clearInterval(id)
   }, [status])
 
