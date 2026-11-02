@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { isLanguageDisabled } from '@/lib/languages'
-import { matchesStation } from '@/lib/stationSearch'
+import { shownInGuide, guideEmptyMessage } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getChannelEpg } from '../stalkerApi'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
@@ -31,7 +31,7 @@ function isNow(startTime, endTime) {
 }
 
 // The Guide page's list view: one channel's programmes at a time.
-export default function GuideListView({ query = '' }) {
+export default function GuideListView({ query = '', favoriteIds = null }) {
   const navigate = useNavigate()
   const { showAdult, disabledGenres, disabledLanguages } = useApp()
   const [allChannels, setChannels] = useState([])
@@ -78,13 +78,13 @@ export default function GuideListView({ query = '' }) {
     return () => { cancelled = true; unsub() }
   }, [showAdult, disabledGenres, disabledLanguages])
 
-  const channels = useMemo(() => allChannels.filter(ch => matchesStation(ch, query)), [allChannels, query])
+  const channels = useMemo(() => allChannels.filter(ch => shownInGuide(ch, query, favoriteIds)), [allChannels, query, favoriteIds])
 
-  // Searching shows the first match.
+  // Searching, or Favorites, shows the first match.
   useEffect(() => {
-    if (!query.trim() || !channels.length) return
+    if ((!query.trim() && !favoriteIds) || !channels.length) return
     setActiveChannel(cur => (cur && channels.some(c => c.uniqueId === cur.uniqueId) ? cur : channels[0]))
-  }, [query, channels])
+  }, [query, favoriteIds, channels])
 
   useEffect(() => {
     if (!activeChannel?.uniqueId) return
@@ -112,7 +112,7 @@ export default function GuideListView({ query = '' }) {
         ) : (
           <ScrollArea className="flex-1">
             {channels.length === 0 && (
-              <p className="px-4 py-3 text-xs text-[var(--color-muted)]">No stations match “{query.trim()}”.</p>
+              <p className="px-4 py-3 text-xs text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds)}</p>
             )}
             {channels.map(ch => (
               <button

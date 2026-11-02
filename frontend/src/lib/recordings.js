@@ -13,6 +13,11 @@ export const RECORD_CHOICES = [
   { id: 'stop', label: 'Until I stop it' },
 ]
 
+/** The lengths offered: "until the programme ends" only with a guide end still to come. */
+export function recordChoices(programmeEnd, now) {
+  return programmeEnd && programmeEnd > now ? RECORD_CHOICES : RECORD_CHOICES.filter((c) => c.id !== 'programme')
+}
+
 /** When a recording started now ends: ms, or null for "until stopped". No guide end: an hour. */
 export function endForChoice(choice, now, programmeEnd = null) {
   if (choice === 'stop') return null

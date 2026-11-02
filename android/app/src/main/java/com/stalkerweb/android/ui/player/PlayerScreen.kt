@@ -74,6 +74,9 @@ import coil.compose.AsyncImage
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.api.NowNextEntry
+import com.stalkerweb.android.data.repo.RECORD_CHOICES
+import com.stalkerweb.android.data.repo.RecordChoice
+import com.stalkerweb.android.data.repo.recordChoices
 import com.stalkerweb.android.data.repo.nowPlaying
 import com.stalkerweb.android.data.repo.eventAt
 import com.stalkerweb.android.data.repo.progressAt
@@ -126,6 +129,7 @@ private class LiveControls(
     val stats: StatsRepository? = null,
     val recordingHere: Boolean = false,   // this player is recording the channel playing (Record stops it)
     val recordWhat: String = "",          // what Record would record: the programme on now, or the channel
+    val recordChoices: List<RecordChoice> = RECORD_CHOICES,   // its lengths — no "until the programme ends" without a guide end
 )
 
 /** What the controls can do. */
@@ -314,6 +318,7 @@ fun PlayerScreen(
         isTV = isTV, statsOpen = statsOpen, stats = viewModel.stats,
         recordingHere = state.recording?.first == activeId,
         recordWhat = programmeNow?.title?.takeIf { it.isNotBlank() }?.let { "\"$it\"" } ?: displayName,
+        recordChoices = recordChoices(programmeNow?.endTime?.times(1000), nowSecs * 1000),
     )
     val actions = LiveActions(
         onBack                 = onBack,
@@ -580,7 +585,7 @@ private fun LandscapePlayer(c: LiveControls, a: LiveActions, castManager: com.st
                     }
                     Spacer(Modifier.weight(1f))
                     TrackButtons(c.audio, c.subtitles, a)
-                    RecordButton(c.recordingHere, c.recordWhat, Color.White, a.onRecord, a.onStopRecording)
+                    RecordButton(c.recordingHere, c.recordWhat, c.recordChoices, Color.White, a.onRecord, a.onStopRecording)
                     TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                         Icon(
                             if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -710,7 +715,7 @@ private fun PortraitPlayer(c: LiveControls, a: LiveActions, castManager: com.sta
             SleepTimerChip(s.sleepTimerEndsAt)
             Spacer(Modifier.width(4.dp))
             LiveBadge()
-            RecordButton(c.recordingHere, c.recordWhat, MaterialTheme.colorScheme.onSurface, a.onRecord, a.onStopRecording)
+            RecordButton(c.recordingHere, c.recordWhat, c.recordChoices, MaterialTheme.colorScheme.onSurface, a.onRecord, a.onStopRecording)
             TipIconButton(label = if (isFav) "Remove from favorites" else "Add to favorites", onClick = a.onToggleActiveFavorite) {
                 Icon(
                     if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,

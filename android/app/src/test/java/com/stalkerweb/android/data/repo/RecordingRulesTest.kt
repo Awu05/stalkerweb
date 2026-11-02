@@ -66,6 +66,12 @@ class RecordingRulesTest {
         assertEquals("Missed — the server wasn't running", recordingLabel(rec(status = "missed", startAt = now, endAt = now), now, utc))
     }
 
+    @Test fun `until the programme ends is offered only with a guide end still to come`() {
+        assertEquals(listOf("programme", "30", "60", "120", "stop"), recordChoices(now + 25 * min, now).map { it.id })
+        assertEquals(listOf("30", "60", "120", "stop"), recordChoices(null, now).map { it.id })
+        assertEquals(listOf("30", "60", "120", "stop"), recordChoices(now - min, now).map { it.id })
+    }
+
     @Test fun `until the programme ends (an hour when the guide has no end), a set time, or until stopped`() {
         assertEquals(listOf("programme", "30", "60", "120", "stop"), RECORD_CHOICES.map { it.id })
         assertEquals("Until the programme ends", RECORD_CHOICES.first().label)
