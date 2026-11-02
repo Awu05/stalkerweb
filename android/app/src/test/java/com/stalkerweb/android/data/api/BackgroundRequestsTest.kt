@@ -37,7 +37,7 @@ class BackgroundRequestsTest {
         ask { api.getNowNext(bg) }
         ask { api.getChannelHealth(bg) }
         ask { api.getChannelEpg("1", 6, bg) }
-        ask { api.getRecordings(bg) }
+        ask { api.getRecordings(background = bg) }
         ask { api.getDownloads(bg) }
         ask { api.getActivity(bg) }
         ask { api.getStreamDelivery("live", "1", bg) }

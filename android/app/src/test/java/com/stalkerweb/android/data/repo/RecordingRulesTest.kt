@@ -134,4 +134,34 @@ class RecordingRulesTest {
         assertNull(copyToDelete(isSolo = true, copy = null))
         assertNull(copyToDelete(isSolo = false, copy = copy))
     }
+
+    @Test fun `says who stopped someone else's recording, or cancelled their booking`() {
+        assertEquals("Recorded 31 Oct · 20 min · 200 MB · Stopped by Bea",
+            recordingLabel(rec(status = "done", startAt = now - 120 * min, endAt = now + 60 * min, endedAt = now - 100 * min, bytes = 200 * mb).copy(stoppedBy = "Bea"), now, utc))
+        assertEquals("Cancelled by Bea", recordingLabel(rec(status = "cancelled", startAt = now, endAt = now + min).copy(stoppedBy = "Bea"), now, utc))
+    }
+
+    @Test fun `a booking someone else cancelled is listed with the recorded ones, one its owner cancelled is not`() {
+        val g = groupRecordings(listOf(rec("a", "cancelled", now, now + min).copy(stoppedBy = "Bea"), rec("b", "cancelled", now, now + min)))
+        assertEquals(listOf("a"), g.done.map { it.id })
+    }
+
+    @Test fun `a list asked for before the switch changed is dropped`() {
+        assertTrue(keepRecordingsResult(asked = true, current = true))
+        assertTrue(keepRecordingsResult(asked = false, current = false))
+        assertFalse(keepRecordingsResult(asked = false, current = true))
+        assertFalse(keepRecordingsResult(asked = true, current = false))
+    }
+
+    @Test fun `Solo saves only its own recordings to Downloads, never another viewer's`() {
+        val done = rec("d", "done", now - 60 * min, now - min).copy(filePath = "/data/recordings/a.ts", bytes = mb)
+        val list = listOf(done.copy(id = "mine", mine = true), done.copy(id = "theirs", mine = false))
+        assertEquals(listOf("mine"), ownRecordings(list).map { it.id })
+        assertEquals(listOf("mine"), recordingsToPublish(ownRecordings(list), emptySet()).map { it.id })
+    }
+
+    @Test fun `the server's recording link names this device's viewer, for its filters`() {
+        assertEquals("http://h:1/k/t/proxy/recording/a%20b/index.m3u8?viewer=view_1", recordingServerUrl("http://h:1/k/t", "a b", "view_1"))
+        assertEquals("http://h:1/proxy/recording/r/index.m3u8", recordingServerUrl("http://h:1", "r", null))   // Solo: no viewer of its own
+    }
 }

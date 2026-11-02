@@ -85,3 +85,36 @@ describe('stillRecording', () => {
     expect(stillRecording(null, 'a')).toBe(false)
   })
 })
+
+describe('who stopped or cancelled it', () => {
+  const o = { now: NOW, timeZone: 'UTC' }
+  it("says who stopped someone else's recording, or cancelled their booking", () => {
+    expect(recordingLabel(rec({ status: 'done', startAt: NOW - 120 * MIN, endAt: NOW + 60 * MIN, endedAt: NOW - 100 * MIN, bytes: 200 * 1024 ** 2, stoppedBy: 'Bea' }), o))
+      .toBe('Recorded 31 Oct · 20 min · 200 MB · Stopped by Bea')
+    expect(recordingLabel(rec({ status: 'cancelled', startAt: NOW, endAt: NOW + MIN, stoppedBy: 'Bea' }), o)).toBe('Cancelled by Bea')
+  })
+  it('a booking someone else cancelled is listed with the recorded ones, so its owner sees it; one cancelled by its owner is not', () => {
+    const g = groupRecordings([
+      rec({ id: 'a', status: 'cancelled', startAt: NOW, endAt: NOW + MIN, stoppedBy: 'Bea' }),
+      rec({ id: 'b', status: 'cancelled', startAt: NOW, endAt: NOW + MIN }),
+    ])
+    expect(g.done.map((r) => r.id)).toEqual(['a'])
+  })
+})
+
+describe('keepRecordingsResult', () => {
+  it("keeps a list only when it was asked for in the mode the switch is in now", async () => {
+    const { keepRecordingsResult } = await import('./recordings')
+    expect(keepRecordingsResult(true, true)).toBe(true)
+    expect(keepRecordingsResult(false, false)).toBe(true)
+    expect(keepRecordingsResult(false, true)).toBe(false)   // asked before the switch went on: dropped
+    expect(keepRecordingsResult(true, false)).toBe(false)
+  })
+})
+
+describe('the server decides who may delete', () => {
+  it('there is no canDelete of its own here (the list says canDelete)', async () => {
+    const lib = await import('./recordings')
+    expect(lib.canDelete).toBeUndefined()
+  })
+})

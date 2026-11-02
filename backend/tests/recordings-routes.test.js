@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -38,7 +38,7 @@ describe('/api/recordings', () => {
     const app = express()
     app.use(express.json())
     app.use(createViewerContext(viewers).middleware)
-    app.use('/api/recordings', recordingsModule(appState, { now: () => clock.t, settings: () => settings, viewerName: (id) => viewers.get?.(id)?.name ?? (id === andy ? 'Andy' : id === bea ? 'Bea' : '') }))
+    app.use('/api/recordings', recordingsModule(appState, { now: () => clock.t, settings: () => settings, viewerOf: (id) => viewers.get(id) }))
     app.use('/proxy', proxyRecording(appState))
     await new Promise((r) => { server = app.listen(0, r) })
     base = `http://127.0.0.1:${server.address().port}`
@@ -143,6 +143,16 @@ describe('/api/recordings', () => {
     expect(all.length).toBeGreaterThan(0)
     expect(all[0]).toHaveProperty('viewerName', 'Andy')
     expect((await call('DELETE', `/api/recordings/${all[0].id}`, null, bea)).status).toBe(404)   // not hers to delete
+  })
+
+  it("anyone can stop or cancel a household recording (to clear a clash), but only its owner deletes it", async () => {
+    const booked = await call('POST', '/api/recordings', programme({ channelId: '20', title: 'Late Show', startAt: T0 + 300 * MIN, endAt: T0 + 360 * MIN }))
+    expect(booked.status).toBe(201)
+    const cancelled = await call('POST', `/api/recordings/${booked.body.id}/stop`, null, bea)
+    expect(cancelled.status).toBe(200)
+    expect(cancelled.body.status).toBe('cancelled')
+    expect((await call('DELETE', `/api/recordings/${booked.body.id}`, null, bea)).status).toBe(404)
+    expect((await call('POST', '/api/recordings/nope/stop', null, bea)).status).toBe(404)
   })
 })
 
@@ -270,5 +280,171 @@ describe('recording playlists', () => {
     const pieces = Array.from({ length: 200_000 }, (_, i) => ({ o: i * 10, l: 10, d: i === 7 ? 9.2 : 4 }))
     const m3u8 = playlistOf(pieces, '../r')
     expect(m3u8).toContain('#EXT-X-TARGETDURATION:10')
+  })
+})
+
+// A household: Default (Solo's only viewer), Andy, Bea and Kid, with channels (one adult, one in a genre Kid hides).
+async function makeHousehold() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-rec-household-'))
+  const viewers = new ViewersManager(d)
+  viewers.ensureInitialized({})
+  const ids = { default: viewers.getDefault().id, andy: viewers.create({ name: 'Andy' }).id, bea: viewers.create({ name: 'Bea' }).id, kid: viewers.create({ name: 'Kid' }).id }
+  viewers.setFilters(ids.andy, { showAdult: true })
+  viewers.setFilters(ids.kid, { disabledGenres: ['Sport'] })
+  const channels = [
+    { id: '7', name: 'News 24', genre: 'News' },
+    { id: '66', name: 'Late Night', genre: 'Adult' },
+    { id: '9', name: 'Sports 1', genre: 'Sport' },
+  ]
+  const c = { t: T0 - 30 * MIN }
+  const store = new RecordingStore(d, { now: () => c.t })
+  const start = (o) => new Promise((resolve) => {
+    fs.writeFileSync(o.filePath + '.part', Buffer.from('ts-bytes-0123456789'))
+    o.signal.addEventListener('abort', () => { fs.renameSync(o.filePath + '.part', o.filePath); resolve({ status: 'done', bytes: 19 }) }, { once: true })
+  })
+  const scheduler = new RecordingScheduler({ store, start, now: () => c.t, tickMs: 1e9, urlFor: (id) => `http://x/proxy/stream/${id}`, dirFor: () => d, timeZone: 'UTC' })
+  const s = { max_streams: 4, record_pad_before_min: 0, record_pad_after_min: 0 }
+  const st = { recordings: scheduler, recordingStore: store, activeStreams: 0 }
+  const opts = { viewerOf: (id) => viewers.get(id), channels: () => channels }
+  const app = express()
+  app.use(express.json())
+  app.use(createViewerContext(viewers).middleware)
+  app.use('/api/recordings', recordingsModule(st, { settings: () => s, now: () => c.t, ...opts }))
+  app.use('/proxy', proxyRecording(st, opts))
+  const srv = await new Promise((r) => { const x = app.listen(0, () => r(x)) })
+  const b = `http://127.0.0.1:${srv.address().port}`
+  // as: a viewer id (sent as X-Viewer), or null for none (Solo, a cast device).
+  const send = async (method, p, body, as = null) => {
+    const headers = { 'Content-Type': 'application/json', ...(as ? { 'X-Viewer': as } : {}) }
+    const r = await fetch(b + p, { method, headers, body: body ? JSON.stringify(body) : undefined })
+    const text = await r.text()
+    let json = null; try { json = JSON.parse(text) } catch { /* not JSON */ }
+    return { status: r.status, body: json, text }
+  }
+  const finished = (o) => {
+    const r = store.schedule({ channelName: 'News 24', title: 'Show', startAt: T0 - 120 * MIN, endAt: T0 - 60 * MIN, channelId: '7', ...o })
+    const filePath = path.join(d, `${r.id}.ts`)
+    fs.writeFileSync(filePath, 'ts-bytes')
+    fs.writeFileSync(`${filePath}.index`, '{"o":0,"l":8,"d":4.0}\n')
+    return store.update(r.id, { status: 'done', bytes: 8, filePath })
+  }
+  const close = async () => { await scheduler.stopAll(); srv.closeAllConnections(); srv.close(); fs.rmSync(d, { recursive: true, force: true }) }
+  return { ids, viewers, store, scheduler, clock: c, send, finished, close }
+}
+
+describe('/api/recordings — who owns one, and who may see it', () => {
+  let h
+  beforeEach(async () => { h = await makeHousehold() })
+  afterEach(async () => { await h.close() })
+  const row = (res, id) => res.body.recordings.find((x) => x.id === id)
+
+  it('every row says whether it is mine and whether I may delete it', async () => {
+    const a = h.finished({ viewerId: h.ids.andy })
+    const mineToAndy = row(await h.send('GET', '/api/recordings?all=1', null, h.ids.andy), a.id)
+    expect(mineToAndy).toMatchObject({ mine: true, canDelete: true, viewerName: 'Andy' })
+    const toBea = row(await h.send('GET', '/api/recordings?all=1', null, h.ids.bea), a.id)
+    expect(toBea).toMatchObject({ mine: false, canDelete: false })
+    expect(row(await h.send('GET', '/api/recordings', null, h.ids.andy), a.id)).toMatchObject({ mine: true, canDelete: true })
+  })
+
+  it('Solo (no X-Viewer: the Default viewer) may delete its own recordings', async () => {
+    const booked = await h.send('POST', '/api/recordings/now', { channelId: '7', channelName: 'News 24', title: 'Solo', endAt: null, force: true })
+    expect(booked.body.viewerId).toBe(h.ids.default)
+    await h.send('POST', `/api/recordings/${booked.body.id}/stop`)
+    await h.scheduler.settled(booked.body.id)
+    const r = row(await h.send('GET', '/api/recordings'), booked.body.id)
+    expect(r).toMatchObject({ mine: true, canDelete: true })
+    // A stale web viewer id the server maps to Default: the same.
+    expect(row(await h.send('GET', '/api/recordings', null, 'view_stale'), booked.body.id)).toMatchObject({ canDelete: true })
+    expect((await h.send('DELETE', `/api/recordings/${booked.body.id}`)).status).toBe(200)
+  })
+
+  it("a recording whose viewer is gone is anyone's to delete, shown as (deleted viewer)", async () => {
+    const gone = h.viewers.create({ name: 'Gone' }).id
+    const a = h.finished({ viewerId: gone })
+    const b = h.finished({ viewerId: 'view_unreadable' })
+    h.viewers.remove(gone)
+    const all = await h.send('GET', '/api/recordings?all=1', null, h.ids.bea)
+    expect(row(all, a.id)).toMatchObject({ viewerName: '(deleted viewer)', mine: false, canDelete: true })
+    expect(row(all, b.id)).toMatchObject({ viewerName: '(deleted viewer)', canDelete: true })
+    expect((await h.send('DELETE', `/api/recordings/${a.id}`, null, h.ids.bea)).status).toBe(200)
+    expect(h.store.get(a.id)).toBeNull()
+  })
+
+  it("someone else's failed one stays undeletable for me; once its viewer is gone, it isn't", async () => {
+    const f = h.store.schedule({ viewerId: h.ids.andy, channelId: '7', channelName: 'News 24', title: 'Broken', startAt: T0 - 60 * MIN, endAt: T0 - 30 * MIN })
+    h.store.update(f.id, { status: 'failed', error: 'no signal' })
+    expect(row(await h.send('GET', '/api/recordings?all=1', null, h.ids.bea), f.id)).toMatchObject({ canDelete: false })
+    expect((await h.send('DELETE', `/api/recordings/${f.id}`, null, h.ids.bea)).status).toBe(404)
+    h.viewers.remove(h.ids.andy)
+    expect(row(await h.send('GET', '/api/recordings?all=1', null, h.ids.bea), f.id)).toMatchObject({ canDelete: true })
+  })
+
+  it("a viewer without Show Adult neither lists nor plays another viewer's adult-channel recording; its owner does", async () => {
+    const adult = h.finished({ viewerId: h.ids.andy, channelId: '66', channelName: 'Late Night', title: 'After Dark' })
+    const news = h.finished({ viewerId: h.ids.andy })
+    const toBea = await h.send('GET', '/api/recordings?all=1', null, h.ids.bea)
+    expect(row(toBea, adult.id)).toBeUndefined()
+    expect(row(toBea, news.id)).toBeTruthy()
+    expect((await h.send('GET', `/proxy/recording/${adult.id}`, null, h.ids.bea)).status).toBe(404)
+    expect((await h.send('GET', `/proxy/recording/${adult.id}/index.m3u8`, null, h.ids.bea)).status).toBe(404)
+    expect((await h.send('GET', `/proxy/recording/${adult.id}?viewer=${h.ids.bea}`)).status).toBe(404)
+    expect((await h.send('GET', `/proxy/recording/${news.id}`, null, h.ids.bea)).status).toBe(200)
+    // The owner lists and plays it.
+    expect(row(await h.send('GET', '/api/recordings?all=1', null, h.ids.andy), adult.id)).toBeTruthy()
+    expect((await h.send('GET', `/proxy/recording/${adult.id}`, null, h.ids.andy)).status).toBe(200)
+    // A cast device or share link names no viewer: it plays.
+    expect((await h.send('GET', `/proxy/recording/${adult.id}`)).status).toBe(200)
+  })
+
+  it('a hidden genre hides the recordings of its channels too — but never my own', async () => {
+    const sport = h.finished({ viewerId: h.ids.andy, channelId: '9', channelName: 'Sports 1', title: 'Match' })
+    const kids = h.finished({ viewerId: h.ids.kid, channelId: '9', channelName: 'Sports 1', title: 'My Match' })
+    const toKid = await h.send('GET', '/api/recordings?all=1', null, h.ids.kid)
+    expect(row(toKid, sport.id)).toBeUndefined()
+    expect(row(toKid, kids.id)).toBeTruthy()
+    expect((await h.send('GET', `/proxy/recording/${kids.id}`, null, h.ids.kid)).status).toBe(200)
+  })
+
+  it('the HLS playlist keeps the viewer named in its link on the file it points at', async () => {
+    const news = h.finished({ viewerId: h.ids.bea })
+    const m3u8 = await h.send('GET', `/proxy/recording/${news.id}/index.m3u8?viewer=${h.ids.bea}`)
+    expect(m3u8.status).toBe(200)
+    expect(m3u8.text).toContain(`../${news.id}?viewer=${h.ids.bea}`)
+    expect((await h.send('GET', `/proxy/recording/${news.id}/index.m3u8`)).text).toContain(`../${news.id}\n`)
+  })
+})
+
+describe('/api/recordings — stopping or cancelling someone else’s', () => {
+  let h, infos
+  beforeEach(async () => {
+    h = await makeHousehold()
+    const log = require('../logger.js')
+    infos = []
+    vi.spyOn(log, 'info').mockImplementation((tag, msg) => { infos.push(`${tag} ${msg}`) })
+  })
+  afterEach(async () => { vi.restoreAllMocks(); await h.close() })
+
+  it('another viewer stopping a running one: it ends done, what it has kept, and says who stopped it', async () => {
+    const r = await h.send('POST', '/api/recordings/now', { channelId: '7', channelName: 'News 24', title: 'Long One', endAt: null, force: true }, h.ids.andy)
+    const stopped = await h.send('POST', `/api/recordings/${r.body.id}/stop`, null, h.ids.bea)
+    expect(stopped.status).toBe(200)
+    await h.scheduler.settled(r.body.id)
+    expect(h.store.get(r.body.id)).toMatchObject({ status: 'done', bytes: 19, stoppedBy: 'Bea' })
+    expect(fs.existsSync(h.store.get(r.body.id).filePath)).toBe(true)
+    expect(infos.some((l) => /stopped "Long One".*Bea/.test(l))).toBe(true)
+    expect(infos.join('\n')).not.toContain(h.ids.bea)
+  })
+
+  it('another viewer cancelling a booked one says who; the owner stopping their own says nothing', async () => {
+    const booked = await h.send('POST', '/api/recordings', { channelId: '7', channelName: 'News 24', title: 'Later', startAt: T0 + 300 * MIN, endAt: T0 + 360 * MIN }, h.ids.andy)
+    const cancelled = await h.send('POST', `/api/recordings/${booked.body.id}/stop`, null, h.ids.bea)
+    expect(cancelled.body).toMatchObject({ status: 'cancelled', stoppedBy: 'Bea' })
+    expect(infos.some((l) => /cancelled "Later".*Bea/.test(l))).toBe(true)
+    const own = await h.send('POST', '/api/recordings', { channelId: '7', channelName: 'News 24', title: 'Mine', startAt: T0 + 400 * MIN, endAt: T0 + 460 * MIN }, h.ids.andy)
+    const ownCancel = await h.send('POST', `/api/recordings/${own.body.id}/stop`, null, h.ids.andy)
+    expect(ownCancel.body.status).toBe('cancelled')
+    expect(ownCancel.body.stoppedBy).toBeUndefined()
+    expect(infos.some((l) => /cancelled "Mine"/.test(l))).toBe(true)
   })
 })

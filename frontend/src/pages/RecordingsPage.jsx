@@ -1,17 +1,19 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CircleDot, Clock, CheckCircle2, AlertCircle, Play, Square, X, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, stopRecording, deleteRecording } from '../stalkerApi'
-import { groupRecordings, recordingLabel } from '@/lib/recordings'
+import { groupRecordings, recordingLabel, keepRecordingsResult } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
+import { Switch } from '@/components/ui/switch'
 
 // Live TV recordings: what's booked, what's recording now, what's done
 // (the server makes them — lib/recordings.js for the lines).
 
 const REFRESH_MS = 5000
+const EVERYONE_KEY = 'sw:recordings-everyone'
 
-function Row({ r, onPlay, onStop, onDelete }) {
+function Row({ r, onPlay, onStop, onDelete, everyone }) {
   const icon = r.status === 'recording' ? <CircleDot size={18} className="shrink-0 text-[var(--color-live)] animate-pulse" />
     : r.status === 'scheduled' ? <Clock size={18} className="shrink-0 text-[var(--color-muted)]" />
       : r.status === 'done' ? <CheckCircle2 size={18} className="shrink-0 text-[var(--color-success)]" />
@@ -22,7 +24,13 @@ function Row({ r, onPlay, onStop, onDelete }) {
     <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       {icon}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[var(--color-text)] truncate">{r.title || r.channelName}</p>
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-sm font-medium text-[var(--color-text)] truncate">{r.title || r.channelName}</p>
+          {/* Who booked it: its own label, never cut off by a long title. */}
+          {everyone && r.viewerName && (
+            <span className="shrink-0 rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-xs text-[var(--color-muted)]">{r.viewerName}</span>
+          )}
+        </div>
         <p className={cn('text-xs mt-0.5 truncate', failed ? 'text-[var(--color-live)]' : 'text-[var(--color-muted)]')}>
           {r.channelName}{r.channelName ? ' · ' : ''}{recordingLabel(r)}{r.status === 'done' && r.error ? ` · ${r.error}` : ''}
         </p>
@@ -38,7 +46,7 @@ function Row({ r, onPlay, onStop, onDelete }) {
           {r.status === 'recording' ? <Square size={14} /> : <X size={14} />}
         </button>
       )}
-      {r.status !== 'scheduled' && r.status !== 'recording' && (
+      {r.status !== 'scheduled' && r.status !== 'recording' && r.canDelete && (
         <button onClick={() => onDelete(r)} data-tooltip="Delete" aria-label="Delete" className={cn(iconButton, 'hover:text-[var(--color-live)] hover:bg-[var(--color-live)]/10')}>
           <Trash2 size={14} />
         </button>
@@ -48,6 +56,7 @@ function Row({ r, onPlay, onStop, onDelete }) {
 }
 
 function Section({ title, list, ...actions }) {
+  // (actions carries `everyone` through to each row)
   if (!list.length) return null
   return (
     <section className="mb-6">
@@ -61,8 +70,19 @@ export default function RecordingsPage() {
   const navigate = useNavigate()
   const [list, setList] = useState(null)
   const [error, setError] = useState('')
+  // Everyone's recordings (each with who booked it) — remembered on this device.
+  const [everyone, setEveryone] = useState(() => { try { return localStorage.getItem(EVERYONE_KEY) === '1' } catch { return false } })
+  const toggleEveryone = (on) => {
+    try { localStorage.setItem(EVERYONE_KEY, on ? '1' : '0') } catch { /* not kept */ }
+    setEveryone(on)
+  }
+  // The mode the switch is in now: an answer to a request made in the other one is dropped.
+  const mode = useRef(everyone)
+  useEffect(() => { mode.current = everyone }, [everyone])
 
-  const load = useCallback((background = false) => getRecordings(false, { background }).then((r) => { setList(r.recordings || []); setError('') }).catch((e) => setError(e.message)), [])
+  const load = useCallback((background = false) => getRecordings(everyone, { background })
+    .then((r) => { if (keepRecordingsResult(everyone, mode.current)) { setList(r.recordings || []); setError('') } })
+    .catch((e) => { if (keepRecordingsResult(everyone, mode.current)) setError(e.message) }), [everyone])
   // The refresh every few seconds never wakes an asleep server (stalkerApi.js).
   useEffect(() => { load(); const t = setInterval(() => load(true), REFRESH_MS); return () => clearInterval(t) }, [load])
 
@@ -83,6 +103,11 @@ export default function RecordingsPage() {
         <p className="text-sm text-[var(--color-muted)] mt-1">
           Live TV recorded on the server — even with every app closed. Kept until you delete them.
         </p>
+        <label className="mt-3 inline-flex items-center gap-2 text-sm text-[var(--color-text)] cursor-pointer">
+          <Switch checked={everyone} onCheckedChange={toggleEveryone} aria-label="Everyone's recordings" />
+          Everyone&rsquo;s recordings
+          <span className="text-xs text-[var(--color-muted)]">— see every viewer&rsquo;s, and stop or cancel any of them</span>
+        </label>
       </div>
       {error && <p className="text-sm text-[var(--color-live)] mb-4">{error}</p>}
       {empty ? (
@@ -93,9 +118,9 @@ export default function RecordingsPage() {
         </div>
       ) : (
         <>
-          <Section title="Recording now" list={g.recording} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
-          <Section title="Scheduled" list={g.scheduled} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
-          <Section title="Recorded" list={g.done} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
+          <Section everyone={everyone} title="Recording now" list={g.recording} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
+          <Section everyone={everyone} title="Scheduled" list={g.scheduled} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
+          <Section everyone={everyone} title="Recorded" list={g.done} onPlay={onPlay} onStop={onStop} onDelete={onDelete} />
         </>
       )}
     </div>

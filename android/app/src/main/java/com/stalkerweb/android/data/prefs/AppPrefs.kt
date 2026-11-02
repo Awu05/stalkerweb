@@ -59,6 +59,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_FAVORITES_OPEN, true)
         set(value) = prefs.edit().putBoolean(KEY_FAVORITES_OPEN, value).apply()
 
+    /** The Recordings screen shows every viewer's recordings, not just this one's. */
+    var recordingsEveryone: Boolean
+        get() = prefs.getBoolean(KEY_RECORDINGS_EVERYONE, false)
+        set(value) = prefs.edit().putBoolean(KEY_RECORDINGS_EVERYONE, value).apply()
+
     // Solo: the downloads already copied to the Downloads folder (by job id), so each is saved once.
     var publishedDownloads: Set<String>
         get() = prefs.getStringSet(KEY_PUBLISHED_DOWNLOADS, null)?.toSet() ?: emptySet()
@@ -309,6 +314,7 @@ class AppPrefs(context: Context) {
         private const val KEY_CHANNELS_VIEWER = "channel_cache_viewer"
         private const val KEY_VOD_SORT        = "vod_sort"
         private const val KEY_FAVORITES_OPEN  = "favorites_open"
+        private const val KEY_RECORDINGS_EVERYONE = "recordings_everyone"
         private const val KEY_PUBLISHED_DOWNLOADS = "published_downloads"
         private const val KEY_PUBLISHED_RECORDINGS = "published_recordings"
         private const val KEY_RECORDING_POSITION_PREFIX = "recording_position_"

@@ -26,6 +26,12 @@ data class Recording(
     val endedAt: Long? = null,
     val createdAt: Long = 0,
     val viewerName: String? = null,
+    /** Booked by this device's viewer (the server's word — Solo has no viewer id of its own). */
+    val mine: Boolean = false,
+    /** This viewer may delete it: its own, or one whose viewer is gone (the server decides). */
+    val canDelete: Boolean = false,
+    /** Who stopped or cancelled it, when that wasn't its owner. */
+    val stoppedBy: String? = null,
 )
 
 @JsonClass(generateAdapter = false)

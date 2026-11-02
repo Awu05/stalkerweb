@@ -280,6 +280,13 @@ export const scheduleRecording = (programme)   => _post('/recordings', programme
 export const recordNow         = (p)           => _post('/recordings/now', p)                // { channelId, channelName, title, endAt | null, force? }
 export const stopRecording     = (id)          => _post(`/recordings/${encodeURIComponent(id)}/stop`, {})
 export const deleteRecording   = (id)          => _delete(`/recordings/${encodeURIComponent(id)}`)
-/** A finished recording as HLS (byte ranges into its .ts file), for the player. */
-export const recordingStreamUrl = (id) => `/proxy/recording/${encodeURIComponent(id)}/index.m3u8`
+/**
+ * A finished recording as HLS (byte ranges into its .ts file), for the player —
+ * naming this device's viewer, whose channel filters the server applies to
+ * someone else's recording (the player sends no X-Viewer).
+ */
+export const recordingStreamUrl = (id) => {
+  const viewer = getViewerId()
+  return `/proxy/recording/${encodeURIComponent(id)}/index.m3u8${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ''}`
+}
 

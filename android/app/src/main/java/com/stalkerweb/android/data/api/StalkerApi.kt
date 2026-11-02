@@ -245,8 +245,9 @@ interface StalkerApi {
     suspend fun saveSettings(@Body body: SettingsUpdate)
 
     // ── Live TV recordings (backend routes/recordings.js) ─────────────────────
+    /** [all] = "1": every viewer's, each with viewerName (the Recordings screen's "Everyone's recordings"). */
     @GET("api/recordings")
-    suspend fun getRecordings(@Tag background: Background? = null): RecordingsResponse
+    suspend fun getRecordings(@Query("all") all: String? = null, @Tag background: Background? = null): RecordingsResponse
 
     /** A guide programme booked; 409 (with clash) when it overlaps past the provider's limit. */
     @POST("api/recordings")

@@ -40,6 +40,9 @@ fun shownCards(isSolo: Boolean): List<SettingsCard> =
     if (isSolo) SettingsCard.entries - setOf(SettingsCard.Viewers, SettingsCard.Links, SettingsCard.Activity, SettingsCard.Server)
     else SettingsCard.entries.toList()
 
+/** The Recordings screen's Everyone's recordings switch: not in Solo, whose one viewer owns every recording. */
+fun showsEveryoneSwitch(isSolo: Boolean): Boolean = !isSolo
+
 /** Single fields inside a card that one app shows and the other doesn't. */
 enum class SettingsField { DownloadFolder }
 
