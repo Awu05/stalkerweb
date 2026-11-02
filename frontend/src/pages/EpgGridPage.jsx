@@ -5,7 +5,7 @@ import { Play, X, Bell, BellOff, Tv2, Loader2, AlertCircle, CircleDot } from 'lu
 import { cn } from '@/lib/utils'
 import { isAdult } from '@/lib/adultFilter'
 import { isLanguageDisabled } from '@/lib/languages'
-import { matchesStation } from '@/lib/stationSearch'
+import { shownInGuide, guideEmptyMessage } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
 import { getChannelEpg, getProxiedLogoUrl, scheduleRecording } from '../stalkerApi'
@@ -244,7 +244,7 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
 
 // ── Main component ────────────────────────────────────────────────────────────
 // The Guide page's grid view: every channel against a timeline.
-export default function EpgGridView({ query = '' }) {
+export default function EpgGridView({ query = '', favoriteIds = null }) {
   const navigate = useNavigate()
   const { showAdult, disabledGenres, disabledLanguages } = useApp()
 
@@ -300,8 +300,8 @@ export default function EpgGridView({ query = '' }) {
     if (!showAdult) ch = ch.filter(c => !isAdult(c.genre) && !isAdult(c.name))
     if (disabledGenres.size > 0) ch = ch.filter(c => !c.genre || !disabledGenres.has(c.genre))
     if (disabledLanguages.size > 0) ch = ch.filter(c => !c.genre || !isLanguageDisabled(c.genre, disabledLanguages))
-    return ch.filter(c => matchesStation(c, query))
-  }, [allChannels, showAdult, disabledGenres, disabledLanguages, query])
+    return ch.filter(c => shownInGuide(c, query, favoriteIds))
+  }, [allChannels, showAdult, disabledGenres, disabledLanguages, query, favoriteIds])
 
   // ── EPG data (fetched for the rows being rendered) ───────────────────────
   const [epgMap, setEpgMap]   = useState({})      // { [uniqueId]: { events } }
@@ -394,7 +394,7 @@ export default function EpgGridView({ query = '' }) {
   // A new search shows its matches from the top (keeping the time position).
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
-  }, [query])
+  }, [query, favoriteIds])
 
   // Fetch the guide for the rendered rows. The overscan rows are fetched too,
   // so a row's guide is usually there before it scrolls into view.
@@ -425,7 +425,7 @@ export default function EpgGridView({ query = '' }) {
   }
 
   const rowsHeight = rowVirtualizer.getTotalSize()
-  const noMatch = channels.length === 0 && query.trim()
+  const noMatch = channels.length === 0
 
   return (
     <div
@@ -470,7 +470,7 @@ export default function EpgGridView({ query = '' }) {
         </div>
 
         {noMatch && (
-          <p className="sticky left-0 px-4 py-6 text-sm text-[var(--color-muted)]">No stations match “{query.trim()}”.</p>
+          <p className="sticky left-0 px-4 py-6 text-sm text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds)}</p>
         )}
 
         {/* ── Channel rows (virtualized) ───────────────────────────────────── */}

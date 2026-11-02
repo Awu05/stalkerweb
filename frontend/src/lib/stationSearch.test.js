@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchesStation } from './stationSearch'
+import { matchesStation, shownInGuide, guideEmptyMessage } from './stationSearch'
 
 const hgtv = { name: 'HGTV 4K', number: 397 }
 const cnn = { name: 'CNN', number: 39 }
@@ -25,5 +25,25 @@ describe('matchesStation', () => {
 
   it('still matches digits in a name', () => {
     expect(matchesStation({ name: 'Channel 4', number: 0 }, '4')).toBe(true)
+  })
+})
+
+describe('shownInGuide', () => {
+  const news = { uniqueId: 7, name: 'News 24', number: 101 }
+  const film = { uniqueId: 8, name: 'Film Four', number: 102 }
+  it('every channel the search matches, or only the favorites among them', () => {
+    expect([news, film].filter((c) => shownInGuide(c, '', null))).toEqual([news, film])
+    expect([news, film].filter((c) => shownInGuide(c, '', new Set(['8'])))).toEqual([film])
+    expect([news, film].filter((c) => shownInGuide(c, 'news', new Set(['8'])))).toEqual([])
+    expect([news, film].filter((c) => shownInGuide(c, '', new Set()))).toEqual([])
+  })
+})
+
+describe('guideEmptyMessage', () => {
+  it('says why nothing is shown', () => {
+    expect(guideEmptyMessage('news', false)).toBe('No stations match “news”.')
+    expect(guideEmptyMessage('', true)).toBe('No favorite channels yet — add one with the heart on a channel.')
+    expect(guideEmptyMessage('news', true)).toBe('No favorite stations match “news”.')
+    expect(guideEmptyMessage('', false)).toBe('No channels to show.')
   })
 })

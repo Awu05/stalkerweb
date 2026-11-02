@@ -67,6 +67,12 @@ class RecordingRulesTest {
         assertEquals("Missed — the server wasn't running", recordingLabel(rec(status = "missed", startAt = now, endAt = now), now, utc))
     }
 
+    @Test fun `until the programme ends is offered only with a guide end still to come`() {
+        assertEquals(listOf("programme", "30", "60", "120", "stop"), recordChoices(now + 25 * min, now).map { it.id })
+        assertEquals(listOf("30", "60", "120", "stop"), recordChoices(null, now).map { it.id })
+        assertEquals(listOf("30", "60", "120", "stop"), recordChoices(now - min, now).map { it.id })
+    }
+
     @Test fun `until the programme ends (an hour when the guide has no end), a set time, or until stopped`() {
         assertEquals(listOf("programme", "30", "60", "120", "stop"), RECORD_CHOICES.map { it.id })
         assertEquals("Until the programme ends", RECORD_CHOICES.first().label)
@@ -120,12 +126,16 @@ class RecordingRulesTest {
         assertTrue(recordingsHint(isSolo = true).contains("Downloads/StalkerWeb"))
     }
 
-    @Test fun `the Record button follows the recording until it's no longer recording`() {
-        val list = listOf(rec("a", "recording", now - min, null), rec("b", "done", now - 60 * min, now - min), rec("c", "failed", now - 60 * min, now - min))
-        assertTrue(stillRecording(list, "a"))
-        assertFalse(stillRecording(list, "b"))      // ended by itself, or stopped elsewhere
-        assertFalse(stillRecording(list, "c"))
-        assertFalse(stillRecording(list, "gone"))   // deleted
+    @Test fun `the Record button finds the recording running on its channel, started anywhere`() {
+        val list = listOf(
+            rec("a", "recording", now - min, null),                                   // channel 1
+            rec("b", "done", now - 60 * min, now - min).copy(channelId = "2"),
+            rec("c", "scheduled", now + 60 * min, now + 90 * min).copy(channelId = "3"),
+        )
+        assertEquals("a", recordingOn(list, "1"))
+        assertNull(recordingOn(list, "2"))   // ended by itself, or stopped elsewhere
+        assertNull(recordingOn(list, "3"))   // booked, not started yet
+        assertNull(recordingOn(list, "9"))
     }
 
     private val server = "http://127.0.0.1:8983/proxy/recording/r/index.m3u8"

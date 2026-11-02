@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, stillRecording, diskLine } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, recordingOn, diskLine } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -56,6 +56,14 @@ describe('endForChoice', () => {
   })
 })
 
+describe('recordChoices', () => {
+  it('offers "until the programme ends" only when the guide has an end still to come', () => {
+    expect(recordChoices(NOW + 25 * MIN, NOW).map((c) => c.id)).toEqual(['programme', '30', '60', '120', 'stop'])
+    expect(recordChoices(null, NOW).map((c) => c.id)).toEqual(['30', '60', '120', 'stop'])
+    expect(recordChoices(NOW - MIN, NOW).map((c) => c.id)).toEqual(['30', '60', '120', 'stop'])
+  })
+})
+
 describe('recording positions (resume, on this device)', () => {
   const store = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) } }
   it('keeps where a recording was left, and forgets it once it is near the end', async () => {
@@ -75,14 +83,18 @@ describe('recording positions (resume, on this device)', () => {
   })
 })
 
-describe('stillRecording', () => {
-  it('is true only while the recording is listed as recording', () => {
-    const list = [rec({ id: 'a', status: 'recording', startAt: NOW }), rec({ id: 'b', status: 'done', startAt: NOW }), rec({ id: 'c', status: 'failed', startAt: NOW })]
-    expect(stillRecording(list, 'a')).toBe(true)
-    expect(stillRecording(list, 'b')).toBe(false)   // ended by itself, or stopped elsewhere
-    expect(stillRecording(list, 'c')).toBe(false)
-    expect(stillRecording(list, 'gone')).toBe(false)   // deleted
-    expect(stillRecording(null, 'a')).toBe(false)
+describe('recordingOn', () => {
+  it('finds the recording running on a channel — started here, elsewhere, or from the guide', () => {
+    const list = [
+      rec({ id: 'a', channelId: '1', status: 'recording', startAt: NOW }),
+      rec({ id: 'b', channelId: '2', status: 'done', startAt: NOW }),
+      rec({ id: 'c', channelId: '3', status: 'scheduled', startAt: NOW + 60 * MIN }),
+    ]
+    expect(recordingOn(list, '1')).toBe('a')
+    expect(recordingOn(list, 2)).toBeNull()     // ended by itself, or stopped elsewhere
+    expect(recordingOn(list, '3')).toBeNull()   // booked, not started yet
+    expect(recordingOn(list, '9')).toBeNull()
+    expect(recordingOn(null, '1')).toBeNull()
   })
 })
 

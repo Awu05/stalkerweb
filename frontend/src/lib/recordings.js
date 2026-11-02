@@ -13,6 +13,11 @@ export const RECORD_CHOICES = [
   { id: 'stop', label: 'Until I stop it' },
 ]
 
+/** The lengths offered: "until the programme ends" only with a guide end still to come. */
+export function recordChoices(programmeEnd, now) {
+  return programmeEnd && programmeEnd > now ? RECORD_CHOICES : RECORD_CHOICES.filter((c) => c.id !== 'programme')
+}
+
 /** When a recording started now ends: ms, or null for "until stopped". No guide end: an hour. */
 export function endForChoice(choice, now, programmeEnd = null) {
   if (choice === 'stop') return null
@@ -21,12 +26,12 @@ export function endForChoice(choice, now, programmeEnd = null) {
 }
 
 /**
- * Whether recording `id` is still being made, in the list from GET
- * /api/recordings — not once it ended by itself, was stopped elsewhere,
- * failed or was deleted. The player's Record button follows it.
+ * The id of the recording being made on `channelId`, in the list from GET
+ * /api/recordings — started in this player, on another device or from the
+ * guide — or null. The player's Record button follows it.
  */
-export function stillRecording(list, id) {
-  return !!list?.some((r) => r.id === id && r.status === 'recording')
+export function recordingOn(list, channelId) {
+  return list?.find((r) => r.status === 'recording' && String(r.channelId) === String(channelId))?.id ?? null
 }
 
 /**
