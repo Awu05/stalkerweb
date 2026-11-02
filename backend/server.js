@@ -425,9 +425,11 @@ const stremioRoutes   = require('./routes/stremio')(appState, {
 app.use('/api/auth', authRoutes);
 app.use('/api/vod', vodRoutes);
 app.use('/api/downloads', downloadsRoutes);
+// Who owns a recording, and the channels (a recording's genre, for the viewer's filters): recordings/visibility.js.
+const recordingViewers = { viewerOf: (id) => viewersManager.get(id), channels: () => appState.channelManager?.getChannels?.() ?? [] };
 app.use('/api/recordings', require('./routes/recordings')(appState, {
   settings: () => require('./routes/settings').recordingSettings(exportSettingsCache.load() || {}),
-  viewerName: (id) => viewersManager.get(id)?.name ?? '',
+  ...recordingViewers,
 }));
 app.use('/api/channels', channelRoutes);
 app.use('/api/epg', epgRoutes);
@@ -454,7 +456,7 @@ require('./routes/solo').mount(app, config, soloCast, {
 });
 app.use('/stremio', stremioRoutes);
 // /proxy must be registered before the SPA static fallback
-app.use('/proxy', require('./routes/recordingFile')(appState));   // a finished recording, for the players
+app.use('/proxy', require('./routes/recordingFile')(appState, recordingViewers));   // a finished recording, for the players
 app.use('/proxy', proxyRoutes);
 // Xtream Codes API (/player_api.php, /live/…, /movie/…, /series/…) — after
 // /api and /proxy so its catch-all /<user>/<pass>/<id> path never shadows them.

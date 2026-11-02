@@ -1,9 +1,12 @@
 // routes/recordings.js — live TV recordings (recordings/)
-// GET    /api/recordings           — this viewer's recordings, newest first (?all=1: everyone's, with viewerName)
+// GET    /api/recordings           — this viewer's recordings, newest first (?all=1: everyone's it may see,
+//                                     with viewerName); each row says `mine` and `canDelete` (recordings/visibility.js)
 // POST   /api/recordings           — book a guide programme { channelId, channelName, title, startAt, endAt, force? }
 // POST   /api/recordings/now       — record a channel now { channelId, channelName, title, endAt | null, force? }
 // POST   /api/recordings/:id/stop  — stop one recording (what it has is kept), or cancel one not started — anyone's
-// DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file → { deleted }
+//                                     (someone else's keeps `stoppedBy`: who did it)
+// DELETE /api/recordings/:id       — stop it if it's running, then delete it and its file → { deleted } —
+//                                     one's own, or one whose viewer is gone
 //
 // The provider's stream limit (Settings: max_streams, 1 by default): booking a
 // recording that would have more running at once than that is refused (409
@@ -17,6 +20,7 @@ const express = require('express');
 const fs = require('fs');
 const { inUse } = require('../lib/streamLimit');
 const log = require('../logger');
+const { recordingRules } = require('../recordings/visibility');
 const TAG = 'recordings';
 
 const MIN = 60_000;
@@ -46,12 +50,13 @@ function peakRunning(recs, from, to, openEnd) {
   return peak;
 }
 
-module.exports = function recordingsModule(appState, { settings = () => ({}), viewerName = () => '', now = Date.now } = {}) {
+// viewerOf(id) → the viewer, or null once deleted; channels() → the channel list (a recording's genre, for the viewer's filters).
+module.exports = function recordingsModule(appState, { settings = () => ({}), viewerOf = () => null, channels = () => [], now = Date.now } = {}) {
   const router = express.Router();
   const store = () => appState.recordingStore;
   const limitOf = (s) => Math.max(1, parseInt(s.max_streams, 10) || 1);
   const pad = (s, k, dflt) => { const n = Number(s[k]); return Number.isFinite(n) && n >= 0 ? n : dflt; };
-  const mine = (req, r) => r && r.viewerId === (req.viewer?.id ?? null);
+  const rulesFor = (req) => recordingRules(req.viewer, { viewerOf, channels });
   const streams = (n) => `${n} stream${n === 1 ? '' : 's'}`;
   // The stream limit is in use now: recording may stop what's playing.
   const takesStream = (limit) => ({
@@ -61,8 +66,17 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
 
   router.get('/', (req, res) => {
     const all = req.query.all === '1';
-    const list = store().list(all ? undefined : req.viewer?.id ?? null);
-    res.json({ recordings: all ? list.map((r) => ({ ...r, viewerName: viewerName(r.viewerId) })) : list });
+    const rules = rulesFor(req);
+    // Everyone's: those of a channel this viewer's filters hide are left out (its own always show).
+    const list = all ? store().list().filter(rules.visible) : store().list(req.viewer?.id ?? null);
+    res.json({
+      recordings: list.map((r) => ({
+        ...r,
+        mine: rules.mine(r),
+        canDelete: rules.canDelete(r),
+        ...(all ? { viewerName: rules.ownerName(r) } : {}),
+      })),
+    });
   });
 
   router.post('/', (req, res) => {
@@ -109,17 +123,25 @@ module.exports = function recordingsModule(appState, { settings = () => ({}), vi
     res.status(201).json(r);
   });
 
-  // Anyone in the household may stop or cancel one (to clear a clash, or free the stream); only its owner deletes it.
+  // Anyone in the household may stop or cancel one (to clear a clash, or free the stream); only its owner deletes it
+  // (or anyone, once its viewer is gone).
   router.post('/:id/stop', (req, res) => {
     const r = store().get(req.params.id);
     if (!r) return res.status(404).json({ error: 'No such recording.' });
-    appState.recordings.stop(r.id);
+    const rules = rulesFor(req);
+    const by = req.viewer?.name ?? '';
+    if (appState.recordings.stop(r.id)) {
+      // Someone else's: its owner sees who ("Stopped by Bea"). Kept through the recorder's own last update.
+      if (!rules.mine(r) && by) store().update(r.id, { stoppedBy: by });
+      const owner = rules.mine(r) ? 'their own' : `${rules.ownerName(r) || 'no one'}'s`;
+      log.info(TAG, `${r.status === 'recording' ? 'stopped' : 'cancelled'} "${r.title || r.channelName}" (${owner}) — by ${by || 'the default viewer'}`);
+    }
     res.json(store().get(r.id));
   });
 
   router.delete('/:id', async (req, res) => {
     const r = store().get(req.params.id);
-    if (!mine(req, r)) return res.status(404).json({ error: 'No such recording.' });
+    if (!r || !rulesFor(req).canDelete(r)) return res.status(404).json({ error: 'No such recording.' });
     // Stopped first, its file finished: then nothing is left half-written.
     if (appState.recordings.stop(r.id)) await appState.recordings.settled(r.id);
     const file = store().get(r.id)?.filePath;
