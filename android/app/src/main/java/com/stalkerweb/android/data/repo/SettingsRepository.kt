@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.data.api.CreateViewerRequest
 import com.stalkerweb.android.data.api.Group
 import com.stalkerweb.android.data.api.LogoOverrideRequest
@@ -16,7 +17,8 @@ import com.stalkerweb.android.data.prefs.AppPrefs
 class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
     suspend fun settings(): SettingsResponse = apis.get().getSettings().also { prefs.keepShareToken(it.accessShareToken) }
     suspend fun save(update: SettingsUpdate) = apis.get().saveSettings(update)
-    suspend fun activity() = apis.get().getActivity()
+    /** Refreshed every few seconds: a timer's request (ApiClient.kt Background). */
+    suspend fun activity() = apis.get().getActivity(background(true))
 
     // Viewers
     suspend fun renameViewer(id: String, name: String) = apis.get().updateViewer(id, ViewerUpdate(name = name.trim()))

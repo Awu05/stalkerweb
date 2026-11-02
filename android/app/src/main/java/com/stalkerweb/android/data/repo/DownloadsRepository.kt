@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.background
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -30,7 +31,8 @@ class DownloadsRepository(private val apis: ApiProvider, private val prefs: AppP
     private val adapter = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         .adapter<List<DownloadJob>>(Types.newParameterizedType(List::class.java, DownloadJob::class.java))
 
-    suspend fun list(): List<DownloadJob> = apis.get().getDownloads().downloads.also { onJobs?.invoke(it) }
+    /** [background]: asked by a timer or loop (ApiClient.kt Background). */
+    suspend fun list(background: Boolean = false): List<DownloadJob> = apis.get().getDownloads(background(background)).downloads.also { onJobs?.invoke(it) }
 
     // Told every job list the app reads, from here and from the event stream:
     // Solo saves finished downloads to the Downloads folder from it (DownloadPublisher).
@@ -65,7 +67,7 @@ class DownloadsRepository(private val apis: ApiProvider, private val prefs: AppP
     private suspend fun followUntilIdle() {
         var misses = 0
         while (true) {
-            val jobs = runCatching { list() }.getOrNull()
+            val jobs = runCatching { list(background = true) }.getOrNull()
             if (jobs != null && !anyDownloadActive(jobs)) return
             // The server not answering for about a minute: let go, it isn't downloading.
             misses = if (jobs == null) misses + 1 else 0

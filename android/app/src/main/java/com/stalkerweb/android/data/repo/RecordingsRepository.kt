@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.api.RecordNowRequest
@@ -21,7 +22,8 @@ import kotlinx.coroutines.launch
  */
 class RecordingsRepository(private val apis: ApiProvider, private val prefs: AppPrefs) {
 
-    suspend fun list(): List<Recording> = apis.get().getRecordings().recordings.also { seen(it) }
+    /** [background]: asked by a timer or loop (ApiClient.kt Background). */
+    suspend fun list(background: Boolean = false): List<Recording> = apis.get().getRecordings(background(background)).recordings.also { seen(it) }
 
     // Told every list the app reads: Solo saves finished recordings to the
     // Downloads folder from it (DownloadPublisher).
@@ -94,7 +96,7 @@ class RecordingsRepository(private val apis: ApiProvider, private val prefs: App
     private suspend fun followUntilIdle() {
         var misses = 0
         while (true) {
-            val list = runCatching { apis.get().getRecordings().recordings }.getOrNull()
+            val list = runCatching { apis.get().getRecordings(background(true)).recordings }.getOrNull()
             list?.let { onList?.invoke(it) }
             if (list != null && !recordingNeedsServer(list, System.currentTimeMillis())) return
             // The server not answering for about two minutes: let go, it isn't recording.

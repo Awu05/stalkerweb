@@ -131,7 +131,7 @@ fun ChannelScreen(viewModel: ChannelViewModel, onSelectChannel: (Channel) -> Uni
             viewModel.loadFavorites()
             viewModel.refreshHealth()
             launch { while (true) { delay(5 * 60_000L); viewModel.refreshNowNext(background = true) } }
-            while (true) { delay(60_000L); viewModel.refreshHealth() }
+            while (true) { delay(60_000L); viewModel.refreshHealth(background = true) }
         }
     }
     // Number jump: the digits typed, then the channel 1.2 s after the last one.

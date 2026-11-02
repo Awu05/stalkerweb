@@ -116,7 +116,7 @@ class ChannelViewModel(
                     // coroutineScope: a failing async is rethrown here, where runCatching catches it
                     // (a portal-not-connected 503 becomes the banner, not a crash).
                     coroutineScope {
-                        val channels = async { live.getChannels() }
+                        val channels = async { live.loadChannels() }
                         val logos = async { live.getLogoMap() }
                         val groups = async { live.getGroups() }
                         Triple(channels.await(), logos.await(), groups.await())
@@ -125,8 +125,9 @@ class ChannelViewModel(
                 val e = result.exceptionOrNull()
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 if (e != null && retriesWhileWaking(e, attempt)) { attempt++; continue }
-                result.onSuccess { (channels, logos, groups) ->
-                    _state.value = _state.value.copy(channels = channels, logoMap = logos, groups = groups, loading = false)
+                result.onSuccess { (list, logos, groups) ->
+                    _state.value = _state.value.copy(channels = list.channels, logoMap = logos, groups = groups, loading = false)
+                    if (list.refetch) followLoad()
                 }.onFailure { err ->
                     val notConnected = err is HttpException && err.code() == 503
                     val body = if (notConnected) runCatching { (err as HttpException).response()?.errorBody()?.string() }.getOrNull() else null
@@ -159,6 +160,20 @@ class ChannelViewModel(
         }
     }
 
+    // The server still loading its list (it came back empty): ask again every
+    // few seconds until it's in — a loop's requests (ApiClient.kt Background).
+    private suspend fun followLoad() {
+        repeat(20) {
+            kotlinx.coroutines.delay(3_000)
+            val list = runCatching { live.loadChannels(background = true) }.getOrNull() ?: return@repeat
+            if (list.channels.isNotEmpty()) _state.value = _state.value.copy(channels = list.channels)
+            if (!list.refetch) {
+                runCatching { live.getGroups() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { _state.value = _state.value.copy(groups = it) }
+                return
+            }
+        }
+    }
+
     /** @param background a timed refresh — never wakes an asleep server. */
     fun refreshNowNext(background: Boolean = false) {
         viewModelScope.launch {
@@ -167,8 +182,9 @@ class ChannelViewModel(
         }
     }
 
-    fun refreshHealth() {
-        viewModelScope.launch { _state.value = _state.value.copy(health = live.getHealth()) }
+    /** @param background the minute's refresh — never wakes an asleep server. */
+    fun refreshHealth(background: Boolean = false) {
+        viewModelScope.launch { _state.value = _state.value.copy(health = live.getHealth(background)) }
     }
 
     /** Re-read this device's history — after returning from the player (MainActivity.onResume). */

@@ -23,3 +23,17 @@ const val WAKE_LOAD_RETRIES = 3
 
 /** Whether a failed load should ask again: the request timed out — the server still reconnecting, the next ask joins it. */
 fun retriesWhileWaking(e: Throwable, attempt: Int): Boolean = e is SocketTimeoutException && attempt < WAKE_LOAD_RETRIES
+
+/** What the Portal screen offers: the portals to pick, Reconnect, Disconnect. */
+data class PortalActions(val portals: Boolean, val reconnect: Boolean, val disconnect: Boolean)
+
+/**
+ * Disconnected, or a wake that failed: the portals and Reconnect. Connected or
+ * asleep (a failed wake too): Disconnect, which stops the reconnect on use.
+ * Mirrors frontend/src/lib/connection.js connectionActions.
+ */
+fun portalActions(status: StatusResponse?): PortalActions {
+    val failedWake = status != null && !status.connected && status.asleep && !status.wakeError.isNullOrBlank()
+    val usable = portalUsable(status)
+    return PortalActions(portals = !usable || failedWake, reconnect = !usable || failedWake, disconnect = usable)
+}

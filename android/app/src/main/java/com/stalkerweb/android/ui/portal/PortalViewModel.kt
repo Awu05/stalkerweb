@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalkerweb.android.data.api.Profile
 import com.stalkerweb.android.data.repo.ServerRepository
+import com.stalkerweb.android.data.repo.PortalActions
 import com.stalkerweb.android.data.repo.connectionNote
+import com.stalkerweb.android.data.repo.portalActions
 import com.stalkerweb.android.data.repo.portalUsable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +20,8 @@ data class PortalUiState(
     val connected: Boolean = false,
     // Connected only as asleep: what to say instead of "Connected" (ConnectionLabel.kt connectionNote).
     val note: String? = null,
+    // What the screen offers (PortalState.kt): after a failed wake, the portals and Reconnect, plus Disconnect.
+    val actions: PortalActions = PortalActions(portals = true, reconnect = true, disconnect = false),
     val portalUrl: String = "",
     val mac: String = "",
     val busy: Boolean = false,
@@ -56,6 +60,7 @@ class PortalViewModel(private val server: ServerRepository) : ViewModel() {
                 connectingProfileId = null,
                 connected       = connected,
                 note            = connectionNote(status),
+                actions         = portalActions(status),
                 portalUrl       = (if (connected) status?.portal else config?.portal) ?: config?.portal ?: "",
                 mac             = (if (connected) status?.mac    else config?.mac)    ?: config?.mac    ?: "",
                 hasSavedConfig  = !config?.portal.isNullOrBlank() && !config?.mac.isNullOrBlank(),

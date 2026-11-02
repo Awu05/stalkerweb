@@ -22,6 +22,8 @@ data class Channel(
 data class ChannelsResponse(
     val channels: List<Channel>,
     val total: Int = 0,
+    /** The server is still loading the list from the portal (it may be empty for now). */
+    val loading: Boolean = false,
 )
 
 @JsonClass(generateAdapter = false)

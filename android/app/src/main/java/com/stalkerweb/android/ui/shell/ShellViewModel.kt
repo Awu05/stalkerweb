@@ -41,7 +41,7 @@ class ShellViewModel(private val server: ServerRepository, val viewers: ViewerRe
 
     /** One status check (the shell runs it every 30 s while the app is in front). */
     suspend fun refreshStatus() {
-        runCatching { server.testConnection() }
+        runCatching { server.testConnection(background = true) }
             .onSuccess { status ->
                 val profiles = server.getProfiles().profiles
                 _state.value = _state.value.copy(connection = connectionLabel(status, profiles), unreachable = false)

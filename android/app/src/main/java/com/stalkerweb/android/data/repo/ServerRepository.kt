@@ -10,6 +10,7 @@ import com.stalkerweb.android.data.api.SetActiveProfileRequest
 import com.stalkerweb.android.data.api.SettingsResponse
 import com.stalkerweb.android.data.api.StalkerApi
 import com.stalkerweb.android.data.api.StatusResponse
+import com.stalkerweb.android.data.api.background
 import com.stalkerweb.android.data.prefs.AppPrefs
 
 /** The StalkerWeb server itself: address, access key, status, IPTV connections, settings. */
@@ -47,7 +48,8 @@ class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
     /** Told the portal in use whenever a status check finds one connected or asleep (reminders follow it). */
     var onPortal: (String?) -> Unit = {}
 
-    suspend fun testConnection(): StatusResponse = apis.get().getStatus().also { if (portalUsable(it)) onPortal(it.portal) }
+    /** [background]: the shell's 30 s poll (ApiClient.kt Background). */
+    suspend fun testConnection(background: Boolean = false): StatusResponse = apis.get().getStatus(background(background)).also { if (portalUsable(it)) onPortal(it.portal) }
 
     // ── Portal management ─────────────────────────────────────────────────────
 
