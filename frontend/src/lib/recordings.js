@@ -21,12 +21,12 @@ export function endForChoice(choice, now, programmeEnd = null) {
 }
 
 /**
- * Whether recording `id` is still being made, in the list from GET
- * /api/recordings — not once it ended by itself, was stopped elsewhere,
- * failed or was deleted. The player's Record button follows it.
+ * The id of the recording being made on `channelId`, in the list from GET
+ * /api/recordings — started in this player, on another device or from the
+ * guide — or null. The player's Record button follows it.
  */
-export function stillRecording(list, id) {
-  return !!list?.some((r) => r.id === id && r.status === 'recording')
+export function recordingOn(list, channelId) {
+  return list?.find((r) => r.status === 'recording' && String(r.channelId) === String(channelId))?.id ?? null
 }
 
 /**

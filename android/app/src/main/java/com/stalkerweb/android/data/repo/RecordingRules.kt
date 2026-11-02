@@ -120,11 +120,12 @@ fun recordingsToPublish(list: List<Recording>, published: Set<String>): List<Rec
 }
 
 /**
- * Whether recording [id] is still being made, in [list] (GET /api/recordings) —
- * not once it ended by itself, was stopped elsewhere, failed or was deleted.
- * The live player's Record button follows it (the web's stillRecording).
+ * The id of the recording being made on [channelId] in [list] (GET
+ * /api/recordings) — started in this player, on another device or from the
+ * guide — or null. The live player's Record button follows it (the web's recordingOn).
  */
-fun stillRecording(list: List<Recording>, id: String): Boolean = list.any { it.id == id && it.status == "recording" }
+fun recordingOn(list: List<Recording>, channelId: String): String? =
+    list.firstOrNull { it.status == "recording" && it.channelId == channelId }?.id
 
 /**
  * Where the app plays a recording from: in Solo, its copy in
