@@ -23,6 +23,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
+import com.stalkerweb.android.data.repo.wakesOnReturn
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -300,7 +302,7 @@ class MainActivity : ComponentActivity() {
                     if (!soloUp) return@LaunchedEffect
                     if (container.server.getServerUrl() == null || container.guard.blocked) return@LaunchedEffect
                     if (!BuildConfig.IS_SOLO && container.viewers.startupChoice().needsPicker) { toPicker(required = true); return@LaunchedEffect }
-                    val status = runCatching { container.server.testConnection() }.getOrNull()
+                    val status = runCatching { container.server.testConnection(wake = true) }.getOrNull()
                     if (status?.connected == false) navController.navigate(Screen.Portal.route)
                 }
 
@@ -544,8 +546,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Back after a while away: the server may have gone idle — ask it to reconnect to the last portal.
+        if (wakesOnReturn(stoppedAt, System.currentTimeMillis())) {
+            val app = application as StalkerWebApp
+            lifecycleScope.launch { runCatching { app.container.server.testConnection(wake = true) } }
+        }
+        stoppedAt = null
         // Refresh so "Continue watching" shows channels added during the player session
         channelViewModel?.refreshHistory()
+    }
+
+    // When the app went to the background (wakesOnReturn).
+    private var stoppedAt: Long? = null
+
+    override fun onStop() {
+        super.onStop()
+        stoppedAt = System.currentTimeMillis()
     }
 
     private fun createNotificationChannel() {

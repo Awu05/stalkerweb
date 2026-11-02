@@ -4,8 +4,9 @@ import retrofit2.http.*
 
 interface StalkerApi {
 
+    /** [wake] = 1: the app was just opened — the server reconnects to the last portal if the idle timeout dropped it (WakeRules.kt). */
     @GET("api/auth/status")
-    suspend fun getStatus(): StatusResponse
+    suspend fun getStatus(@Query("wake") wake: Int? = null): StatusResponse
 
     @GET("api/channels")
     suspend fun getChannels(): ChannelsResponse

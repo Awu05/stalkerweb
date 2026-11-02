@@ -47,7 +47,9 @@ class ServerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
     /** Told the portal in use whenever a status check finds one connected (reminders follow it). */
     var onPortal: (String?) -> Unit = {}
 
-    suspend fun testConnection(): StatusResponse = apis.get().getStatus().also { if (it.connected) onPortal(it.portal) }
+    /** [wake]: the app was just opened, or come back to — reconnect to the last portal if the server went idle (WakeRules.kt). */
+    suspend fun testConnection(wake: Boolean = false): StatusResponse =
+        apis.get().getStatus(if (wake) 1 else null).also { if (it.connected) onPortal(it.portal) }
 
     // ── Portal management ─────────────────────────────────────────────────────
 
