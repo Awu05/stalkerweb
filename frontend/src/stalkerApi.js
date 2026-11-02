@@ -29,8 +29,10 @@ async function _fetch(path, opts = {}) {
   }
 }
 
-async function _get(path) {
-  return _fetch(path)
+// background: a timed refresh, not someone using the app — it never wakes the
+// server's portal session (asleep after the idle timeout, backend middleware/session.js).
+async function _get(path, { background = false } = {}) {
+  return _fetch(path, background ? { headers: { 'X-Background': '1' } } : {})
 }
 
 async function _post(path, body) {
@@ -71,8 +73,7 @@ export async function disconnect() {
   invalidateFavoritesCache()
   return result
 }
-// wake: the app was just opened or signed into — the server reconnects to the last portal if the idle timeout dropped it (lib/wake.js).
-export const getStatus = ({ wake = false } = {}) => _get(`/auth/status${wake ? '?wake=1' : ''}`)
+export const getStatus = () => _get('/auth/status')
 // Languages offered for the per-profile hide filter — union of channel genres
 // and VOD categories, so portal spelling variants are each togglable.
 export const getLanguages = () => _get('/channels/languages')
@@ -117,7 +118,7 @@ export const getGroups = (refresh = false) =>
 export const getEpg = (period = 24) => _get(`/epg?period=${period}`)
 export const getChannelEpg = (channelId, period = 24) =>
   _get(`/epg/${channelId}?period=${period}`)
-export const getNowNext = () => _get('/epg/now')
+export const getNowNext = ({ background = false } = {}) => _get('/epg/now', { background })
 
 // ── Logos ─────────────────────────────────────────────────────────────────
 export const getLogos = () => _get('/logos')

@@ -22,6 +22,7 @@ import {
 import { invalidateChannelCache } from '../lib/channelCache'
 import { invalidateFavoritesCache } from '../lib/useFavorites'
 import { useApp } from '@/lib/appContext'
+import { portalUsable } from '@/lib/connection'
 import {
   fetchProfiles, createProfile, updateProfile, deleteProfile,
   normalizePortal, DEFAULT_FORM,
@@ -632,8 +633,8 @@ export default function SetupPage() {
       let profileList = serverProfiles
 
       if (sw?.stripWords) setStripWords(sw.stripWords)
-      // Track which portal is currently connected
-      if (status?.connected && status?.portal && status?.mac) {
+      // Track which portal is currently connected (asleep: the one the next use reconnects to)
+      if (portalUsable(status) && status?.portal && status?.mac) {
         setConnectedPortal({ portal: status.portal, mac: status.mac })
       }
 

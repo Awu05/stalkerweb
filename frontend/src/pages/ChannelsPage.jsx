@@ -150,9 +150,10 @@ export default function ChannelsPage() {
   // and progress bars don't freeze during a long-lived session.
   useEffect(() => {
     let cancelled = false
-    const refresh = () => getNowNext().then(d => { if (!cancelled) setNowNext(d) }).catch(() => {})
-    refresh()
-    const id = setInterval(refresh, 5 * 60 * 1000)
+    const refresh = (background) => getNowNext({ background }).then(d => { if (!cancelled) setNowNext(d) }).catch(() => {})
+    refresh(false)
+    // The timed refresh never wakes an asleep server (stalkerApi.js).
+    const id = setInterval(() => refresh(true), 5 * 60 * 1000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
