@@ -32,7 +32,7 @@ import com.stalkerweb.android.data.repo.stallTick
 import com.stalkerweb.android.data.repo.LiveRepository
 import com.stalkerweb.android.data.repo.RecordingsRepository
 import com.stalkerweb.android.data.repo.endForChoice
-import com.stalkerweb.android.data.repo.stillRecording
+import com.stalkerweb.android.data.repo.recordingOn
 import com.stalkerweb.android.data.api.ApiError
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.service.PlaybackService
@@ -65,7 +65,7 @@ data class PlayerUiState(
     val nowNext: Map<String, NowNextEntry> = emptyMap(),
     /** A channel number being typed on the remote. */
     val jumpDigits: String             = "",
-    /** The recording this player started: (channel, recording id) — Record on that channel stops it. */
+    /** The recording being made on the channel playing: (channel, recording id) — Record stops it. */
     val recording: Pair<String, String>? = null,
     /** Recording now would go past the provider's stream limit: asked first. */
     val recordAsk: RecordAsk?          = null,
@@ -204,6 +204,7 @@ class PlayerViewModel(
         )
         startWatchdog()
         loadGuide(channelId)
+        watchRecording(channelId)
 
         // Reuse an existing connected MediaController; if the previous one disconnected
         // (PlaybackService was stopped while the app was in the background) fall through
@@ -313,6 +314,7 @@ class PlayerViewModel(
         resetReconnect()   // a deliberate zap starts a fresh backoff sequence
         loadStream(channelId)
         loadGuide(channelId)
+        watchRecording(channelId)
     }
 
     /** The player screen closed: stop watching over the shared player (VOD may use it next). */
@@ -343,8 +345,8 @@ class PlayerViewModel(
         nowNextJob?.cancel()
         cancelDigits()
         resetReconnect()
-        // A recording goes on in the server; next time Record starts another (the Recordings screen stops this one).
-        followJob?.cancel()
+        // A recording goes on in the server; the next visit finds it again.
+        recordingJob?.cancel()
         _state.value = _state.value.copy(recording = null, recordAsk = null)
         castManager?.clearSource(castSourceNo)   // what's on the TV carries on
         _player.value?.takeIf { playingLive() }?.let { p ->
@@ -366,8 +368,8 @@ class PlayerViewModel(
             val now = System.currentTimeMillis()
             runCatching { recordings.recordNow(channelId, channelName, title, endForChoice(choice, now, programme?.endTime?.times(1000)), force) }
                 .onSuccess { r ->
+                    recordingChanged++
                     _state.value = _state.value.copy(recording = channelId to r.id, recordAsk = null)
-                    follow(r.id)
                     toast("Recording \"$title\" — it's on the Recordings screen")
                 }
                 .onFailure { e ->
@@ -382,24 +384,27 @@ class PlayerViewModel(
         }
     }
 
-    private var followJob: Job? = null
+    private var recordingJob: Job? = null
+    private var recordingChanged = 0   // bumped by Record and Stop here: a look sent before can't undo them
 
     /**
-     * While Record shows "recording": a look at the recording every 30 s —
-     * ended by itself, stopped elsewhere (the Recordings screen, the web),
-     * failed or deleted, the button is Record again (the web's RecordButton).
+     * On [channelId], and every 30 s: the recording being made on it — a
+     * guide booking that started, one begun elsewhere (the web, another
+     * device); ended, stopped or failed, the button is Record again (the
+     * web's RecordButton).
      */
-    private fun follow(id: String) {
-        followJob?.cancel()
-        followJob = viewModelScope.launch {
+    private fun watchRecording(channelId: String) {
+        recordingJob?.cancel()
+        _state.value = _state.value.copy(recording = null)
+        recordingJob = viewModelScope.launch {
             while (isActive) {
-                delay(30_000)
+                val n = recordingChanged
                 // Not answering for a moment: asked again next time.
-                val list = runCatching { recordings.list(background = true) }.getOrNull() ?: continue
-                if (!stillRecording(list, id)) {
-                    if (_state.value.recording?.second == id) _state.value = _state.value.copy(recording = null)
-                    return@launch
+                val list = runCatching { recordings.list(background = true) }.getOrNull()
+                if (list != null && n == recordingChanged && _state.value.activeChannelId == channelId) {
+                    _state.value = _state.value.copy(recording = recordingOn(list, channelId)?.let { channelId to it })
                 }
+                delay(30_000)
             }
         }
     }
@@ -413,12 +418,12 @@ class PlayerViewModel(
 
     fun dismissRecordAsk() { _state.value = _state.value.copy(recordAsk = null) }
 
-    /** Stops the recording this player started (what it has is kept). */
+    /** Stops the recording being made on the channel playing (what it has is kept). */
     fun stopRecording() {
         val id = _state.value.recording?.second ?: return
         viewModelScope.launch {
             runCatching { recordings.stop(id) }
-                .onSuccess { followJob?.cancel(); _state.value = _state.value.copy(recording = null); toast("Recording stopped — what it has is kept") }
+                .onSuccess { recordingChanged++; _state.value = _state.value.copy(recording = null); toast("Recording stopped — what it has is kept") }
                 .onFailure { toast(it.toApiError().message ?: "Couldn't stop it") }
         }
     }
