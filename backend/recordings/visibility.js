@@ -7,6 +7,8 @@
 //   • mine      — booked by the request's viewer
 //   • orphaned  — its viewer no longer exists (deleted, or the placeholder used
 //                 while viewers.json couldn't be read): anyone may delete it
+//   • admin     — the request's viewer is the admin (the first viewer,
+//                 viewers/ViewersManager.js): it may delete anyone's
 //   • visible   — mine, or its channel passes the viewer's own channel filters
 //                 (Show Adult, hidden genres and languages — the same check the
 //                 channel list and the exports use, lib/exportFilter.js)
@@ -18,9 +20,10 @@ const DELETED_VIEWER = '(deleted viewer)';
 /**
  * The rules for one request's viewer. `viewerOf(id)` → the viewer or null;
  * `channels()` → the channel list (for a recording's genre — one whose channel
- * is no longer listed is judged by its name alone).
+ * is no longer listed is judged by its name alone); `isAdmin(viewer)` → whether
+ * it's the admin.
  */
-function recordingRules(viewer, { viewerOf = () => null, channels = () => [] } = {}) {
+function recordingRules(viewer, { viewerOf = () => null, channels = () => [], isAdmin = () => false } = {}) {
   const me = viewer?.id ?? null;
   const keep = buildExportFilter({ profile: viewer, showAdult: viewer?.showAdult === true }).keep;
   let byId = null;
@@ -33,10 +36,11 @@ function recordingRules(viewer, { viewerOf = () => null, channels = () => [] } =
   };
   const mine = (r) => !!r && (r.viewerId ?? null) === me;
   const orphaned = (r) => !!r && !(r.viewerId && viewerOf(r.viewerId));
+  const admin = !!viewer && isAdmin(viewer);
   return {
     mine,
     orphaned,
-    canDelete: (r) => mine(r) || orphaned(r),
+    canDelete: (r) => !!r && (admin || mine(r) || orphaned(r)),
     visible: (r) => mine(r) || keep(channelOf(r)),
     ownerName: (r) => (orphaned(r) ? DELETED_VIEWER : viewerOf(r.viewerId)?.name ?? ''),
   };

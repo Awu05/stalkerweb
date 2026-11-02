@@ -3,6 +3,7 @@ package com.stalkerweb.android.ui.recordings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalkerweb.android.data.api.Recording
+import com.stalkerweb.android.data.api.RecordingDisk
 import com.stalkerweb.android.data.api.toApiError
 import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.repo.RecordingsRepository
@@ -18,7 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class RecordingsState(val list: List<Recording> = emptyList(), val loading: Boolean = true, val error: String? = null, val everyone: Boolean = false)
+data class RecordingsState(val list: List<Recording> = emptyList(), val loading: Boolean = true, val error: String? = null, val everyone: Boolean = false, val disk: RecordingDisk? = null)
 
 // As often as the web's Recordings page reads them: a recording's length and size move.
 private const val REFRESH_MS = 5_000L
@@ -49,11 +50,11 @@ class RecordingsViewModel(private val recordings: RecordingsRepository, private 
 
     private suspend fun refresh(background: Boolean = false) {
         val everyone = _state.value.everyone
-        val result = runCatching { recordings.list(everyone, background) }
+        val result = runCatching { recordings.listing(everyone, background) }
         // The switch changed while this was asked: its answer is the other mode's — dropped.
         if (!keepRecordingsResult(everyone, _state.value.everyone)) return
         result
-            .onSuccess { _state.value = RecordingsState(list = it, loading = false, everyone = everyone) }
+            .onSuccess { _state.value = RecordingsState(list = it.recordings, loading = false, everyone = everyone, disk = it.disk) }
             .onFailure { _state.value = _state.value.copy(loading = false, error = it.toApiError().message) }
     }
 

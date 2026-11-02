@@ -6,3 +6,17 @@ export function matchesStation(channel, query) {
   if (/^\d+$/.test(q) && channel.number > 0 && String(channel.number).startsWith(q)) return true
   return String(channel.name ?? '').toLowerCase().includes(q)
 }
+
+// Whether the Guide shows a channel: the search matches it and, with
+// favoritesOnly's ids (null = every channel), it's one of the favorites.
+export function shownInGuide(channel, query, favoriteIds) {
+  if (favoriteIds && !favoriteIds.has(String(channel.uniqueId))) return false
+  return matchesStation(channel, query)
+}
+
+// What the Guide says when it has no channels to show.
+export function guideEmptyMessage(query, favoritesOnly) {
+  const q = String(query ?? '').trim()
+  if (favoritesOnly) return q ? `No favorite stations match “${q}”.` : 'No favorite channels yet — add one with the heart on a channel.'
+  return q ? `No stations match “${q}”.` : 'No channels to show.'
+}

@@ -53,6 +53,7 @@ import com.stalkerweb.android.BuildConfig
 import com.stalkerweb.android.data.api.Recording
 import com.stalkerweb.android.data.repo.groupRecordings
 import com.stalkerweb.android.data.repo.recordingLabel
+import com.stalkerweb.android.data.repo.diskLine
 import com.stalkerweb.android.data.repo.recordingsHint
 import com.stalkerweb.android.data.repo.sourceLabel
 import com.stalkerweb.android.data.repo.showsEveryoneSwitch
@@ -81,6 +82,9 @@ fun RecordingsScreen(viewModel: RecordingsViewModel, onPlay: (Recording) -> Unit
         Text("Recordings", style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp))
         Text(recordingsHint(BuildConfig.IS_SOLO), style = MaterialTheme.typography.labelMedium, color = SwColors.Muted,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        diskLine(state.disk).takeIf { it.isNotEmpty() }?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = SwColors.Muted, modifier = Modifier.padding(horizontal = 16.dp))
+        }
         // Everyone's recordings: each with who booked it; any can be stopped or cancelled, only one's own deleted.
         // Not in Solo: its one viewer owns every recording.
         if (showsEveryoneSwitch(BuildConfig.IS_SOLO)) {

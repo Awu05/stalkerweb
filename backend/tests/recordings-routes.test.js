@@ -305,7 +305,8 @@ async function makeHousehold() {
   const scheduler = new RecordingScheduler({ store, start, now: () => c.t, tickMs: 1e9, urlFor: (id) => `http://x/proxy/stream/${id}`, dirFor: () => d, timeZone: 'UTC' })
   const s = { max_streams: 4, record_pad_before_min: 0, record_pad_after_min: 0 }
   const st = { recordings: scheduler, recordingStore: store, activeStreams: 0 }
-  const opts = { viewerOf: (id) => viewers.get(id), channels: () => channels }
+  const disk = { free: 50 * 1024 ** 3 }
+  const opts = { viewerOf: (id) => viewers.get(id), channels: () => channels, isAdmin: (v) => viewers.isAdmin(v?.id), freeBytes: () => disk.free }
   const app = express()
   app.use(express.json())
   app.use(createViewerContext(viewers).middleware)
@@ -329,7 +330,7 @@ async function makeHousehold() {
     return store.update(r.id, { status: 'done', bytes: 8, filePath })
   }
   const close = async () => { await scheduler.stopAll(); srv.closeAllConnections(); srv.close(); fs.rmSync(d, { recursive: true, force: true }) }
-  return { ids, viewers, store, scheduler, clock: c, send, finished, close }
+  return { ids, viewers, store, scheduler, clock: c, send, finished, close, disk }
 }
 
 describe('/api/recordings — who owns one, and who may see it', () => {
@@ -380,6 +381,30 @@ describe('/api/recordings — who owns one, and who may see it', () => {
     expect(row(list, booked.id).source).toBe('scheduled')
     expect(row(list, now.body.id).source).toBe('manual')
     expect(row(list, old.id).source).toBe('manual')
+  })
+
+  it("the admin (the first viewer) may delete anyone's recording; others still only their own", async () => {
+    const a = h.finished({ viewerId: h.ids.andy })
+    const f = h.store.schedule({ viewerId: h.ids.bea, channelId: '7', channelName: 'News 24', title: 'Broken', startAt: T0 - 60 * MIN, endAt: T0 - 30 * MIN })
+    h.store.update(f.id, { status: 'failed', error: 'no signal' })
+    const toAdmin = await h.send('GET', '/api/recordings?all=1', null, h.ids.default)
+    expect(row(toAdmin, a.id)).toMatchObject({ mine: false, canDelete: true })
+    expect(row(toAdmin, f.id)).toMatchObject({ mine: false, canDelete: true })
+    expect(row(await h.send('GET', '/api/recordings?all=1', null, h.ids.bea), a.id)).toMatchObject({ canDelete: false })
+    expect((await h.send('DELETE', `/api/recordings/${a.id}`, null, h.ids.bea)).status).toBe(404)
+    expect((await h.send('DELETE', `/api/recordings/${a.id}`, null, h.ids.default)).status).toBe(200)
+    expect(h.store.get(a.id)).toBeNull()
+    expect((await h.send('DELETE', `/api/recordings/${f.id}`, null, h.ids.default)).status).toBe(200)
+  })
+
+  it('the list says how much the recordings take on the disk, and how much is free', async () => {
+    h.finished({ viewerId: h.ids.andy })
+    h.finished({ viewerId: h.ids.bea })
+    const r = await h.send('GET', '/api/recordings', null, h.ids.bea)
+    // Everyone's, whichever list was asked for: it's the disk they share.
+    expect(r.body.disk).toEqual({ usedBytes: 16, freeBytes: 50 * 1024 ** 3 })
+    h.disk.free = null   // unknown (statfs failed)
+    expect((await h.send('GET', '/api/recordings?all=1', null, h.ids.bea)).body.disk).toEqual({ usedBytes: 16, freeBytes: null })
   })
 
   it("someone else's failed one stays undeletable for me; once its viewer is gone, it isn't", async () => {

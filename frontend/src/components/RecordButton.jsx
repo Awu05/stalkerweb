@@ -2,31 +2,39 @@ import { useEffect, useRef, useState } from 'react'
 import { CircleDot, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getRecordings, recordNow, stopRecording } from '../stalkerApi'
-import { RECORD_CHOICES, endForChoice, stillRecording } from '@/lib/recordings'
+import { recordChoices, endForChoice, recordingOn } from '@/lib/recordings'
 import { showToast } from '@/lib/toast'
 
 /**
  * Record in the live player: the channel playing, from now — until the
  * programme ends, for a while, or until stopped (lib/recordings.js). The
- * server records it (recordings/), so it goes on with the player closed;
- * pressed again while this player started one, it stops it.
+ * server records it (recordings/), so it goes on with the player closed.
+ * While one of this viewer's recordings is being made on the channel —
+ * started here, elsewhere or from the guide — it shows so, and stops it.
  */
 export default function RecordButton({ channel, programme }) {
   const [open, setOpen] = useState(false)
   const [recordingId, setRecordingId] = useState(null)
   const box = useRef(null)
-  useEffect(() => { setRecordingId(null); setOpen(false) }, [channel?.uniqueId])
-  // While it shows "recording": a look every 30 s — ended by itself, stopped elsewhere or failed, it's Record again.
+  const changed = useRef(0)   // bumped by Record and Stop here: a look sent before can't undo them
+  const channelId = channel ? String(channel.uniqueId) : null
+  // On the channel, and every 30 s: what's recording on it — a booking that
+  // started, one begun elsewhere; ended, stopped or failed, it's Record again.
   useEffect(() => {
-    if (!recordingId) return
+    setRecordingId(null); setOpen(false)
+    if (!channelId) return
     let gone = false
-    // A timer's request: never wakes an asleep server (stalkerApi.js, { background: true }).
-    const look = () => getRecordings(false, { background: true })
-      .then((r) => { if (!gone && !stillRecording(r.recordings, recordingId)) setRecordingId((id) => (id === recordingId ? null : id)) })
-      .catch(() => { /* offline for a moment: ask again next time */ })
+    // Never wakes an asleep server (stalkerApi.js, { background: true }).
+    const look = () => {
+      const n = changed.current
+      getRecordings(false, { background: true })
+        .then((r) => { if (!gone && n === changed.current) setRecordingId(recordingOn(r.recordings, channelId)) })
+        .catch(() => { /* offline for a moment: ask again next time */ })
+    }
+    look()
     const t = setInterval(look, 30_000)
     return () => { gone = true; clearInterval(t) }
-  }, [recordingId])
+  }, [channelId])
   useEffect(() => {
     if (!open) return
     const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }
@@ -44,6 +52,7 @@ export default function RecordButton({ channel, programme }) {
     }
     try {
       const r = await recordNow(body)
+      changed.current++
       setRecordingId(r.id)
       showToast(`Recording "${body.title}" — it's on the Recordings page`)
     } catch (e) {
@@ -53,7 +62,7 @@ export default function RecordButton({ channel, programme }) {
     }
   }
   const stop = () => stopRecording(recordingId)
-    .then(() => { setRecordingId(null); showToast('Recording stopped — what it has is kept') })
+    .then(() => { changed.current++; setRecordingId(null); showToast('Recording stopped — what it has is kept') })
     .catch((e) => showToast(e.message, 'error'))
 
   return (
@@ -69,7 +78,7 @@ export default function RecordButton({ channel, programme }) {
       {open && (
         <div role="menu" className="absolute bottom-full right-0 mb-2 w-56 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-xl z-50">
           <p className="px-3 py-1.5 text-xs text-[var(--color-muted)]">Record {programme?.title ? `"${programme.title}"` : channel.name}</p>
-          {RECORD_CHOICES.map((c) => (
+          {recordChoices(programme?.endTime ? programme.endTime * 1000 : null, Date.now()).map((c) => (
             <button key={c.id} role="menuitem" onClick={() => start(c.id)}
               className="block w-full text-left px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]">
               {c.label}

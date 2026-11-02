@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { LayoutGrid, List, Search, X } from 'lucide-react'
+import { Heart, LayoutGrid, List, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFavorites } from '@/lib/useFavorites'
 import EpgGridView from './EpgGridPage'
 import GuideListView from './GuideListView'
 
 // The programme guide: a grid of every channel against a timeline (the
 // default), or a list of one channel's programmes. The view is in the URL
 // (?view=list) and switching replaces the history entry, so Back still leaves
-// the page. The station search filters either view.
+// the page. The station search filters either view, and so does Favorites
+// (?favorites=1): only the viewer's favorite channels.
 const VIEWS = [
   { id: 'grid', label: 'Grid', icon: LayoutGrid },
   { id: 'list', label: 'List', icon: List },
@@ -17,14 +19,18 @@ const VIEWS = [
 export default function GuidePage() {
   const [params, setParams] = useSearchParams()
   const view = params.get('view') === 'list' ? 'list' : 'grid'
+  const favoritesOnly = params.get('favorites') === '1'
   const [query, setQuery] = useState('')
+  const { favoriteIds } = useFavorites()
+  const onlyIds = favoritesOnly ? favoriteIds : null
 
-  const setView = (id) => {
+  const setParam = (key, value) => {
     const next = new URLSearchParams(params)
-    if (id === 'grid') next.delete('view')
-    else next.set('view', id)
+    if (value == null) next.delete(key)
+    else next.set(key, value)
     setParams(next, { replace: true })
   }
+  const setView = (id) => setParam('view', id === 'grid' ? null : id)
 
   return (
     <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-dvh">
@@ -52,6 +58,22 @@ export default function GuidePage() {
           ))}
         </div>
 
+        {/* Favorites only */}
+        <button
+          aria-pressed={favoritesOnly}
+          onClick={() => setParam('favorites', favoritesOnly ? null : '1')}
+          data-tooltip="Only my favorite channels"
+          className={cn(
+            'flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
+            favoritesOnly
+              ? 'fill-primary'
+              : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]'
+          )}
+        >
+          <Heart size={13} className={favoritesOnly ? 'fill-current' : ''} />
+          <span className="hidden sm:inline">Favorites</span>
+        </button>
+
         {/* Station search */}
         <div className="relative flex-1 max-w-xs ml-auto">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none" />
@@ -77,7 +99,7 @@ export default function GuidePage() {
       </div>
 
       <div className="flex-1 min-h-0">
-        {view === 'grid' ? <EpgGridView query={query} /> : <GuideListView query={query} />}
+        {view === 'grid' ? <EpgGridView query={query} favoriteIds={onlyIds} /> : <GuideListView query={query} favoriteIds={onlyIds} />}
       </div>
     </div>
   )

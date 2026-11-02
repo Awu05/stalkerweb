@@ -7,6 +7,10 @@
 //
 // Every change reads the file, changes one viewer and writes it back, so two
 // viewers saving in turn never overwrite each other.
+//
+// The first viewer (defaultViewerId: the one made on the first start) is the
+// admin: it may delete anyone's recordings (recordings/visibility.js), and it
+// can't be deleted itself, so the role never moves to someone else.
 
 const fs   = require('fs');
 const path = require('path');
@@ -195,7 +199,15 @@ class ViewersManager {
 
   list() {
     const d = this._data();
-    return { defaultViewerId: d.defaultViewerId, viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color })) };
+    return {
+      defaultViewerId: d.defaultViewerId,
+      viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color, admin: id === d.defaultViewerId })),
+    };
+  }
+
+  /** Whether viewer `id` is the admin (the first viewer). */
+  isAdmin(id) {
+    return !!id && id === this._data().defaultViewerId;
   }
 
   get(id) {
@@ -246,8 +258,8 @@ class ViewersManager {
     const d = this._data();
     if (!d.viewers.some((v) => v.id === id)) throw new ViewerError(404, 'Viewer not found.');
     if (d.viewers.length === 1) throw new ViewerError(409, 'The last viewer cannot be deleted.');
+    if (d.defaultViewerId === id) throw new ViewerError(409, "The admin profile can't be removed.");
     d.viewers = d.viewers.filter((v) => v.id !== id);
-    if (d.defaultViewerId === id) d.defaultViewerId = d.viewers[0].id;
     this._save(d);
   }
 

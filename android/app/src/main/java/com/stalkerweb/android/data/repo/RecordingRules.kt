@@ -1,6 +1,7 @@
 package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.Recording
+import com.stalkerweb.android.data.api.RecordingDisk
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -22,6 +23,10 @@ val RECORD_CHOICES = listOf(
     RecordChoice("120", "2 hours"),
     RecordChoice("stop", "Until I stop it"),
 )
+
+/** The lengths offered: "until the programme ends" only with a guide end ([programmeEnd], ms) still to come. */
+fun recordChoices(programmeEnd: Long?, now: Long): List<RecordChoice> =
+    if (programmeEnd != null && programmeEnd > now) RECORD_CHOICES else RECORD_CHOICES.filter { it.id != "programme" }
 
 /** When a recording started [now] ends: ms, or null for "until stopped". No guide end (or one gone by): an hour. */
 fun endForChoice(choice: String, now: Long, programmeEnd: Long? = null): Long? = when (choice) {
@@ -71,6 +76,14 @@ private fun dayLabel(ms: Long, now: Long, zone: ZoneId): String {
 private fun size(bytes: Long): String =
     if (bytes >= 1024L * 1024 * 1024) "%.1f GB".format(Locale.ROOT, bytes / (1024.0 * 1024 * 1024))
     else "${maxOf(0L, Math.round(bytes / (1024.0 * 1024)))} MB"
+
+/** The Recordings screen's disk line (the web's diskLine): what they take, what's free. */
+fun diskLine(disk: RecordingDisk?): String {
+    if (disk == null) return ""
+    val free = disk.freeBytes?.let { "${size(it)} free" }
+    if (disk.usedBytes <= 0) return free?.let { "$it for recordings" } ?: ""
+    return listOfNotNull("Recordings use ${size(disk.usedBytes)}", free).joinToString(" · ")
+}
 
 private fun length(ms: Long): String {
     val m = maxOf(0L, Math.round(ms.toDouble() / MIN))
@@ -133,11 +146,12 @@ fun recordingsToPublish(list: List<Recording>, published: Set<String>): List<Rec
 }
 
 /**
- * Whether recording [id] is still being made, in [list] (GET /api/recordings) —
- * not once it ended by itself, was stopped elsewhere, failed or was deleted.
- * The live player's Record button follows it (the web's stillRecording).
+ * The id of the recording being made on [channelId] in [list] (GET
+ * /api/recordings) — started in this player, on another device or from the
+ * guide — or null. The live player's Record button follows it (the web's recordingOn).
  */
-fun stillRecording(list: List<Recording>, id: String): Boolean = list.any { it.id == id && it.status == "recording" }
+fun recordingOn(list: List<Recording>, channelId: String): String? =
+    list.firstOrNull { it.status == "recording" && it.channelId == channelId }?.id
 
 /**
  * Where the app plays a recording from: in Solo, its copy in

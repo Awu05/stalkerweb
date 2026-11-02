@@ -148,6 +148,7 @@ fun ViewerPickerScreen(
                         ) {
                             ViewerAvatar(v.name, v.color, 88.dp)
                             Text(v.name, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                            if (v.admin) Text("ADMIN", style = MaterialTheme.typography.labelSmall, color = SwColors.Muted)
                         }
                     }
                     item(key = "add") {
