@@ -388,15 +388,16 @@ class PlayerViewModel(
     private var recordingChanged = 0   // bumped by Record and Stop here: a look sent before can't undo them
 
     /**
-     * On [channelId], and every 30 s: the recording being made on it — a
-     * guide booking that started, one begun elsewhere (the web, another
-     * device); ended, stopped or failed, the button is Record again (the
-     * web's RecordButton).
+     * On [channelId] (a moment after: not for each one zapped past), and every
+     * 30 s: the recording being made on it — a guide booking that started, one
+     * begun elsewhere (the web, another device); ended, stopped or failed, the
+     * button is Record again (the web's RecordButton).
      */
     private fun watchRecording(channelId: String) {
         recordingJob?.cancel()
         _state.value = _state.value.copy(recording = null)
         recordingJob = viewModelScope.launch {
+            delay(1_000)
             while (isActive) {
                 val n = recordingChanged
                 // Not answering for a moment: asked again next time.

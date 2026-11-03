@@ -32,6 +32,7 @@
 // row ends there, with what it has; a booked one rides it out to its end.
 
 const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const { readSelfStream, sleep } = require('../stalker/selfStreamReader');
 const { TsSegmenter } = require('../stalker/TsSegmenter');
@@ -51,6 +52,32 @@ function freeBytesOf(dir) {
 }
 
 /**
+ * freeBytesOf for a list every open player polls: without blocking, looked up
+ * at most every `ttlMs`, and given up on (null) after `waitMs` — a network
+ * disk that hangs mustn't hold the list up. A folder not made yet (before the
+ * first recording) is judged by the nearest one above it: where it will be.
+ */
+function cachedFreeBytes(dir, { ttlMs = 30_000, waitMs = 1_000, now = Date.now, statfs = fs.promises.statfs } = {}) {
+  let at = -Infinity, value = null, pending = null;
+  const look = async (d) => {
+    try {
+      const s = await statfs(d);
+      return s.bavail * s.bsize;
+    } catch (e) {
+      const up = path.dirname(d);
+      return e.code === 'ENOENT' && up !== d ? look(up) : null;
+    }
+  };
+  return () => {
+    if (now() - at < ttlMs) return Promise.resolve(value);
+    pending ??= look(dir).then((v) => { value = v; at = now(); pending = null; return v; });
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(value), waitMs); timer.unref?.(); });
+    return Promise.race([pending, late]).finally(() => clearTimeout(timer));
+  };
+}
+
+/**
  * @param {object} o
  * @param {string} o.url         this server's /proxy/stream URL for the channel
  * @param {string} o.filePath    where the finished recording goes
@@ -64,7 +91,7 @@ function freeBytesOf(dir) {
  */
 async function startRecording({
   url, filePath, endAt = null, signal = new globalThis.AbortController().signal, now = Date.now, onBytes = () => {},
-  freeBytes = () => freeBytesOf(require('path').dirname(filePath)), reader = readSelfStream, userAgent = null,
+  freeBytes = () => freeBytesOf(path.dirname(filePath)), reader = readSelfStream, userAgent = null,
   checkEveryMs = 1000, retryMs = 5000, giveUpMs = GIVE_UP_MS, maxBacklog = MAX_BACKLOG,
   maxPieceBytes = config.castMaxPieceBytes, openFile = (p) => fs.createWriteStream(p),
 }) {
@@ -162,4 +189,4 @@ async function startRecording({
   return { status: 'done', bytes, ...(error ? { error } : {}) };
 }
 
-module.exports = { startRecording, freeBytesOf };
+module.exports = { startRecording, freeBytesOf, cachedFreeBytes };

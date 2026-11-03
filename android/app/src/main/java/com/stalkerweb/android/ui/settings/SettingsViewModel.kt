@@ -123,6 +123,7 @@ class SettingsViewModel(
         settings.deleteViewer(v.id)
         if (v.id == viewers.savedViewerId()) { viewers.forget(); onOwnDeleted() }
     }
+    fun makeAdmin(v: ViewerSummary) = act("${v.name} is the admin now") { settings.makeAdmin(v.id); viewers.refresh() }
     fun saveFilters(f: FiltersToSave, showAdult: Boolean) = act("Saved") {
         settings.saveFilters(ViewerFiltersRequest(f.genres, f.vodCategories, showAdult, f.languages))
         viewers.filtersSaved()

@@ -123,6 +123,23 @@ describe('viewers', () => {
     expect(listed.find((v) => v.id === a.id).admin).toBe(false)
   })
 
+  it('the admin hands the role on; then the old default can go, and the admin stays', () => {
+    const def = viewers.getDefault()
+    const a = viewers.create({ name: 'Andy' })
+    const b = viewers.create({ name: 'Bea' })
+    expect(statusOf(() => viewers.setAdmin(b.id, a.id))).toBe(403)   // only the admin may
+    expect(statusOf(() => viewers.setAdmin(b.id, null))).toBe(403)
+    expect(statusOf(() => viewers.setAdmin('view_missing', def.id))).toBe(404)
+    viewers.setAdmin(a.id, def.id)
+    expect(viewers.isAdmin(a.id)).toBe(true)
+    expect(viewers.isAdmin(def.id)).toBe(false)
+    expect(viewers.list().viewers.filter((v) => v.admin).map((v) => v.id)).toEqual([a.id])
+    expect(statusOf(() => viewers.remove(a.id))).toBe(409)
+    viewers.remove(def.id)
+    expect(viewers.isAdmin(a.id)).toBe(true)                         // not moved with the default
+    expect(viewers.getDefault().id).not.toBe(def.id)
+  })
+
   it('finds a viewer by name or id, ignoring case', () => {
     const a = viewers.create({ name: 'Andy' })
     expect(viewers.findByName('andy').id).toBe(a.id)

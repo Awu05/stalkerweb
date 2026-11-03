@@ -44,6 +44,8 @@ describe('recordingLabel', () => {
     expect(recordingLabel(s({ status: 'scheduled', startAt: NOW + 120 * MIN, endAt: NOW + 187 * MIN }), o)).toBe('Today 20:00–21:07 · 1 h 07')
     expect(recordingLabel(s({ status: 'recording', bytes: 340 * 1024 ** 2 }), o)).toBe('Recording · 12 min of 1 h 07 · 340 MB')
     expect(recordingLabel(s({ status: 'done', endedAt: NOW - 12 * MIN + 65 * MIN, bytes: 2.1 * 1024 ** 3 }), o)).toBe('Recorded 31 Oct · 1 h 05 of 1 h 07 · 2.1 GB')
+    // A part 2 (after a restart) says its part 1's booking, not the time that was left.
+    expect(recordingLabel(s({ status: 'recording', startAt: NOW - 2 * MIN, endAt: NOW + 25 * MIN, bookedMs: 67 * MIN, bytes: 1024 ** 2 }), o)).toBe('Recording · 2 min of 1 h 07 · 1 MB')
     // Record now keeps its lines as they were, a set length or not.
     expect(recordingLabel(rec({ source: 'manual', status: 'recording', startAt: NOW - 12 * MIN, endAt: NOW + 18 * MIN, bytes: 340 * 1024 ** 2 }), o)).toBe('Recording · 12 min · 340 MB')
   })

@@ -271,6 +271,10 @@ interface StalkerApi {
     @DELETE("api/viewers/{id}")
     suspend fun deleteViewer(@Path("id") id: String)
 
+    /** Makes it the admin — asked by the admin (this device's X-Viewer). */
+    @PUT("api/viewers/{id}/admin")
+    suspend fun makeViewerAdmin(@Path("id") id: String, @Body body: Map<String, String> = emptyMap())
+
     @PUT("api/viewers/me/filters")
     suspend fun saveMyFilters(@Body body: ViewerFiltersRequest): ViewerDetails
 

@@ -45,5 +45,7 @@ describe('guideEmptyMessage', () => {
     expect(guideEmptyMessage('', true)).toBe('No favorite channels yet — add one with the heart on a channel.')
     expect(guideEmptyMessage('news', true)).toBe('No favorite stations match “news”.')
     expect(guideEmptyMessage('', false)).toBe('No channels to show.')
+    // Favorites, all hidden by the channel filters: not "none yet".
+    expect(guideEmptyMessage('', true, 3)).toBe('None of your favorite channels are in this guide — your channel filters may hide them.')
   })
 })

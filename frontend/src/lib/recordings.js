@@ -86,8 +86,10 @@ export function sourceLabel(r) {
 /** The line under a recording's title. `timeZone`: for tests; else the browser's. */
 export function recordingLabel(r, { now = Date.now(), timeZone } = {}) {
   const o = { now, timeZone }
-  // A booked one says how long it was booked for (with its padding).
-  const booked = r.source === 'scheduled' && r.endAt ? length(r.endAt - r.startAt) : null
+  // A booked one says how long it was booked for (with its padding): bookedMs — a part 2, after a
+  // restart, keeps its part 1's — or, from an older server, its own start to end.
+  const bookedMs = r.source === 'scheduled' ? (r.bookedMs ?? (r.endAt ? r.endAt - r.startAt : null)) : null
+  const booked = bookedMs ? length(bookedMs) : null
   const of = booked ? ` of ${booked}` : ''
   switch (r.status) {
     case 'scheduled':
