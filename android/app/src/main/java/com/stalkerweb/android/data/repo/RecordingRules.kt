@@ -212,7 +212,7 @@ fun recordingServerUrl(base: String, id: String, viewerId: String?): String {
 /** The lengths offered, in minutes. */
 val RECORD_LENGTHS = listOf(30, 60, 120, 180)
 private const val MAX_TIMED_MS = 12 * 60 * MIN
-private val PLACEHOLDER = Regex("^no (information|info|data|programme|program|epg|guide)\b", RegexOption.IGNORE_CASE)
+private val PLACEHOLDER = Regex("^no (information|info|data|programme|program|epg|guide)\\b", RegexOption.IGNORE_CASE)
 
 /** A guide entry that stands for no programme ("No information available"): recorded by time instead. */
 fun isGuidePlaceholder(title: String?): Boolean {
