@@ -8,8 +8,10 @@ import { isLanguageDisabled } from '@/lib/languages'
 import { shownInGuide, guideEmptyMessage } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
-import { getChannelEpg, getProxiedLogoUrl, scheduleRecording } from '../stalkerApi'
-import { showToast } from '@/lib/toast'
+import { getChannelEpg, getProxiedLogoUrl } from '../stalkerApi'
+import { isGuidePlaceholder, timedStart } from '@/lib/recordings'
+import RecordTimeDialog from '@/components/RecordTimeDialog'
+import { bookRecording } from '@/lib/bookRecording'
 import { useReminders } from '@/lib/useReminders'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -137,22 +139,7 @@ const ProgrammeBlock = memo(function ProgrammeBlock({ prog, channel, gridStartMs
 })
 
 // ── Programme detail popup ────────────────────────────────────────────────────
-// Booked on the server (routes/recordings.js): it records with every app closed. A clash past the
-// provider's stream limit is refused with what it clashes with. One that starts within 5 minutes
-// while the limit is in use (watching, casting) asks first, like Record now in the player.
-function bookRecording(prog, channel, onClose, force = false) {
-  scheduleRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
-    startAt: prog.startTime * 1000, endAt: prog.endTime * 1000, ...(force ? { force: true } : {}) })
-    .then(() => { showToast(`"${prog.title}" will be recorded — see Recordings`); onClose() })
-    .catch((e) => {
-      if (e.status === 409 && e.body?.takesStream) {
-        if (window.confirm(e.message)) bookRecording(prog, channel, onClose, true)
-        return
-      }
-      showToast(e.message, 'error')
-    })
-}
-
+// Record books it on the server (lib/bookRecording.js).
 function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, hasReminder }) {
   const live = isNow(prog.startTime, prog.endTime)
   const future = prog.startTime * 1000 > Date.now()
@@ -224,7 +211,8 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
           )}
           {(live || future) && channel && (
             <button
-              onClick={() => bookRecording(prog, channel, onClose)}
+              onClick={() => bookRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
+                startAt: prog.startTime * 1000, endAt: prog.endTime * 1000 }, onClose)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium border bg-[var(--color-surface-2)] border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-live)]/50 transition-colors"
             >
               <CircleDot size={13} className="text-[var(--color-live)]" /> Record
@@ -340,7 +328,12 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
   const [selectedProg, setSelectedProg] = useState(null)
   const [selectedChannel, setSelectedChannel] = useState(null)
 
+  // Record a time: { channel, start (ms) } — where there's no programme to book.
+  const [timed, setTimed] = useState(null)
+
+  // A "No information available" stand-in is no programme: it opens Record a time.
   const handleSelectProg = useCallback((prog, channel) => {
+    if (isGuidePlaceholder(prog.title)) return setTimed({ channel, start: timedStart(prog.startTime * 1000, Date.now()) })
     setSelectedProg(prog)
     setSelectedChannel(channel)
   }, [])
@@ -515,7 +508,15 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
                 </div>
 
                 {/* Programme track */}
-                <div className="relative shrink-0 bg-[var(--color-bg)]" style={{ width: gridWidthPx }}>
+                {/* A row without guide data: clicking it records a time, from the half hour clicked. */}
+                <div
+                  className={cn('relative shrink-0 bg-[var(--color-bg)]', !loading && events.length === 0 && 'cursor-pointer hover:bg-[var(--color-surface)]')}
+                  style={{ width: gridWidthPx }}
+                  onClick={!loading && events.length === 0 ? (e => {
+                    const x = e.clientX - e.currentTarget.getBoundingClientRect().left
+                    setTimed({ channel: ch, start: timedStart(gridStartMs + x / HOUR_WIDTH * 3_600_000, Date.now()) })
+                  }) : undefined}
+                >
                   {/* Slot grid lines */}
                   {timeSlots.map(slotMs => (
                     <div
@@ -532,7 +533,9 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
                     </div>
                   ) : events.length === 0 ? (
                     <div className="sticky flex items-center h-full w-fit" style={{ left: colWidth + 16 }}>
-                      <span className="text-xs text-[var(--color-muted)] opacity-50">No guide data</span>
+                      <button className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">
+                        <span className="opacity-50">No guide data</span> · Record a time
+                      </button>
                     </div>
                   ) : (
                     events.map((prog, i) => (
@@ -567,6 +570,7 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
           onToggleReminder={(prog) => handleToggleReminder(prog, selectedChannel)}
         />
       )}
+      {timed && <RecordTimeDialog channel={timed.channel} defaultStart={timed.start} onClose={() => setTimed(null)} />}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Tv2, Loader2, AlertCircle, Play } from 'lucide-react'
+import { Tv2, Loader2, AlertCircle, Play, CircleDot } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,8 @@ import { shownInGuide, guideEmptyMessage } from '@/lib/stationSearch'
 import { useApp } from '@/lib/appContext'
 import { getChannelEpg } from '../stalkerApi'
 import { getCachedChannelData, subscribeChannelUpdates } from '@/lib/channelCache'
+import { timedStart } from '@/lib/recordings'
+import RecordTimeDialog from '@/components/RecordTimeDialog'
 
 const PERIODS = [
   { label: '6h', value: 6 },
@@ -41,6 +43,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
   const [loadingChannels, setLoadingChannels] = useState(true)
   const [loadingEpg, setLoadingEpg] = useState(false)
   const [error, setError] = useState(null)
+  const [timed, setTimed] = useState(null)   // Record a time's start (ms): a channel without guide data
 
   useEffect(() => {
     let cancelled = false
@@ -184,7 +187,12 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
           )}
 
           {shown && !loadingEpg && !error && epg.length === 0 && (
-            <p className="text-sm text-[var(--color-muted)] mt-4">No EPG data available for this channel.</p>
+            <div className="mt-4 flex items-center gap-3">
+              <p className="text-sm text-[var(--color-muted)]">No EPG data available for this channel.</p>
+              <Button size="sm" variant="outline" onClick={() => setTimed(timedStart(Date.now(), Date.now()))}>
+                <CircleDot size={13} className="text-[var(--color-live)]" /> Record a time
+              </Button>
+            </div>
           )}
 
           {!loadingEpg && epg.length > 0 && (
@@ -223,6 +231,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
           )}
         </ScrollArea>
       </div>
+      {timed && shown && <RecordTimeDialog channel={shown} defaultStart={timed} onClose={() => setTimed(null)} />}
     </div>
   )
 }

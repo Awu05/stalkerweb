@@ -72,6 +72,8 @@ import coil.compose.AsyncImage
 import com.stalkerweb.android.data.api.Channel
 import com.stalkerweb.android.data.api.EpgEvent
 import com.stalkerweb.android.data.repo.eventAt
+import com.stalkerweb.android.data.repo.isGuidePlaceholder
+import com.stalkerweb.android.data.repo.timedStart
 import com.stalkerweb.android.data.repo.eventSpan
 import com.stalkerweb.android.data.repo.progressOf
 import com.stalkerweb.android.data.repo.slotStart
@@ -99,7 +101,9 @@ private fun clock(secs: Long): String = hm.format(Date(secs * 1000))
  * programmes across; the remote moves Up/Down between channels and
  * Left/Right between programmes), a channel → schedule list on phones.
  * OK on a programme: details, with Watch (on now) or Remind me (later), and
- * Record (on now or later: the server records it).
+ * Record (on now or later: the server records it). Where there's no programme
+ * to book — a channel without guide data, a "No information available"
+ * stand-in — OK opens Record a time.
  */
 @Composable
 fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
@@ -109,6 +113,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     val wide = isTV || LocalConfiguration.current.screenWidthDp >= 600
     val context = LocalContext.current
     var details by remember { mutableStateOf<Pair<Channel, EpgEvent>?>(null) }
+    var timed by remember { mutableStateOf<Pair<Channel, Long>?>(null) }   // Record a time: the channel, its start (ms)
     var phoneChannelId by rememberSaveable { mutableStateOf<String?>(null) }
     val phoneChannel = if (wide) null else phoneChannelId?.let { id -> state.channels.firstOrNull { it.uniqueId == id } }
     BackHandler(enabled = phoneChannel != null) { phoneChannelId = null }
@@ -121,6 +126,12 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     val recordAsk by viewModel.recordAsk.collectAsStateWithLifecycle()
     // A booking that starts within 5 minutes, with the provider's streams in use: asked first.
     recordAsk?.let { ask -> RecordAskDialog(ask.message, onYes = viewModel::confirmRecord, onNo = viewModel::dismissRecordAsk) }
+
+    val nowMs = { System.currentTimeMillis() }
+    fun open(ch: Channel, e: EpgEvent) {
+        if (isGuidePlaceholder(e.title)) timed = ch to timedStart(e.startTime * 1000, nowMs()) else details = ch to e
+    }
+    fun recordTime(ch: Channel) { timed = ch to timedStart(nowMs(), nowMs()) }
 
     fun toggleReminder(ch: Channel, e: EpgEvent) {
         val wasSet = reminders.any { it.id == "${ch.uniqueId}:${e.startTime}" }
@@ -152,8 +163,8 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
             state.error != null && state.channels.isEmpty() -> EmptyState(Icons.Default.GridView, "Couldn't load the guide", state.error) {
                 Button(onClick = { viewModel.load(force = true) }) { Text("Retry") }
             }
-            state.shown.isEmpty() -> EmptyState(Icons.Default.GridView, "No guide data", "The portal has no programmes for these channels.")
-            wide -> GuideGrid(state, anchorSecs, nowSecs, reminders.map { it.id }.toSet()) { ch, e -> details = ch to e }
+            state.shown.isEmpty() -> EmptyState(Icons.Default.GridView, "No channels", "There are no channels to show here.")
+            wide -> GuideGrid(state, anchorSecs, nowSecs, reminders.map { it.id }.toSet(), ::open, ::recordTime)
             phoneChannel == null -> LazyColumn {
                 items(state.shown, key = { it.uniqueId }) { ch ->
                     val now = eventAt(state.epg[ch.uniqueId].orEmpty(), nowSecs)
@@ -162,7 +173,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
                         Logo(state.logoMap[ch.uniqueId], 40.dp)
                         Column(Modifier.weight(1f)) {
                             Text(ch.name, color = SwColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(now?.title ?: "—", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(now?.title ?: if (state.epg[ch.uniqueId].isNullOrEmpty()) "No guide data" else "—", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -171,11 +182,20 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
                 val ch = phoneChannel
                 val events = state.epg[ch.uniqueId].orEmpty().filter { it.endTime > nowSecs }
                 LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (events.isEmpty()) item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("No guide data for this channel.", color = SwColors.Muted)
+                            OutlinedButton(onClick = { recordTime(ch) }) {
+                                Icon(Icons.Default.FiberManualRecord, null, Modifier.size(14.dp), tint = SwColors.Live)
+                                Text("  Record a time")
+                            }
+                        }
+                    }
                     items(events, key = { it.startTime }) { e ->
                         val on = e.startTime <= nowSecs
                         Column(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (on) SwColors.Surface2 else SwColors.Surface)
-                                .tvFocus(RoundedCornerShape(8.dp)).clickable { details = ch to e }.padding(12.dp),
+                                .tvFocus(RoundedCornerShape(8.dp)).clickable { open(ch, e) }.padding(12.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${clock(e.startTime)}–${clock(e.endTime)}", color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(96.dp))
@@ -224,6 +244,10 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
             },
         )
     }
+
+    timed?.let { (ch, start) ->
+        RecordTimeDialog(ch, start, onRecord = { timed = null; viewModel.recordTime(ch, it) }, onDismiss = { timed = null })
+    }
 }
 
 @Composable
@@ -236,7 +260,10 @@ private fun Logo(url: String?, size: Dp) {
 
 /** Channels down the side, a 24-hour timeline across — every row sharing one horizontal scroll. */
 @Composable
-private fun GuideGrid(state: GuideState, anchorSecs: Long, nowSecs: Long, reminderIds: Set<String>, onOpen: (Channel, EpgEvent) -> Unit) {
+private fun GuideGrid(
+    state: GuideState, anchorSecs: Long, nowSecs: Long, reminderIds: Set<String>,
+    onOpen: (Channel, EpgEvent) -> Unit, onRecordTime: (Channel) -> Unit,
+) {
     val windowStart = slotStart(anchorSecs) - BEFORE_SECS
     val windowEnd = windowStart + WINDOW_SECS
     val scroll = rememberScrollState()
@@ -261,7 +288,7 @@ private fun GuideGrid(state: GuideState, anchorSecs: Long, nowSecs: Long, remind
         }
         LazyColumn(Modifier.fillMaxSize()) {
             items(state.shown, key = { it.uniqueId }) { ch ->
-                GuideRow(ch, state.logoMap[ch.uniqueId], state.epg[ch.uniqueId].orEmpty(), windowStart, windowEnd, nowSecs, scroll, timelineWidth, reminderIds, onOpen)
+                GuideRow(ch, state.logoMap[ch.uniqueId], state.epg[ch.uniqueId].orEmpty(), windowStart, windowEnd, nowSecs, scroll, timelineWidth, reminderIds, onOpen, onRecordTime)
             }
         }
     }
@@ -271,6 +298,7 @@ private fun GuideGrid(state: GuideState, anchorSecs: Long, nowSecs: Long, remind
 private fun GuideRow(
     ch: Channel, logo: String?, events: List<EpgEvent>, windowStart: Long, windowEnd: Long, nowSecs: Long,
     scroll: ScrollState, timelineWidth: Dp, reminderIds: Set<String>, onOpen: (Channel, EpgEvent) -> Unit,
+    onRecordTime: (Channel) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().height(ROW).padding(vertical = 2.dp)) {
         Row(Modifier.width(CHANNEL_COL).fillMaxHeight().background(SwColors.Surface).padding(horizontal = 8.dp),
@@ -298,6 +326,20 @@ private fun GuideRow(
                                 if ("${ch.uniqueId}:${e.startTime}" in reminderIds) Icon(Icons.Default.NotificationsActive, "Reminder set", Modifier.padding(start = 4.dp).size(12.dp), tint = SwColors.Warning)
                             }
                         }
+                    }
+                }
+                // No guide data in the window: one block from now, OK records a time.
+                if (events.none { eventSpan(it, windowStart, windowEnd) != null }) {
+                    Box(
+                        Modifier.offset(x = MINUTE * ((nowSecs - windowStart) / 60f)).width(MINUTE * 180f).fillMaxHeight()
+                            .tvFocus(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(SwColors.Surface)
+                            .clickable { onRecordTime(ch) }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text("No guide data · Record a time", color = SwColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 // Now

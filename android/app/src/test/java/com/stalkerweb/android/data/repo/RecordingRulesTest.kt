@@ -200,4 +200,30 @@ class RecordingRulesTest {
         assertEquals("http://h:1/k/t/proxy/recording/a%20b/index.m3u8?viewer=view_1", recordingServerUrl("http://h:1/k/t", "a b", "view_1"))
         assertEquals("http://h:1/proxy/recording/r/index.m3u8", recordingServerUrl("http://h:1", "r", null))   // Solo: no viewer of its own
     }
+
+    @Test fun `knows a guide entry that stands for no programme`() {
+        assertTrue(isGuidePlaceholder("No information available"))
+        assertTrue(isGuidePlaceholder("no data"))
+        assertTrue(isGuidePlaceholder("  "))
+        assertFalse(isGuidePlaceholder("The Office"))
+        assertFalse(isGuidePlaceholder("Nothing But Trailers"))
+    }
+
+    @Test fun `record a time starts at the half hour picked, or now's once that one is over`() {
+        val t = { h: Int, m: Int -> now + ((h - 18) * 60 + m) * min }   // 31 Oct, UTC
+        assertEquals(t(21, 0), timedStart(t(21, 10), t(20, 5), utc))
+        assertEquals(t(21, 30), timedStart(t(21, 40), t(20, 5), utc))
+        assertEquals(t(20, 0), timedStart(t(20, 5), t(20, 20), utc))
+        assertEquals(t(20, 30), timedStart(t(18, 10), t(20, 40), utc))
+        assertEquals("Today 21:00", timedLabel(t(21, 0), now, utc))
+        assertEquals("Tomorrow 00:30", timedLabel(t(24, 30), now, utc))
+    }
+
+    @Test fun `record a time books a start and end, titled after the channel unless named`() {
+        assertEquals(TimedBooking("HBO 2", now + 60 * min, now + 120 * min), timedBooking(now + 60 * min, now + 120 * min, "", "HBO 2", now))
+        assertEquals("Movie night", timedBooking(now + 60 * min, now + 120 * min, " Movie night ", "HBO 2", now).title)
+        assertEquals("It has to end after it starts.", timedBooking(now, now, "", "HBO 2", now - min).error)
+        assertEquals("That time has already passed.", timedBooking(now - 120 * min, now - 60 * min, "", "HBO 2", now).error)
+        assertEquals("A recording can be at most 12 hours.", timedBooking(now, now + 13 * 60 * min, "", "HBO 2", now).error)
+    }
 }

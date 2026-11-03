@@ -203,3 +203,41 @@ fun recordingServerUrl(base: String, id: String, viewerId: String?): String {
     val viewer = viewerId?.takeIf { it.isNotBlank() }?.let { "?viewer=${enc(it)}" } ?: ""
     return "$base/proxy/recording/${enc(id)}/index.m3u8$viewer"
 }
+
+// ── Record a time ────────────────────────────────────────────────────────────
+// Where the guide has no programme to book (a channel without guide data, or
+// a "No information available" stand-in): a start and an end of your own,
+// booked like a programme. The web's lib/recordings.js says the same.
+
+/** The lengths offered, in minutes. */
+val RECORD_LENGTHS = listOf(30, 60, 120, 180)
+private const val MAX_TIMED_MS = 12 * 60 * MIN
+private val PLACEHOLDER = Regex("^no (information|info|data|programme|program|epg|guide)\b", RegexOption.IGNORE_CASE)
+
+/** A guide entry that stands for no programme ("No information available"): recorded by time instead. */
+fun isGuidePlaceholder(title: String?): Boolean {
+    val t = title?.trim().orEmpty()
+    return t.isEmpty() || PLACEHOLDER.containsMatchIn(t)
+}
+
+private fun halfHour(ms: Long, zone: ZoneId): Long =
+    at(ms, zone).let { it.withMinute(if (it.minute < 30) 0 else 30).withSecond(0).withNano(0) }.toInstant().toEpochMilli()
+
+/** Where Record a time starts: the half hour [picked] is in — or, that one over, the half hour [now] is in. */
+fun timedStart(picked: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
+    val s = halfHour(picked, zone)
+    return if (s + 30 * MIN <= now) halfHour(now, zone) else s
+}
+
+/** What Record a time books, or [error] saying why it can't. */
+data class TimedBooking(val title: String = "", val startAt: Long = 0, val endAt: Long = 0, val error: String? = null)
+
+fun timedBooking(startAt: Long, endAt: Long, title: String, channelName: String, now: Long): TimedBooking = when {
+    endAt <= startAt -> TimedBooking(error = "It has to end after it starts.")
+    endAt <= now -> TimedBooking(error = "That time has already passed.")
+    endAt - startAt > MAX_TIMED_MS -> TimedBooking(error = "A recording can be at most 12 hours.")
+    else -> TimedBooking(title.trim().ifEmpty { channelName.ifBlank { "Recording" } }, startAt, endAt)
+}
+
+/** A time in the Record a time dialog: "Today 21:00". */
+fun timedLabel(ms: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String = "${dayLabel(ms, now, zone)} ${time(ms, zone)}"
