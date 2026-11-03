@@ -97,22 +97,23 @@ fun sourceLabel(r: Recording): String = when (r.source) {
     else -> ""
 }
 
-/** The line under a recording's title. [zone]: for tests; else the device's. A booked one says how long it was booked for. */
+/**
+ * The line under a recording's title. [zone]: for tests; else the device's. A booked one says how long it was
+ * booked for: bookedMs (a part 2, after a restart, keeps its part 1's) or, from an older server, its start to end.
+ */
 fun recordingLabel(r: Recording, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String {
-    val booked = if (r.source == "scheduled") r.endAt?.let { length(it - r.startAt) } else null
+    val booked = if (r.source == "scheduled") (r.bookedMs ?: r.endAt?.let { it - r.startAt })?.let(::length) else null
     val of = booked?.let { " of $it" } ?: ""
-    return recordingLine(r, now, zone, booked, of)
-}
-
-private fun recordingLine(r: Recording, now: Long, zone: ZoneId, booked: String?, of: String): String = when (r.status) {
-    "scheduled" -> "${dayLabel(r.startAt, now, zone)} ${time(r.startAt, zone)}${r.endAt?.let { "–${time(it, zone)}" } ?: ""}${booked?.let { " · $it" } ?: ""}"
-    "recording" -> "Recording · ${length(now - r.startAt)}$of · ${size(r.bytes)}"
-    "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)}$of · ${size(r.bytes)}" +
-        (r.stoppedBy?.takeIf { it.isNotBlank() }?.let { " · Stopped by $it" } ?: "")
-    "failed" -> "Failed — ${r.error?.takeIf { it.isNotBlank() } ?: "the recording didn't work"}"
-    "missed" -> "Missed — the server wasn't running"
-    "cancelled" -> r.stoppedBy?.takeIf { it.isNotBlank() }?.let { "Cancelled by $it" } ?: "Cancelled"
-    else -> ""
+    return when (r.status) {
+        "scheduled" -> "${dayLabel(r.startAt, now, zone)} ${time(r.startAt, zone)}${r.endAt?.let { "–${time(it, zone)}" } ?: ""}${booked?.let { " · $it" } ?: ""}"
+        "recording" -> "Recording · ${length(now - r.startAt)}$of · ${size(r.bytes)}"
+        "done" -> "Recorded ${shortDate(r.startAt, zone)} · ${length((r.endedAt ?: r.endAt ?: now) - r.startAt)}$of · ${size(r.bytes)}" +
+            (r.stoppedBy?.takeIf { it.isNotBlank() }?.let { " · Stopped by $it" } ?: "")
+        "failed" -> "Failed — ${r.error?.takeIf { it.isNotBlank() } ?: "the recording didn't work"}"
+        "missed" -> "Missed — the server wasn't running"
+        "cancelled" -> r.stoppedBy?.takeIf { it.isNotBlank() }?.let { "Cancelled by $it" } ?: "Cancelled"
+        else -> ""
+    }
 }
 
 /**

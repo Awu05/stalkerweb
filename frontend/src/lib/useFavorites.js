@@ -26,14 +26,17 @@ export function useFavorites() {
   const [favoriteIds, setFavoriteIds] = useState(new Set())
   const [loaded, setLoaded] = useState(false)   // favoriteIds is the viewer's, not the empty start
   const [saved, setSaved]   = useState(0)       // bumped when the server has taken a change
+  const [failed, setFailed] = useState(false)   // they couldn't be loaded (reload asks again)
+  const [tries, setTries]   = useState(0)
 
   useEffect(() => {
     let cancelled = false
+    setFailed(false)
     loadFavorites()
       .then(r => { if (!cancelled) { setFavoriteIds(new Set(r.channels.map(c => String(c.uniqueId)))); setLoaded(true) } })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setFailed(true) })
     return () => { cancelled = true }
-  }, [])
+  }, [tries])
 
   async function toggleFavorite(channel) {
     const id = String(channel.uniqueId)
@@ -51,5 +54,5 @@ export function useFavorites() {
     }
   }
 
-  return { favoriteIds, setFavoriteIds, toggleFavorite, loaded, saved }
+  return { favoriteIds, setFavoriteIds, toggleFavorite, loaded, saved, failed, reload: () => setTries(n => n + 1) }
 }

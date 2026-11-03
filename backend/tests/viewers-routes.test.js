@@ -71,6 +71,19 @@ describe('viewers API and favorites', () => {
     expect(r.body.error).toMatch(/last viewer/)
   })
 
+  it('only the admin hands the admin role on', async () => {
+    const def = viewers.getDefault().id
+    const kim = (await call('POST', '/api/viewers', { name: 'Kim' })).body
+    expect((await call('PUT', `/api/viewers/${kim.id}/admin`)).status).toBe(403)                 // naming no viewer
+    expect((await call('PUT', `/api/viewers/${kim.id}/admin`, null, kim.id)).status).toBe(403)   // not the admin
+    expect((await call('PUT', `/api/viewers/${kim.id}/admin`, null, 'view_deleted')).status).toBe(409)
+    const made = await call('PUT', `/api/viewers/${kim.id}/admin`, null, def)
+    expect(made.status).toBe(200)
+    expect(made.body.viewers.find((v) => v.admin).id).toBe(kim.id)
+    expect((await call('PUT', `/api/viewers/${def}/admin`, null, kim.id)).status).toBe(200)       // and back
+    expect((await call('DELETE', `/api/viewers/${kim.id}`)).status).toBe(200)
+  })
+
   it('reads and saves the current viewer\'s filters', async () => {
     const sam = (await call('POST', '/api/viewers', { name: 'Sam' })).body
     expect((await call('GET', '/api/viewers/me')).body).toMatchObject({ name: 'Default', isDefault: true })

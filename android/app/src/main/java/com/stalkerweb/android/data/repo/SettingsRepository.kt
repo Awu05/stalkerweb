@@ -24,6 +24,7 @@ class SettingsRepository(private val apis: ApiProvider, private val prefs: AppPr
     suspend fun renameViewer(id: String, name: String) = apis.get().updateViewer(id, ViewerUpdate(name = name.trim()))
     suspend fun recolorViewer(id: String, color: String) = apis.get().updateViewer(id, ViewerUpdate(color = color))
     suspend fun deleteViewer(id: String) = apis.get().deleteViewer(id)
+    suspend fun makeAdmin(id: String) = apis.get().makeViewerAdmin(id)
     /** Adds a viewer without switching this device to it (as the web's Viewers card). */
     suspend fun createViewer(name: String) = apis.get().createViewer(CreateViewerRequest(name.trim()))
     suspend fun saveFilters(f: ViewerFiltersRequest) = apis.get().saveMyFilters(f)

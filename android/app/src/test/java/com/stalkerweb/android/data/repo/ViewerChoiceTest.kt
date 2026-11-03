@@ -15,6 +15,15 @@ class ViewerChoiceTest {
         assertEquals(false, canRemoveViewer(b, listOf(b)))
     }
 
+    @Test fun onlyTheAdminMakesSomeoneElseTheAdmin() {
+        val admin = ViewerSummary("view_a", "Andy", admin = true)
+        val kim = ViewerSummary("view_k", "Kim")
+        assertEquals(true, canMakeAdmin(b, listOf(admin, b, kim), "view_a"))
+        assertEquals(false, canMakeAdmin(admin, listOf(admin, b, kim), "view_a"))
+        assertEquals(false, canMakeAdmin(kim, listOf(admin, b, kim), "view_b"))
+        assertEquals(false, canMakeAdmin(kim, listOf(admin, b, kim), null))
+    }
+
     @Test fun keepsTheSavedViewerWhileItExists() {
         assertEquals(ViewerChoice("view_b", false), chooseViewer(listOf(a, b), "view_b"))
     }

@@ -17,7 +17,6 @@ const fs = require('fs');
 const path = require('path');
 const { startRecording } = require('./Recorder');
 const { readPieces, indexText } = require('./pieceIndex');
-const { sourceOf } = require('./RecordingStore');
 const log = require('../logger');
 const TAG = 'recordings';
 
@@ -167,7 +166,7 @@ class RecordingScheduler {
       this._store.update(r.id, { status: more ? 'cancelled' : 'failed', bytes: 0, error: 'The server restarted during this recording.' });
     }
     if (more) {
-      const two = this._store.schedule({ ...r, source: sourceOf(r), title: size > 0 ? `${r.title} (part 2)` : r.title, startAt: now, endAt: r.endAt,
+      const two = this._store.schedule({ ...r, title: size > 0 ? `${r.title} (part 2)` : r.title, startAt: now, endAt: r.endAt,
         padBeforeMin: 0, padAfterMin: 0, partOf: r.id, status: 'scheduled' });
       try { this._begin(two); } catch { /* marked failed, with why */ }
     }

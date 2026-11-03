@@ -85,18 +85,20 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
     if ((!query.trim() && !favoriteIds) || !channels.length) return
     setActiveChannel(cur => (cur && channels.some(c => c.uniqueId === cur.uniqueId) ? cur : channels[0]))
   }, [query, favoriteIds, channels])
+  // The programmes shown are of a channel in the list: none matching, none shown.
+  const shown = channels.some(c => c.uniqueId === activeChannel?.uniqueId) ? activeChannel : null
 
   useEffect(() => {
-    if (!activeChannel?.uniqueId) return
+    if (!shown?.uniqueId) { setEpg([]); return }
     let cancelled = false
     setLoadingEpg(true)
     setEpg([])
-    getChannelEpg(activeChannel.uniqueId, period)
+    getChannelEpg(shown.uniqueId, period)
       .then(data => { if (!cancelled) setEpg(data?.events || []) })
       .catch(() => { if (!cancelled) setEpg([]) })
       .finally(() => { if (!cancelled) setLoadingEpg(false) })
     return () => { cancelled = true }
-  }, [activeChannel?.uniqueId, period])
+  }, [shown?.uniqueId, period])
 
   return (
     <div className="flex h-full">
@@ -112,7 +114,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
         ) : (
           <ScrollArea className="flex-1">
             {channels.length === 0 && (
-              <p className="px-4 py-3 text-xs text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds)}</p>
+              <p className="px-4 py-3 text-xs text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds, favoriteIds?.size ?? 0)}</p>
             )}
             {channels.map(ch => (
               <button
@@ -138,7 +140,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
         {/* Header */}
         <div className="flex items-center gap-4 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
           <h2 className="font-semibold text-sm text-[var(--color-text)] truncate flex-1">
-            {activeChannel?.name || 'Select a channel'}
+            {shown?.name || 'Select a channel'}
           </h2>
           <div className="flex items-center gap-1">
             {PERIODS.map(p => (
@@ -156,11 +158,11 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
               </button>
             ))}
           </div>
-          {activeChannel && (
+          {shown && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(`/player?channel=${activeChannel.uniqueId}&name=${encodeURIComponent(activeChannel.name)}`)}
+              onClick={() => navigate(`/player?channel=${shown.uniqueId}&name=${encodeURIComponent(shown.name)}`)}
             >
               <Play size={13} /> Watch
             </Button>
@@ -181,7 +183,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
             </div>
           )}
 
-          {!loadingEpg && !error && epg.length === 0 && (
+          {shown && !loadingEpg && !error && epg.length === 0 && (
             <p className="text-sm text-[var(--color-muted)] mt-4">No EPG data available for this channel.</p>
           )}
 

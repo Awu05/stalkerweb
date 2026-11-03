@@ -34,6 +34,8 @@ data class Recording(
     val stoppedBy: String? = null,
     /** How it was started: "manual" (Record now) or "scheduled" (booked from the guide). */
     val source: String? = null,
+    /** How long a booked one was booked for, with its padding (ms) — a part 2 keeps its part 1's; null: not booked, or an older server. */
+    val bookedMs: Long? = null,
 )
 
 /** What every recording takes on the server's disk, and what's free there (null: unknown). */

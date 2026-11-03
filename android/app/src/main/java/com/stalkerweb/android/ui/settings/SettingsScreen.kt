@@ -5,6 +5,7 @@ import com.stalkerweb.android.ui.components.TvTextField
 import com.stalkerweb.android.ui.components.TipIconButton
 
 import com.stalkerweb.android.ui.components.tvKeyboardOptions
+import com.stalkerweb.android.data.repo.canMakeAdmin
 import com.stalkerweb.android.data.repo.canRemoveViewer
 import com.stalkerweb.android.data.repo.normalizeMac
 import android.content.ClipData
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -171,6 +173,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
     val me by viewModel.viewers.current.collectAsStateWithLifecycle()
     var renaming by remember { mutableStateOf<ViewerSummary?>(null) }
     var deleting by remember { mutableStateOf<ViewerSummary?>(null) }
+    var makingAdmin by remember { mutableStateOf<ViewerSummary?>(null) }
     var adding by remember { mutableStateOf(false) }
     // The filter checklists, edited here and saved together.
     val oldLanguages = me?.disabledLanguages.orEmpty()
@@ -197,8 +200,12 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                                 Box(Modifier.size(22.dp).tvFocus(CircleShape).background(c.color, CircleShape).clickable { viewModel.recolor(v, c.hex) })
                             }
                         }
+                        // Only the admin hands the role on (the server refuses anyone else too).
+                        if (canMakeAdmin(v, state.viewers, me?.id)) {
+                            TipIconButton(label = "Make ${v.name} the admin", onClick = { makingAdmin = v }) { Icon(Icons.Default.Shield, "Make ${v.name} the admin") }
+                        }
                         TipIconButton(label = "Rename ${v.name}", onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
-                        // The admin (the first viewer) and the last one can't be deleted (the server refuses too).
+                        // The admin and the last one can't be deleted (the server refuses too).
                         if (canRemoveViewer(v, state.viewers)) {
                             TipIconButton(label = "Delete ${v.name}", onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
                         }
@@ -281,6 +288,15 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
             text = { Text("Their favorites, history, My List and filters are deleted too.") },
             confirmButton = { Button(onClick = { deleting = null; viewModel.deleteViewer(v, onOwnViewerDeleted) }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
+    }
+    makingAdmin?.let { v ->
+        AlertDialog(
+            onDismissRequest = { makingAdmin = null },
+            title = { Text("Make ${v.name} the admin?") },
+            text = { Text("They'll be able to delete anyone's recordings, and you won't.") },
+            confirmButton = { Button(onClick = { makingAdmin = null; viewModel.makeAdmin(v) }) { Text("Make admin") } },
+            dismissButton = { TextButton(onClick = { makingAdmin = null }) { Text("Cancel") } },
         )
     }
 }

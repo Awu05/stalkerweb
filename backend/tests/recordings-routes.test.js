@@ -355,8 +355,10 @@ describe('/api/recordings — who owns one, and who may see it', () => {
     await h.scheduler.settled(booked.body.id)
     const r = row(await h.send('GET', '/api/recordings'), booked.body.id)
     expect(r).toMatchObject({ mine: true, canDelete: true })
-    // A stale web viewer id the server maps to Default: the same.
-    expect(row(await h.send('GET', '/api/recordings', null, 'view_stale'), booked.body.id)).toMatchObject({ canDelete: true })
+    // A deleted web viewer: asked who is watching, never handed the Default's recordings.
+    const stale = await h.send('GET', '/api/recordings', null, 'view_stale')
+    expect(stale).toMatchObject({ status: 409, body: { viewerGone: true } })
+    expect((await h.send('DELETE', `/api/recordings/${booked.body.id}`, null, 'view_stale')).status).toBe(409)
     expect((await h.send('DELETE', `/api/recordings/${booked.body.id}`)).status).toBe(200)
   })
 
@@ -372,15 +374,12 @@ describe('/api/recordings — who owns one, and who may see it', () => {
     expect(h.store.get(a.id)).toBeNull()
   })
 
-  it('every row says how it was started — older ones too', async () => {
-    const booked = h.finished({ viewerId: h.ids.andy })   // made well before its start: booked
+  it('every row says how it was started, and how long a booked one was booked for', async () => {
+    const booked = h.finished({ viewerId: h.ids.andy })
     const now = await h.send('POST', '/api/recordings/now', { channelId: '7', channelName: 'News 24', title: 'Now', endAt: null, force: true }, h.ids.andy)
-    const old = h.store.schedule({ viewerId: h.ids.andy, channelId: '7', channelName: 'News 24', title: 'Old', startAt: h.clock.t, endAt: null })
-    h.store.update(old.id, { source: undefined })
     const list = await h.send('GET', '/api/recordings', null, h.ids.andy)
-    expect(row(list, booked.id).source).toBe('scheduled')
-    expect(row(list, now.body.id).source).toBe('manual')
-    expect(row(list, old.id).source).toBe('manual')
+    expect(row(list, booked.id)).toMatchObject({ source: 'scheduled', bookedMs: 60 * MIN })
+    expect(row(list, now.body.id)).toMatchObject({ source: 'manual', bookedMs: null })
   })
 
   it("the admin (the first viewer) may delete anyone's recording; others still only their own", async () => {
@@ -395,6 +394,20 @@ describe('/api/recordings — who owns one, and who may see it', () => {
     expect((await h.send('DELETE', `/api/recordings/${a.id}`, null, h.ids.default)).status).toBe(200)
     expect(h.store.get(a.id)).toBeNull()
     expect((await h.send('DELETE', `/api/recordings/${f.id}`, null, h.ids.default)).status).toBe(200)
+  })
+
+  it("a request naming no viewer is given the default one, never the admin's rights", async () => {
+    const a = h.finished({ viewerId: h.ids.andy })
+    expect(row(await h.send('GET', '/api/recordings?all=1'), a.id)).toMatchObject({ canDelete: false })
+    expect((await h.send('DELETE', `/api/recordings/${a.id}`)).status).toBe(404)
+    expect(h.store.get(a.id)).toBeTruthy()
+  })
+
+  it('the admin role follows whoever it was handed to', async () => {
+    const a = h.finished({ viewerId: h.ids.bea })
+    h.viewers.setAdmin(h.ids.andy, h.ids.default)
+    expect(row(await h.send('GET', '/api/recordings?all=1', null, h.ids.default), a.id)).toMatchObject({ canDelete: false })
+    expect((await h.send('DELETE', `/api/recordings/${a.id}`, null, h.ids.andy)).status).toBe(200)
   })
 
   it('the list says how much the recordings take on the disk, and how much is free', async () => {

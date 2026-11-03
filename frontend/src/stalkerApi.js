@@ -93,6 +93,7 @@ export const getViewers    = () => _get('/viewers')
 export const createViewer  = (body) => _post('/viewers', body)
 export const updateViewer  = (id, body) => _put(`/viewers/${encodeURIComponent(id)}`, body)
 export const deleteViewer  = (id) => _delete(`/viewers/${encodeURIComponent(id)}`)
+export const makeViewerAdmin = (id) => _put(`/viewers/${encodeURIComponent(id)}/admin`, {})
 export const getMyViewer   = () => _get('/viewers/me')
 export const saveMyFilters = (body) => _put('/viewers/me/filters', body)
 

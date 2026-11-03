@@ -14,26 +14,34 @@ import { showToast } from '@/lib/toast'
  */
 export default function RecordButton({ channel, programme }) {
   const [open, setOpen] = useState(false)
-  const [recordingId, setRecordingId] = useState(null)
+  // { channelId, id }: kept with its channel, so an answer that comes after a
+  // zap never shows Stop on the next channel (and stops the wrong one).
+  const [recording, setRecording] = useState(null)
   const box = useRef(null)
   const changed = useRef(0)   // bumped by Record and Stop here: a look sent before can't undo them
   const channelId = channel ? String(channel.uniqueId) : null
-  // On the channel, and every 30 s: what's recording on it — a booking that
-  // started, one begun elsewhere; ended, stopped or failed, it's Record again.
+  const recordingId = recording?.channelId === channelId ? recording.id : null
+  // On the channel (a moment after: not for each one zapped past), and every
+  // 30 s: what's recording on it — a booking that started, one begun
+  // elsewhere; ended, stopped or failed, it's Record again.
   useEffect(() => {
-    setRecordingId(null); setOpen(false)
+    setOpen(false)
     if (!channelId) return
     let gone = false
     // Never wakes an asleep server (stalkerApi.js, { background: true }).
     const look = () => {
       const n = changed.current
       getRecordings(false, { background: true })
-        .then((r) => { if (!gone && n === changed.current) setRecordingId(recordingOn(r.recordings, channelId)) })
+        .then((r) => {
+          if (gone || n !== changed.current) return
+          const id = recordingOn(r.recordings, channelId)
+          setRecording(id ? { channelId, id } : null)
+        })
         .catch(() => { /* offline for a moment: ask again next time */ })
     }
-    look()
+    const first = setTimeout(look, 1_000)
     const t = setInterval(look, 30_000)
-    return () => { gone = true; clearInterval(t) }
+    return () => { gone = true; clearTimeout(first); clearInterval(t) }
   }, [channelId])
   useEffect(() => {
     if (!open) return
@@ -53,7 +61,7 @@ export default function RecordButton({ channel, programme }) {
     try {
       const r = await recordNow(body)
       changed.current++
-      setRecordingId(r.id)
+      setRecording({ channelId: body.channelId, id: r.id })
       showToast(`Recording "${body.title}" — it's on the Recordings page`)
     } catch (e) {
       // The provider's stream limit is in use: ask first (routes/recordings.js).
@@ -62,7 +70,7 @@ export default function RecordButton({ channel, programme }) {
     }
   }
   const stop = () => stopRecording(recordingId)
-    .then(() => { changed.current++; setRecordingId(null); showToast('Recording stopped — what it has is kept') })
+    .then(() => { changed.current++; setRecording(null); showToast('Recording stopped — what it has is kept') })
     .catch((e) => showToast(e.message, 'error'))
 
   return (

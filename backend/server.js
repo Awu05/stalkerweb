@@ -356,7 +356,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/vod', vodRoutes);
 app.use('/api/downloads', downloadsRoutes);
 // Who owns a recording, and the channels (a recording's genre, for the viewer's filters): recordings/visibility.js.
-const { freeBytesOf } = require('./recordings/Recorder');
+const { cachedFreeBytes } = require('./recordings/Recorder');
 const recordingViewers = {
   viewerOf: (id) => viewersManager.get(id),
   channels: () => appState.channelManager?.getChannels?.() ?? [],
@@ -365,8 +365,7 @@ const recordingViewers = {
 app.use('/api/recordings', require('./routes/recordings')(appState, {
   settings: () => require('./routes/settings').recordingSettings(exportSettingsCache.load() || {}),
   ...recordingViewers,
-  // The recordings folder may not exist before the first recording: then the disk it will be on.
-  freeBytes: () => freeBytesOf(config.recordingsDir) ?? freeBytesOf(config.dataDir),
+  freeBytes: cachedFreeBytes(config.recordingsDir),
 }));
 app.use('/api/channels', channelRoutes);
 app.use('/api/epg', epgRoutes);

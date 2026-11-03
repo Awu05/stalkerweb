@@ -8,7 +8,7 @@ import { getEventListeners } from 'events'
 import { makeTs } from './helpers/makeTs.js'
 
 const require = createRequire(import.meta.url)
-const { startRecording } = require('../recordings/Recorder.js')
+const { startRecording, cachedFreeBytes } = require('../recordings/Recorder.js')
 
 const GB = 1024 ** 3
 let dir, file
@@ -256,3 +256,41 @@ describe('startRecording', () => {
   })
 })
 
+
+describe('cachedFreeBytes', () => {
+  const stat = (bavail) => ({ bavail, bsize: 4096 })
+
+  it('looks once per interval, and a folder not made yet by the one above it', async () => {
+    const asked = []
+    const c = { t: 0 }
+    const statfs = async (d) => {
+      asked.push(d)
+      if (d === path.join('/data', 'recordings')) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      return stat(10)
+    }
+    const free = cachedFreeBytes(path.join('/data', 'recordings'), { ttlMs: 30_000, now: () => c.t, statfs })
+    expect(await free()).toBe(40960)
+    expect(asked).toEqual([path.join('/data', 'recordings'), '/data'.replace(/\//g, path.sep)])
+    c.t = 29_000
+    await free()
+    expect(asked.length).toBe(2)
+    c.t = 31_000
+    await free()
+    expect(asked.length).toBe(4)
+  })
+
+  it("gives up on a disk that hangs (null, or what it last said) — and doesn't block", async () => {
+    let answer = null
+    const statfs = () => new Promise((resolve) => { answer = resolve })
+    const free = cachedFreeBytes('/rec', { ttlMs: 0, waitMs: 20, statfs })
+    expect(await free()).toBe(null)
+    answer(stat(1))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(await free()).toBe(4096)   // the late answer is kept; this look hangs again
+  })
+
+  it('an error other than a missing folder: unknown', async () => {
+    const free = cachedFreeBytes('/rec', { statfs: async () => { throw Object.assign(new Error('io'), { code: 'EIO' }) } })
+    expect(await free()).toBe(null)
+  })
+})

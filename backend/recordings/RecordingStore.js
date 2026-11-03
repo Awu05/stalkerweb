@@ -7,9 +7,11 @@
 // move later — what was booked stays, recordings/RecordingScheduler.js).
 //
 // A recording: { id, viewerId, channelId, channelName, title, startAt,
-// endAt, status, source, filePath?, bytes, error?, partOf?, createdAt }, status one
-// of scheduled · recording · done · failed · missed · cancelled; source how it
-// was started: 'manual' (Record now) or 'scheduled' (booked from the guide).
+// endAt, status, source, bookedMs, filePath?, bytes, error?, partOf?, createdAt },
+// status one of scheduled · recording · done · failed · missed · cancelled;
+// source how it was started: 'manual' (Record now) or 'scheduled' (booked from
+// the guide); bookedMs how long a booked one was booked for, with its padding
+// (null: not booked) — a part 2 keeps its part 1's, though it starts later.
 
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +31,22 @@ function sourceOf(r) {
   if (r.source === 'manual' || r.source === 'scheduled') return r.source;
   return Math.abs(Number(r.startAt) - Number(r.createdAt)) < MADE_AS_IT_STARTED_MS ? 'manual' : 'scheduled';
 }
+const bookedOf = (r) => (r.source === 'scheduled' && r.endAt != null ? r.endAt - r.startAt : null);
+
+// Saved before source and bookedMs were: filled in, a part 2 from the recording it continues.
+function fillIn(list) {
+  const byId = new Map(list.map((r) => [r.id, r]));
+  const done = new Set();
+  const fill = (r) => {
+    if (done.has(r)) return;
+    done.add(r);
+    const from = r.partOf ? byId.get(r.partOf) : null;
+    if (from) fill(from);
+    if (r.source !== 'manual' && r.source !== 'scheduled') r.source = from?.source ?? sourceOf(r);
+    if (r.bookedMs === undefined) r.bookedMs = from ? from.bookedMs : bookedOf(r);
+  };
+  list.forEach(fill);
+}
 // Still to be made: what clashes, and what the scheduler starts.
 const PENDING = new Set(['scheduled', 'recording']);
 
@@ -39,10 +57,11 @@ class RecordingStore {
     this._list = [];
     try {
       const saved = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      if (Array.isArray(saved)) this._list = saved;
+      if (Array.isArray(saved)) this._list = saved.filter((r) => r && typeof r.id === 'string');
     } catch (e) {
       if (e.code !== 'ENOENT') log.error(TAG, `recordings.json could not be read (${e.message}) — starting with none`);
     }
+    fillIn(this._list);
   }
 
   // Saved on every change: recordings change a few times an hour at most.
@@ -56,13 +75,18 @@ class RecordingStore {
     return [...mine].sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r }));
   }
 
+  /** The bytes every recording takes. */
+  usedBytes() {
+    return this._list.reduce((n, r) => n + (Number(r.bytes) || 0), 0);
+  }
+
   get(id) {
     const r = this._list.find((x) => x.id === id);
     return r ? { ...r } : null;
   }
 
   /** A recording booked for a programme (its own start and end — the padding is added here). */
-  schedule({ viewerId, channelId, channelName = '', title = '', startAt, endAt, padBeforeMin = 0, padAfterMin = 0, status = 'scheduled', source = 'scheduled', partOf }) {
+  schedule({ viewerId, channelId, channelName = '', title = '', startAt, endAt, padBeforeMin = 0, padAfterMin = 0, status = 'scheduled', source = 'scheduled', bookedMs, partOf }) {
     const r = {
       id: crypto.randomBytes(8).toString('hex'),
       viewerId: viewerId ?? null,
@@ -77,6 +101,7 @@ class RecordingStore {
       createdAt: this._now(),
       ...(partOf ? { partOf } : {}),
     };
+    r.bookedMs = bookedMs !== undefined ? bookedMs : bookedOf(r);
     this._list.push(r);
     this._save();
     return { ...r };

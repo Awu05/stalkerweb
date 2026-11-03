@@ -61,6 +61,9 @@ class RecordingRulesTest {
         assertEquals("Recording · 12 min of 1 h 07 · 340 MB", recordingLabel(s("recording").copy(bytes = 340 * mb), now, utc))
         assertEquals("Recorded 31 Oct · 1 h 05 of 1 h 07 · 2.1 GB",
             recordingLabel(s("done").copy(endedAt = now - 12 * min + 65 * min, bytes = (2.1 * gb).toLong()), now, utc))
+        // A part 2 (after a restart) says its part 1's booking, not the time that was left.
+        assertEquals("Recording · 2 min of 1 h 07 · 340 MB",
+            recordingLabel(s("recording", now - 2 * min, now + 25 * min).copy(bookedMs = 67 * min, bytes = 340 * mb), now, utc))
         // Record now keeps its lines as they were, a set length or not.
         assertEquals("Recording · 12 min · 340 MB",
             recordingLabel(rec(status = "recording", startAt = now - 12 * min, endAt = now + 18 * min, bytes = 340 * mb).copy(source = "manual"), now, utc))

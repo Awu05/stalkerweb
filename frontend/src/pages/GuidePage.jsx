@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Heart, LayoutGrid, List, Search, X } from 'lucide-react'
+import { Heart, LayoutGrid, List, Loader2, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useFavorites } from '@/lib/useFavorites'
 import EpgGridView from './EpgGridPage'
@@ -21,8 +21,10 @@ export default function GuidePage() {
   const view = params.get('view') === 'list' ? 'list' : 'grid'
   const favoritesOnly = params.get('favorites') === '1'
   const [query, setQuery] = useState('')
-  const { favoriteIds } = useFavorites()
+  const { favoriteIds, loaded: favoritesLoaded, failed: favoritesFailed, reload: reloadFavorites } = useFavorites()
   const onlyIds = favoritesOnly ? favoriteIds : null
+  // Favorites, before they've come: not "none yet" — they're loading, or couldn't be.
+  const favoritesPending = favoritesOnly && !favoritesLoaded
 
   const setParam = (key, value) => {
     const next = new URLSearchParams(params)
@@ -99,7 +101,18 @@ export default function GuidePage() {
       </div>
 
       <div className="flex-1 min-h-0">
-        {view === 'grid' ? <EpgGridView query={query} favoriteIds={onlyIds} /> : <GuideListView query={query} favoriteIds={onlyIds} />}
+        {favoritesPending ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-[var(--color-muted)]">
+            {favoritesFailed ? (
+              <>
+                <p>Your favorites couldn’t be loaded.</p>
+                <button onClick={reloadFavorites} className="text-xs font-medium text-[var(--color-primary-light)] hover:underline">Try again</button>
+              </>
+            ) : (
+              <Loader2 size={20} className="animate-spin text-[var(--color-primary-light)]" aria-label="Loading favorites" />
+            )}
+          </div>
+        ) : view === 'grid' ? <EpgGridView query={query} favoriteIds={onlyIds} /> : <GuideListView query={query} favoriteIds={onlyIds} />}
       </div>
     </div>
   )

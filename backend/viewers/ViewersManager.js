@@ -8,9 +8,9 @@
 // Every change reads the file, changes one viewer and writes it back, so two
 // viewers saving in turn never overwrite each other.
 //
-// The first viewer (defaultViewerId: the one made on the first start) is the
-// admin: it may delete anyone's recordings (recordings/visibility.js), and it
-// can't be deleted itself, so the role never moves to someone else.
+// One viewer is the admin (adminViewerId; at first the one made on the first
+// start): it may delete anyone's recordings (recordings/visibility.js). It
+// can't be deleted, and only it hands the role to someone else (setAdmin).
 
 const fs   = require('fs');
 const path = require('path');
@@ -70,6 +70,9 @@ function blankViewer(name, color) {
   };
 }
 
+// The admin: adminViewerId, or — data made before it, or without it — the default viewer.
+const adminOf = (d) => (d.viewers.some((v) => v.id === d.adminViewerId) ? d.adminViewerId : d.defaultViewerId);
+
 class ViewersManager {
   constructor(dataDir) {
     this._file = path.join(dataDir, 'viewers.json');
@@ -123,8 +126,11 @@ class ViewersManager {
       v.autoSkip = v.skipMode === 'auto';
       v.audioLanguage = audioLanguageOf(v);
     });
-    const defaultViewerId = viewers.some((v) => v.id === raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
-    const data = { defaultViewerId, viewers };
+    const has = (id) => viewers.some((v) => v.id === id);
+    const defaultViewerId = has(raw?.defaultViewerId) ? raw.defaultViewerId : (viewers[0]?.id ?? null);
+    // Before adminViewerId, the first viewer (the default) was the admin.
+    const adminViewerId = has(raw?.adminViewerId) ? raw.adminViewerId : defaultViewerId;
+    const data = { defaultViewerId, adminViewerId, viewers };
     this._cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };
     return data;
   }
@@ -201,13 +207,22 @@ class ViewersManager {
     const d = this._data();
     return {
       defaultViewerId: d.defaultViewerId,
-      viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color, admin: id === d.defaultViewerId })),
+      viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color, admin: id === adminOf(d) })),
     };
   }
 
-  /** Whether viewer `id` is the admin (the first viewer). */
+  /** Whether viewer `id` is the admin. */
   isAdmin(id) {
-    return !!id && id === this._data().defaultViewerId;
+    return !!id && id === adminOf(this._data());
+  }
+
+  /** Makes viewer `id` the admin — asked by `byId`, which must be the admin now. */
+  setAdmin(id, byId) {
+    const d = this._data();
+    if (!d.viewers.some((v) => v.id === id)) throw new ViewerError(404, 'Viewer not found.');
+    if (!byId || byId !== adminOf(d)) throw new ViewerError(403, 'Only the admin can make someone else the admin.');
+    d.adminViewerId = id;
+    this._save(d);
   }
 
   get(id) {
@@ -258,8 +273,10 @@ class ViewersManager {
     const d = this._data();
     if (!d.viewers.some((v) => v.id === id)) throw new ViewerError(404, 'Viewer not found.');
     if (d.viewers.length === 1) throw new ViewerError(409, 'The last viewer cannot be deleted.');
-    if (d.defaultViewerId === id) throw new ViewerError(409, "The admin profile can't be removed.");
+    if (adminOf(d) === id) throw new ViewerError(409, "The admin profile can't be removed. Make someone else the admin first.");
+    d.adminViewerId = adminOf(d);
     d.viewers = d.viewers.filter((v) => v.id !== id);
+    if (d.defaultViewerId === id) d.defaultViewerId = d.viewers[0].id;
     this._save(d);
   }
 

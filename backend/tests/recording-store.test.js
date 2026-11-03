@@ -31,6 +31,32 @@ describe('RecordingStore', () => {
     expect(book({ source: 'manual' }).source).toBe('manual')
   })
 
+  it('fills in how older ones were started and how long they were booked for; a part 2 from its part 1', () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-rec-legacy-'))
+    fs.writeFileSync(path.join(d, 'recordings.json'), JSON.stringify([
+      { id: 'a', startAt: T0, endAt: T0 + 67 * MIN, createdAt: T0 - 60 * MIN, status: 'done', bytes: 5 },
+      { id: 'b', startAt: T0 + 40 * MIN, endAt: T0 + 67 * MIN, createdAt: T0 + 40 * MIN, status: 'done', partOf: 'a', bytes: 7 },
+      { id: 'c', startAt: T0, endAt: null, createdAt: T0, status: 'done', bytes: 1 },
+      null,
+    ]))
+    const s = new RecordingStore(d)
+    expect(s.get('a')).toMatchObject({ source: 'scheduled', bookedMs: 67 * MIN })
+    expect(s.get('b')).toMatchObject({ source: 'scheduled', bookedMs: 67 * MIN })   // made as it started, but a booking's part 2
+    expect(s.get('c')).toMatchObject({ source: 'manual', bookedMs: null })
+    expect(s.usedBytes()).toBe(13)
+    fs.rmSync(d, { recursive: true, force: true })
+  })
+
+  it('a booking keeps how long it was booked for (with its padding); its part 2 the same', () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-rec-booked-'))
+    const s = new RecordingStore(d)
+    const r = s.schedule({ channelId: '1', startAt: T0, endAt: T0 + 60 * MIN, padBeforeMin: 2, padAfterMin: 5 })
+    expect(r.bookedMs).toBe(67 * MIN)
+    expect(s.schedule({ ...r, startAt: T0 + 30 * MIN, partOf: r.id }).bookedMs).toBe(67 * MIN)
+    expect(s.schedule({ channelId: '1', startAt: T0, endAt: T0 + 10 * MIN, source: 'manual' }).bookedMs).toBe(null)
+    fs.rmSync(d, { recursive: true, force: true })
+  })
+
   it('says how one was started: saved with it, or — older ones — guessed from when it was made', () => {
     expect(sourceOf({ source: 'manual', startAt: T0, createdAt: T0 - 60 * MIN })).toBe('manual')
     expect(sourceOf({ startAt: T0, createdAt: T0 + 200 })).toBe('manual')                 // Record now: made as it started

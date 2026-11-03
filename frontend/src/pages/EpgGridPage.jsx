@@ -470,7 +470,7 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
         </div>
 
         {noMatch && (
-          <p className="sticky left-0 px-4 py-6 text-sm text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds)}</p>
+          <p className="sticky left-0 px-4 py-6 text-sm text-[var(--color-muted)]">{guideEmptyMessage(query, !!favoriteIds, favoriteIds?.size ?? 0)}</p>
         )}
 
         {/* ── Channel rows (virtualized) ───────────────────────────────────── */}
