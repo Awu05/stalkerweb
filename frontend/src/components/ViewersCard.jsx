@@ -5,12 +5,13 @@ import { useApp } from '@/lib/appContext'
 import { createViewer, updateViewer, deleteViewer, makeViewerAdmin } from '../stalkerApi'
 import { ViewerAvatar } from './ViewerPicker'
 import { canRemoveViewer, canMakeAdmin } from '@/lib/viewerAdmin'
+import { getViewerId } from '@/lib/viewer'
 
 import { VIEWER_COLORS as COLORS } from '@/lib/theme.generated'
 
 // Settings → Viewers: the people who watch here, each with their own
 // favorites and channel filters. Everything else on this page is shared. The
-// admin (lib/viewerAdmin.js) can't be deleted, and may hand the role on.
+// admin and the Default (lib/viewerAdmin.js) can't be deleted; the admin may hand its role on.
 export default function ViewersCard() {
   const { viewer, viewers, refreshViewers, switchViewer } = useApp()
   const [editing, setEditing] = useState(null) // { id, name, color } | { id: null, name: '', color } for a new one
@@ -94,7 +95,7 @@ export default function ViewersCard() {
             {v.admin && <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">Admin</span>}
             {v.id === viewer?.id && <span className="text-[11px] text-[var(--color-muted)]">· you</span>}
             <div className="ml-auto flex gap-1">
-              {canMakeAdmin(v, viewers, viewer?.id) && (
+              {canMakeAdmin(v, viewers, getViewerId()) && (
                 <button onClick={() => makeAdmin(v)} className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-text)]" title="Make admin" aria-label={`Make ${v.name} the admin`}><ShieldCheck size={14} /></button>
               )}
               <button onClick={() => setEditing({ id: v.id, name: v.name, color: v.color })} className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-text)]" title="Rename or recolor" aria-label={`Edit ${v.name}`}><Pencil size={14} /></button>

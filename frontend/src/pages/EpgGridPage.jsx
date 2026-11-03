@@ -140,9 +140,11 @@ const ProgrammeBlock = memo(function ProgrammeBlock({ prog, channel, gridStartMs
 
 // ── Programme detail popup ────────────────────────────────────────────────────
 // Record books it on the server (lib/bookRecording.js).
-function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, hasReminder }) {
+// A "No information available" stand-in is no programme: Record a time (onRecordTime) instead of Record.
+function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, hasReminder, onRecordTime }) {
   const live = isNow(prog.startTime, prog.endTime)
   const future = prog.startTime * 1000 > Date.now()
+  const placeholder = isGuidePlaceholder(prog.title)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -211,11 +213,13 @@ function ProgrammePopup({ prog, channel, onClose, navigate, onToggleReminder, ha
           )}
           {(live || future) && channel && (
             <button
-              onClick={() => bookRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
-                startAt: prog.startTime * 1000, endAt: prog.endTime * 1000 }, onClose)}
+              onClick={() => (placeholder
+                ? onRecordTime()
+                : bookRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: prog.title,
+                  startAt: prog.startTime * 1000, endAt: prog.endTime * 1000 }, onClose))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium border bg-[var(--color-surface-2)] border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-live)]/50 transition-colors"
             >
-              <CircleDot size={13} className="text-[var(--color-live)]" /> Record
+              <CircleDot size={13} className="text-[var(--color-live)]" /> {placeholder ? 'Record a time…' : 'Record'}
             </button>
           )}
           <button
@@ -331,9 +335,7 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
   // Record a time: { channel, start (ms) } — where there's no programme to book.
   const [timed, setTimed] = useState(null)
 
-  // A "No information available" stand-in is no programme: it opens Record a time.
   const handleSelectProg = useCallback((prog, channel) => {
-    if (isGuidePlaceholder(prog.title)) return setTimed({ channel, start: timedStart(prog.startTime * 1000, Date.now()) })
     setSelectedProg(prog)
     setSelectedChannel(channel)
   }, [])
@@ -481,6 +483,8 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
             const epgData = epgMap[ch.uniqueId]
             const loading = loadingEpg[ch.uniqueId] === true || !epgData
             const events  = epgData?.events || []
+            // Nothing in the grid's hours (no guide data, or only for other times): clicking records a time.
+            const empty   = !loading && !events.some(p => pxFromTimestamp(p.endTime, gridStartMs) > 0 && pxFromTimestamp(p.startTime, gridStartMs) < gridWidthPx)
             const logoUrl = logoMap[String(ch.uniqueId)] || getProxiedLogoUrl(ch.iconPath)
 
             return (
@@ -510,9 +514,9 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
                 {/* Programme track */}
                 {/* A row without guide data: clicking it records a time, from the half hour clicked. */}
                 <div
-                  className={cn('relative shrink-0 bg-[var(--color-bg)]', !loading && events.length === 0 && 'cursor-pointer hover:bg-[var(--color-surface)]')}
+                  className={cn('relative shrink-0 bg-[var(--color-bg)]', empty && 'cursor-pointer hover:bg-[var(--color-surface)]')}
                   style={{ width: gridWidthPx }}
-                  onClick={!loading && events.length === 0 ? (e => {
+                  onClick={empty ? (e => {
                     const x = e.clientX - e.currentTarget.getBoundingClientRect().left
                     setTimed({ channel: ch, start: timedStart(gridStartMs + x / HOUR_WIDTH * 3_600_000, Date.now()) })
                   }) : undefined}
@@ -531,7 +535,7 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
                       <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse flex-1 max-w-xs" />
                       <div className="h-6 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] animate-pulse w-24" />
                     </div>
-                  ) : events.length === 0 ? (
+                  ) : empty ? (
                     <div className="sticky flex items-center h-full w-fit" style={{ left: colWidth + 16 }}>
                       <button className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">
                         <span className="opacity-50">No guide data</span> · Record a time
@@ -568,6 +572,10 @@ export default function EpgGridView({ query = '', favoriteIds = null }) {
             r => r.channelId === selectedChannel.uniqueId && r.startTime === selectedProg.startTime
           )}
           onToggleReminder={(prog) => handleToggleReminder(prog, selectedChannel)}
+          onRecordTime={() => {
+            setTimed({ channel: selectedChannel, start: timedStart(selectedProg.startTime * 1000, Date.now()) })
+            setSelectedProg(null); setSelectedChannel(null)
+          }}
         />
       )}
       {timed && <RecordTimeDialog channel={timed.channel} defaultStart={timed.start} onClose={() => setTimed(null)} />}

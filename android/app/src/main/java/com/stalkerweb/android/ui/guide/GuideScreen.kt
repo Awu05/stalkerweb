@@ -103,7 +103,7 @@ private fun clock(secs: Long): String = hm.format(Date(secs * 1000))
  * OK on a programme: details, with Watch (on now) or Remind me (later), and
  * Record (on now or later: the server records it). Where there's no programme
  * to book — a channel without guide data, a "No information available"
- * stand-in — OK opens Record a time.
+ * stand-in — it's Record a time instead.
  */
 @Composable
 fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
@@ -128,9 +128,7 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
     recordAsk?.let { ask -> RecordAskDialog(ask.message, onYes = viewModel::confirmRecord, onNo = viewModel::dismissRecordAsk) }
 
     val nowMs = { System.currentTimeMillis() }
-    fun open(ch: Channel, e: EpgEvent) {
-        if (isGuidePlaceholder(e.title)) timed = ch to timedStart(e.startTime * 1000, nowMs()) else details = ch to e
-    }
+    fun open(ch: Channel, e: EpgEvent) { details = ch to e }
     fun recordTime(ch: Channel) { timed = ch to timedStart(nowMs(), nowMs()) }
 
     fun toggleReminder(ch: Channel, e: EpgEvent) {
@@ -234,10 +232,15 @@ fun GuideScreen(viewModel: GuideViewModel, onWatch: (Channel) -> Unit) {
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // On now or still to come: booked on the server (the web's programme popup).
-                    if (e.endTime > nowSecs) OutlinedButton(onClick = { viewModel.record(ch, e); details = null }) {
+                    // On now or still to come: booked on the server (the web's programme popup). A stand-in for
+                    // no programme: Record a time.
+                    val placeholder = isGuidePlaceholder(e.title)
+                    if (e.endTime > nowSecs) OutlinedButton(onClick = {
+                        details = null
+                        if (placeholder) timed = ch to timedStart(e.startTime * 1000, nowMs()) else viewModel.record(ch, e)
+                    }) {
                         Icon(Icons.Default.FiberManualRecord, null, Modifier.size(14.dp), tint = SwColors.Live)
-                        Text("  Record")
+                        Text(if (placeholder) "  Record a time" else "  Record")
                     }
                     TextButton(onClick = { details = null }) { Text("Close") }
                 }

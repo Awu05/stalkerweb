@@ -13,6 +13,8 @@ class ViewerChoiceTest {
         assertEquals(true, canRemoveViewer(b, listOf(admin, b)))
         assertEquals(false, canRemoveViewer(admin, listOf(admin, b)))
         assertEquals(false, canRemoveViewer(b, listOf(b)))
+        val def = ViewerSummary("view_d", "Default", isDefault = true)
+        assertEquals(false, canRemoveViewer(def, listOf(admin, b, def)))
     }
 
     @Test fun onlyTheAdminMakesSomeoneElseTheAdmin() {

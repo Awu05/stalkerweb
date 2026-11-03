@@ -209,12 +209,12 @@ class RecordingRulesTest {
         assertFalse(isGuidePlaceholder("Nothing But Trailers"))
     }
 
-    @Test fun `record a time starts at the half hour picked, or now's once that one is over`() {
+    @Test fun `record a time starts at the half hour picked, or now once that half hour has begun`() {
         val t = { h: Int, m: Int -> now + ((h - 18) * 60 + m) * min }   // 31 Oct, UTC
         assertEquals(t(21, 0), timedStart(t(21, 10), t(20, 5), utc))
         assertEquals(t(21, 30), timedStart(t(21, 40), t(20, 5), utc))
-        assertEquals(t(20, 0), timedStart(t(20, 5), t(20, 20), utc))
-        assertEquals(t(20, 30), timedStart(t(18, 10), t(20, 40), utc))
+        assertEquals(t(20, 25), timedStart(t(20, 5), t(20, 25) + 30_000, utc))   // on now: from now, to the minute
+        assertEquals(t(20, 40), timedStart(t(18, 10), t(20, 40), utc))
         assertEquals("Today 21:00", timedLabel(t(21, 0), now, utc))
         assertEquals("Tomorrow 00:30", timedLabel(t(24, 30), now, utc))
     }

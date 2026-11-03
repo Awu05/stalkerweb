@@ -11,6 +11,9 @@
 // One viewer is the admin (adminViewerId; at first the one made on the first
 // start): it may delete anyone's recordings (recordings/visibility.js). It
 // can't be deleted, and only it hands the role to someone else (setAdmin).
+// The default viewer (defaultViewerId) can't be deleted either: every request
+// naming no viewer — cast devices, old links, Solo — is it (lib/viewerContext.js),
+// and deleting it would quietly make them someone else.
 
 const fs   = require('fs');
 const path = require('path');
@@ -70,9 +73,6 @@ function blankViewer(name, color) {
   };
 }
 
-// The admin: adminViewerId, or — data made before it, or without it — the default viewer.
-const adminOf = (d) => (d.viewers.some((v) => v.id === d.adminViewerId) ? d.adminViewerId : d.defaultViewerId);
-
 class ViewersManager {
   constructor(dataDir) {
     this._file = path.join(dataDir, 'viewers.json');
@@ -90,7 +90,7 @@ class ViewersManager {
     v.showAdult = showAdult === true;
     v.disabledGenres = strings(disabledGenres);
     v.disabledLanguages = strings(disabledLanguages);
-    this._save({ defaultViewerId: v.id, viewers: [v] });
+    this._save({ defaultViewerId: v.id, adminViewerId: v.id, viewers: [v] });
     log.info(TAG, `created the Default viewer with ${v.favorites.channels.length} favorite(s)`);
     return true;
   }
@@ -145,7 +145,7 @@ class ViewersManager {
     }
     const v = blankViewer('Default', COLORS[0]);
     v.id = 'view_unreadable';
-    return { unreadable: true, defaultViewerId: v.id, viewers: [v] };
+    return { unreadable: true, defaultViewerId: v.id, adminViewerId: v.id, viewers: [v] };
   }
 
   _save(data) {
@@ -168,7 +168,7 @@ class ViewersManager {
     const d = this._load();
     if (d.viewers.length || d.unreadable) return d;
     const v = blankViewer('Default', COLORS[0]);
-    const fresh = { defaultViewerId: v.id, viewers: [v] };
+    const fresh = { defaultViewerId: v.id, adminViewerId: v.id, viewers: [v] };
     this._save(fresh);
     return fresh;
   }
@@ -207,20 +207,20 @@ class ViewersManager {
     const d = this._data();
     return {
       defaultViewerId: d.defaultViewerId,
-      viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color, admin: id === adminOf(d) })),
+      viewers: d.viewers.map(({ id, name, color }) => ({ id, name, color, admin: id === d.adminViewerId, isDefault: id === d.defaultViewerId })),
     };
   }
 
   /** Whether viewer `id` is the admin. */
   isAdmin(id) {
-    return !!id && id === adminOf(this._data());
+    return !!id && id === this._data().adminViewerId;
   }
 
   /** Makes viewer `id` the admin — asked by `byId`, which must be the admin now. */
   setAdmin(id, byId) {
     const d = this._data();
     if (!d.viewers.some((v) => v.id === id)) throw new ViewerError(404, 'Viewer not found.');
-    if (!byId || byId !== adminOf(d)) throw new ViewerError(403, 'Only the admin can make someone else the admin.');
+    if (!byId || byId !== d.adminViewerId) throw new ViewerError(403, 'Only the admin can make someone else the admin.');
     d.adminViewerId = id;
     this._save(d);
   }
@@ -273,10 +273,11 @@ class ViewersManager {
     const d = this._data();
     if (!d.viewers.some((v) => v.id === id)) throw new ViewerError(404, 'Viewer not found.');
     if (d.viewers.length === 1) throw new ViewerError(409, 'The last viewer cannot be deleted.');
-    if (adminOf(d) === id) throw new ViewerError(409, "The admin profile can't be removed. Make someone else the admin first.");
-    d.adminViewerId = adminOf(d);
+    if (d.adminViewerId === id) throw new ViewerError(409, "The admin profile can't be removed. Make someone else the admin first.");
+    if (d.defaultViewerId === id) {
+      throw new ViewerError(409, "The Default profile can't be removed: devices that don't pick a profile use it. You can rename it.");
+    }
     d.viewers = d.viewers.filter((v) => v.id !== id);
-    if (d.defaultViewerId === id) d.defaultViewerId = d.viewers[0].id;
     this._save(d);
   }
 

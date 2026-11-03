@@ -22,7 +22,7 @@ const express = require('express');
 const fs = require('fs');
 const { inUse } = require('../lib/streamLimit');
 const log = require('../logger');
-const { recordingRules, namesViewer } = require('../recordings/visibility');
+const { recordingRules } = require('../recordings/visibility');
 const { refuseIfGone } = require('./viewers');
 const TAG = 'recordings';
 
@@ -64,7 +64,7 @@ module.exports = function recordingsModule(appState, {
   const pad = (s, k, dflt) => { const n = Number(s[k]); return Number.isFinite(n) && n >= 0 ? n : dflt; };
   // The admin's rights need its own id on the request: one naming no viewer (Solo, a cast device) is given
   // the default viewer, never the admin's rights. A deleted one is refused (it picks who is watching again).
-  const rulesFor = (req) => recordingRules(req.viewer, { viewerOf, channels, isAdmin: (v) => namesViewer(req) && isAdmin(v) });
+  const rulesFor = (req) => recordingRules(req.viewer, { viewerOf, channels, isAdmin: (v) => req.viewerNamed && isAdmin(v) });
   const streams = (n) => `${n} stream${n === 1 ? '' : 's'}`;
   // The stream limit is in use now: recording may stop what's playing.
   const takesStream = (limit) => ({

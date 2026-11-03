@@ -164,10 +164,14 @@ function halfHour(ms) {
   return d.getTime()
 }
 
-/** Where Record a time starts: the half hour `at` is in — or, that one over, the half hour now is in. */
+/**
+ * Where Record a time starts: the half hour `at` is in — or now (to the
+ * minute) once that half hour has begun: a start gone by would count time
+ * never recorded (the server keeps the start it was given).
+ */
 export function timedStart(at, now) {
   const s = halfHour(at)
-  return s + 30 * MIN <= now ? halfHour(now) : s
+  return s <= now ? now - (now % MIN) : s
 }
 
 /** The end for an "HH:MM" picked after `startAt`: that time on its day, or the next day when it's not later. */

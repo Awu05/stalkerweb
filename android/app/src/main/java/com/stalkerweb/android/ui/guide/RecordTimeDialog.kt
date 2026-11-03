@@ -56,7 +56,7 @@ fun RecordTimeDialog(channel: Channel, defaultStart: Long, onRecord: (TimedBooki
         title = { Text("Record a time") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("${channel.name} · no programme in the guide to book", color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Text(channel.name, color = SwColors.Muted, style = MaterialTheme.typography.bodySmall)
                 // Moving the start keeps the length.
                 Stepper("Starts", timedLabel(startAt, now), "30 minutes", { startAt -= 30 * MIN; endAt -= 30 * MIN }, { startAt += 30 * MIN; endAt += 30 * MIN })
                 Stepper("Ends", timedLabel(endAt, now), "15 minutes", { endAt -= 15 * MIN }, { endAt += 15 * MIN })

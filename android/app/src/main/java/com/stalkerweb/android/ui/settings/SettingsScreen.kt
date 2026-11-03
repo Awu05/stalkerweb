@@ -201,11 +201,11 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                             }
                         }
                         // Only the admin hands the role on (the server refuses anyone else too).
-                        if (canMakeAdmin(v, state.viewers, me?.id)) {
+                        if (canMakeAdmin(v, state.viewers, viewModel.savedViewerId())) {
                             TipIconButton(label = "Make ${v.name} the admin", onClick = { makingAdmin = v }) { Icon(Icons.Default.Shield, "Make ${v.name} the admin") }
                         }
                         TipIconButton(label = "Rename ${v.name}", onClick = { renaming = v }) { Icon(Icons.Default.Edit, "Rename ${v.name}") }
-                        // The admin and the last one can't be deleted (the server refuses too).
+                        // The admin, the Default and the last one can't be deleted (the server refuses too).
                         if (canRemoveViewer(v, state.viewers)) {
                             TipIconButton(label = "Delete ${v.name}", onClick = { deleting = v }) { Icon(Icons.Default.Delete, "Delete ${v.name}", tint = SwColors.Live) }
                         }

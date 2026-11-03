@@ -8,8 +8,8 @@
 //   • orphaned  — its viewer no longer exists (deleted, or the placeholder used
 //                 while viewers.json couldn't be read): anyone may delete it
 //   • admin     — the request's viewer is the admin (named on the request —
-//                 not the default given to one naming none; viewers/ViewersManager.js):
-//                 it may delete anyone's
+//                 req.viewerNamed, not the default given to one naming none;
+//                 viewers/ViewersManager.js): it may delete anyone's
 //   • visible   — mine, or its channel passes the viewer's own channel filters
 //                 (Show Adult, hidden genres and languages — the same check the
 //                 channel list and the exports use, lib/exportFilter.js)

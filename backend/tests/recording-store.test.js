@@ -38,12 +38,14 @@ describe('RecordingStore', () => {
       { id: 'b', startAt: T0 + 40 * MIN, endAt: T0 + 67 * MIN, createdAt: T0 + 40 * MIN, status: 'done', partOf: 'a', bytes: 7 },
       { id: 'c', startAt: T0, endAt: null, createdAt: T0, status: 'done', bytes: 1 },
       null,
+      { id: 42, startAt: T0, endAt: T0 + MIN, createdAt: T0, status: 'done', bytes: 2 },
     ]))
     const s = new RecordingStore(d)
     expect(s.get('a')).toMatchObject({ source: 'scheduled', bookedMs: 67 * MIN })
     expect(s.get('b')).toMatchObject({ source: 'scheduled', bookedMs: 67 * MIN })   // made as it started, but a booking's part 2
     expect(s.get('c')).toMatchObject({ source: 'manual', bookedMs: null })
-    expect(s.usedBytes()).toBe(13)
+    expect(s.get('42')).toMatchObject({ status: 'done', bytes: 2 })   // a hand-edited id: kept, as text
+    expect(s.usedBytes()).toBe(15)
     fs.rmSync(d, { recursive: true, force: true })
   })
 

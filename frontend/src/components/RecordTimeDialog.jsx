@@ -13,24 +13,38 @@ const toTimeInput = (ms) => { const d = new Date(ms); return `${pad(d.getHours()
 const lengthLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`)
 const timeFormat = new Intl.DateTimeFormat([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 
+function LengthButton({ on, onClick, children }) {
+  return (
+    <button aria-pressed={on} onClick={onClick}
+      className={cn('px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
+        on ? 'fill-primary' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]')}>
+      {children}
+    </button>
+  )
+}
+
 /**
  * Record a time: where the guide has no programme to book (no guide data, or a
  * "No information available" stand-in) — a start, a length or an end, and a
- * title (the channel's name unless one is typed). lib/recordings.js.
+ * title (the channel's name unless one is typed). lib/recordings.js. Booked
+ * once: Record is off until the server has answered.
  */
 export default function RecordTimeDialog({ channel, defaultStart, onClose }) {
   const [start, setStart] = useState(() => toLocalInput(defaultStart))
   const [length, setLength] = useState(60)        // minutes, or null: the end time below
   const [endTime, setEndTime] = useState(() => toTimeInput(defaultStart + 60 * MIN))
   const [title, setTitle] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const startAt = start ? new Date(start).getTime() : NaN
   const endAt = length ? startAt + length * MIN : endAtTime(startAt, endTime)
   const booking = timedBooking({ startAt, endAt: endAt ?? NaN, title, channelName: channel.name, now: Date.now() })
 
   const record = () => {
-    if (booking.error) return
+    if (booking.error || busy) return
+    setBusy(true)
     bookRecording({ channelId: String(channel.uniqueId), channelName: channel.name, title: booking.title, startAt: booking.startAt, endAt: booking.endAt }, onClose)
+      .finally(() => setBusy(false))
   }
   const field = 'rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary-light)]'
 
@@ -40,7 +54,7 @@ export default function RecordTimeDialog({ channel, defaultStart, onClose }) {
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-[var(--color-text)]">Record a time</h2>
-            <p className="text-xs text-[var(--color-muted)]">{channel.name} · no programme in the guide to book</p>
+            <p className="text-xs text-[var(--color-muted)]">{channel.name}</p>
           </div>
           <button aria-label="Close" onClick={onClose} className="shrink-0 p-1 rounded text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
             <X size={16} />
@@ -57,17 +71,11 @@ export default function RecordTimeDialog({ channel, defaultStart, onClose }) {
             Length
             <div className="flex flex-wrap items-center gap-1.5">
               {RECORD_LENGTHS.map(m => (
-                <button key={m} aria-pressed={length === m} onClick={() => setLength(m)}
-                  className={cn('px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
-                    length === m ? 'fill-primary' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]')}>
-                  {lengthLabel(m)}
-                </button>
+                <LengthButton key={m} on={length === m} onClick={() => setLength(m)}>{lengthLabel(m)}</LengthButton>
               ))}
-              <button aria-pressed={length === null} onClick={() => { setEndTime(toTimeInput(Number.isFinite(endAt) ? endAt : startAt + 60 * MIN)); setLength(null) }}
-                className={cn('px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-medium transition-colors',
-                  length === null ? 'fill-primary' : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]')}>
+              <LengthButton on={length === null} onClick={() => { setEndTime(toTimeInput(Number.isFinite(endAt) ? endAt : startAt + 60 * MIN)); setLength(null) }}>
                 Until…
-              </button>
+              </LengthButton>
               {length === null && (
                 <input type="time" aria-label="Ends at" value={endTime} onChange={e => setEndTime(e.target.value)} className={cn(field, 'py-1')} />
               )}
@@ -85,7 +93,7 @@ export default function RecordTimeDialog({ channel, defaultStart, onClose }) {
         </div>
 
         <div className="flex items-center gap-2 mt-4">
-          <button onClick={record} disabled={!!booking.error}
+          <button onClick={record} disabled={!!booking.error || busy}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium border bg-[var(--color-surface-2)] border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-live)]/50 transition-colors disabled:opacity-50">
             <CircleDot size={13} className="text-[var(--color-live)]" /> Record
           </button>

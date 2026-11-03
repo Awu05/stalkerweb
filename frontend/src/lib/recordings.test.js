@@ -166,11 +166,11 @@ describe('Record a time', () => {
     expect(isGuidePlaceholder('Nothing But Trailers')).toBe(false)
   })
 
-  it('starts at the half hour clicked — or, that one over, the half hour now is in', () => {
+  it('starts at the half hour clicked — or now, once that half hour has begun', () => {
     expect(timedStart(at(21, 10), at(20, 5))).toBe(at(21, 0))
     expect(timedStart(at(21, 40), at(20, 5))).toBe(at(21, 30))
-    expect(timedStart(at(20, 5), at(20, 20))).toBe(at(20, 0))      // on now: from its start (recorded from now)
-    expect(timedStart(at(18, 10), at(20, 40))).toBe(at(20, 30))    // in the past: now's
+    expect(timedStart(at(20, 5), at(20, 25) + 30_000)).toBe(at(20, 25))   // on now: from now, to the minute
+    expect(timedStart(at(18, 10), at(20, 40))).toBe(at(20, 40))           // in the past: now
   })
 
   it('an end time on the same day, or the next when it is not later', () => {

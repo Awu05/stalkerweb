@@ -22,6 +22,8 @@ const config = require('./config');
 // Ensure data directories exist
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(config.cacheDir, { recursive: true });
+// Made at the start, so its disk's free space can be told before the first recording.
+try { fs.mkdirSync(config.recordingsDir, { recursive: true }); } catch (e) { require('./logger').warn('server', `recordings folder: ${e.message}`); }
 
 const app = express();
 

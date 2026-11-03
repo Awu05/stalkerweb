@@ -43,9 +43,12 @@ function createViewerContext(viewers) {
         if (viewer) break;
       }
       if (!viewer && XTREAM_API.test(req.path)) viewer = viewers.findByName(req.query?.username ?? req.body?.username);
+      const named = !!viewer;
       viewer ??= viewers.getDefault();
       done = {
         viewer,
+        // The request named this viewer — not given the default for naming none (or a deleted one).
+        named,
         gone: !!header && !viewers.get(String(header)),
         // The Stremio addon's identity follows the link (/v/<id>/), so it never
         // changes under an installed addon.
@@ -68,6 +71,7 @@ function createViewerContext(viewers) {
     Object.defineProperties(req, {
       viewer:       { get: () => resolve().viewer, configurable: true },
       viewerGone:   { get: () => resolve().gone, configurable: true },
+      viewerNamed:  { get: () => resolve().named, configurable: true },
       viewerInPath: { get: () => resolve().inPath, configurable: true },
     });
     als.run(resolve, () => next());

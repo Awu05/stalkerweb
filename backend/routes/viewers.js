@@ -1,13 +1,13 @@
 // routes/viewers.js
-// GET    /api/viewers              — { defaultViewerId, viewers: [{ id, name, color, admin }] }
+// GET    /api/viewers              — { defaultViewerId, viewers: [{ id, name, color, admin, isDefault }] }
 // POST   /api/viewers              — { name, color? } create
 // GET    /api/viewers/me           — the viewer this request is for, with its filters
 // PUT    /api/viewers/me/filters   — { disabledGenres?, disabledLanguages?, disabledVodCategories?, showAdult?,
 //                                       skipMode? ('off' | 'button' | 'auto'), audioLanguage? ('' | 'en'…),
 //                                       autoSkip? (older apps: true = 'auto', false = 'button') }
 // PUT    /api/viewers/:id          — { name?, color? }
-// PUT    /api/viewers/:id/admin    — make it the admin; asked by the admin (its X-Viewer) → the list
-// DELETE /api/viewers/:id          — not the last one
+// PUT    /api/viewers/:id/admin    — make it the admin; asked by the admin (named on the request) → the list
+// DELETE /api/viewers/:id          — not the last one, the admin, or the default one
 
 'use strict';
 
@@ -58,7 +58,7 @@ module.exports = function viewersModule(viewers) {
   router.get('/me', refuseIfGone, (req, res) => answer(res, () => details(viewers.get(req.viewer.id) ?? viewers.getDefault())));
   router.put('/me/filters', refuseIfGone, (req, res) => answer(res, () => details(viewers.setFilters(req.viewer.id, req.body ?? {}))));
   router.put('/:id/admin', refuseIfGone, (req, res) => answer(res, () => {
-    viewers.setAdmin(req.params.id, req.get('x-viewer') ? req.viewer.id : null);
+    viewers.setAdmin(req.params.id, req.viewerNamed ? req.viewer.id : null);
     return viewers.list();
   }));
   router.put('/:id', (req, res) => answer(res, () => summary(viewers.update(req.params.id, req.body ?? {}))));

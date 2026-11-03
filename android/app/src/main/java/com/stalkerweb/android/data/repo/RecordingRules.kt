@@ -223,10 +223,13 @@ fun isGuidePlaceholder(title: String?): Boolean {
 private fun halfHour(ms: Long, zone: ZoneId): Long =
     at(ms, zone).let { it.withMinute(if (it.minute < 30) 0 else 30).withSecond(0).withNano(0) }.toInstant().toEpochMilli()
 
-/** Where Record a time starts: the half hour [picked] is in — or, that one over, the half hour [now] is in. */
+/**
+ * Where Record a time starts: the half hour [picked] is in — or [now] (to the minute) once that half hour has
+ * begun: a start gone by would count time never recorded (the server keeps the start it was given).
+ */
 fun timedStart(picked: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
     val s = halfHour(picked, zone)
-    return if (s + 30 * MIN <= now) halfHour(now, zone) else s
+    return if (s <= now) now - now % MIN else s
 }
 
 /** What Record a time books, or [error] saying why it can't. */

@@ -92,7 +92,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
   const shown = channels.some(c => c.uniqueId === activeChannel?.uniqueId) ? activeChannel : null
 
   useEffect(() => {
-    if (!shown?.uniqueId) { setEpg([]); return }
+    if (!shown?.uniqueId) { setEpg([]); setLoadingEpg(false); return }
     let cancelled = false
     setLoadingEpg(true)
     setEpg([])
@@ -161,6 +161,12 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
               </button>
             ))}
           </div>
+          {/* Any channel, guide or not (its list may be all "No information available"). */}
+          {shown && (
+            <Button size="sm" variant="outline" onClick={() => setTimed(timedStart(Date.now(), Date.now()))}>
+              <CircleDot size={13} className="text-[var(--color-live)]" /> Record a time
+            </Button>
+          )}
           {shown && (
             <Button
               size="sm"
@@ -187,12 +193,7 @@ export default function GuideListView({ query = '', favoriteIds = null }) {
           )}
 
           {shown && !loadingEpg && !error && epg.length === 0 && (
-            <div className="mt-4 flex items-center gap-3">
-              <p className="text-sm text-[var(--color-muted)]">No EPG data available for this channel.</p>
-              <Button size="sm" variant="outline" onClick={() => setTimed(timedStart(Date.now(), Date.now()))}>
-                <CircleDot size={13} className="text-[var(--color-live)]" /> Record a time
-              </Button>
-            </div>
+            <p className="text-sm text-[var(--color-muted)] mt-4">No EPG data available for this channel.</p>
           )}
 
           {!loadingEpg && epg.length > 0 && (
