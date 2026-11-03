@@ -53,24 +53,20 @@ function freeBytesOf(dir) {
 
 /**
  * freeBytesOf for a list every open player polls: without blocking, looked up
- * at most every `ttlMs`, and given up on (null) after `waitMs` — a network
- * disk that hangs mustn't hold the list up. A folder not made yet (before the
- * first recording) is judged by the nearest one above it: where it will be.
+ * at most every `ttlMs`, and waited for at most `waitMs` — a network disk that
+ * hangs mustn't hold the list up. One still hanging: not waited for again (the
+ * last answer, or — hanging past `ttlMs` — null, unknown) until it answers.
  */
 function cachedFreeBytes(dir, { ttlMs = 30_000, waitMs = 1_000, now = Date.now, statfs = fs.promises.statfs } = {}) {
-  let at = -Infinity, value = null, pending = null;
-  const look = async (d) => {
-    try {
-      const s = await statfs(d);
-      return s.bavail * s.bsize;
-    } catch (e) {
-      const up = path.dirname(d);
-      return e.code === 'ENOENT' && up !== d ? look(up) : null;
-    }
-  };
+  let at = -Infinity, value = null, pending = null, since = 0;
+  const look = () => statfs(dir).then((s) => s.bavail * s.bsize, () => null);
   return () => {
     if (now() - at < ttlMs) return Promise.resolve(value);
-    pending ??= look(dir).then((v) => { value = v; at = now(); pending = null; return v; });
+    if (pending && now() - since >= waitMs) return Promise.resolve(now() - since >= ttlMs ? null : value);
+    if (!pending) {
+      since = now();
+      pending = look().then((v) => { value = v; at = now(); pending = null; return v; });
+    }
     let timer;
     const late = new Promise((resolve) => { timer = setTimeout(() => resolve(value), waitMs); timer.unref?.(); });
     return Promise.race([pending, late]).finally(() => clearTimeout(timer));

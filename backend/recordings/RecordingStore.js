@@ -57,7 +57,15 @@ class RecordingStore {
     this._list = [];
     try {
       const saved = JSON.parse(fs.readFileSync(this._file, 'utf8'));
-      if (Array.isArray(saved)) this._list = saved.filter((r) => r && typeof r.id === 'string');
+      if (Array.isArray(saved)) {
+        // A hand edit may leave an odd entry: kept (its file stays listed and deletable), with an id of text.
+        this._list = saved.filter((r) => r && typeof r === 'object');
+        for (const r of this._list) {
+          if (typeof r.id === 'string' && r.id) continue;
+          r.id = r.id != null && r.id !== '' ? String(r.id) : crypto.randomBytes(8).toString('hex');
+          log.warn(TAG, `a recording in recordings.json had no text id — it is ${r.id} now`);
+        }
+      }
     } catch (e) {
       if (e.code !== 'ENOENT') log.error(TAG, `recordings.json could not be read (${e.message}) — starting with none`);
     }

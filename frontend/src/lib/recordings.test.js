@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, recordingOn, diskLine, sourceLabel } from './recordings'
+import { groupRecordings, recordingLabel, endForChoice, RECORD_CHOICES, recordChoices, recordingOn, diskLine, sourceLabel, isGuidePlaceholder, timedStart, endAtTime, timedBooking } from './recordings'
 
 const MIN = 60_000
 const NOW = Date.UTC(2026, 9, 31, 18, 0)   // Sat 31 Oct, 18:00 UTC
@@ -152,5 +152,42 @@ describe('diskLine', () => {
     expect(diskLine({ usedBytes: 340 * 1024 ** 2, freeBytes: null })).toBe('Recordings use 340 MB')
     expect(diskLine({ usedBytes: 0, freeBytes: 5 * 1024 ** 3 })).toBe('5.0 GB free for recordings')
     expect(diskLine(undefined)).toBe('')
+  })
+})
+
+describe('Record a time', () => {
+  const at = (h, m, day = 31) => new Date(2026, 9, day, h, m).getTime()   // local time
+
+  it('knows a guide entry that stands for no programme', () => {
+    expect(isGuidePlaceholder('No information available')).toBe(true)
+    expect(isGuidePlaceholder('no data')).toBe(true)
+    expect(isGuidePlaceholder('  ')).toBe(true)
+    expect(isGuidePlaceholder('The Office')).toBe(false)
+    expect(isGuidePlaceholder('Nothing But Trailers')).toBe(false)
+  })
+
+  it('starts at the half hour clicked — or now, once that half hour has begun', () => {
+    expect(timedStart(at(21, 10), at(20, 5))).toBe(at(21, 0))
+    expect(timedStart(at(21, 40), at(20, 5))).toBe(at(21, 30))
+    expect(timedStart(at(20, 5), at(20, 25) + 30_000)).toBe(at(20, 25))   // on now: from now, to the minute
+    expect(timedStart(at(18, 10), at(20, 40))).toBe(at(20, 40))           // in the past: now
+  })
+
+  it('an end time on the same day, or the next when it is not later', () => {
+    expect(endAtTime(at(21, 0), '22:30')).toBe(at(22, 30))
+    expect(endAtTime(at(23, 30), '01:00')).toBe(at(1, 0, 32))
+    expect(endAtTime(at(21, 0), '21:00')).toBe(at(21, 0, 32))
+    expect(endAtTime(at(21, 0), '')).toBe(null)
+  })
+
+  it('books a start and end, titled after the channel unless named', () => {
+    const now = at(20, 0)
+    expect(timedBooking({ startAt: at(21, 0), endAt: at(22, 0), title: '', channelName: 'HBO 2', now }))
+      .toEqual({ title: 'HBO 2', startAt: at(21, 0), endAt: at(22, 0) })
+    expect(timedBooking({ startAt: at(21, 0), endAt: at(22, 0), title: ' Movie night ', channelName: 'HBO 2', now }).title).toBe('Movie night')
+    expect(timedBooking({ startAt: at(21, 0), endAt: at(21, 0), channelName: 'HBO 2', now }).error).toBe('It has to end after it starts.')
+    expect(timedBooking({ startAt: at(18, 0), endAt: at(19, 0), channelName: 'HBO 2', now }).error).toBe('That time has already passed.')
+    expect(timedBooking({ startAt: at(21, 0), endAt: at(9, 30, 32), channelName: 'HBO 2', now }).error).toBe('A recording can be at most 12 hours.')
+    expect(timedBooking({ startAt: NaN, endAt: at(22, 0), channelName: 'HBO 2', now }).error).toBe('Pick when it starts and ends.')
   })
 })

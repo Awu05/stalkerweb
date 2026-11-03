@@ -9,8 +9,10 @@ data class ViewerSummary(
     val id: String,
     val name: String = "",
     val color: String? = null,
-    /** The first viewer: may delete anyone's recordings, and can't be deleted (backend viewers/ViewersManager.js). */
+    /** The admin: may delete anyone's recordings, and can't be deleted (backend viewers/ViewersManager.js). */
     val admin: Boolean = false,
+    /** The Default: what devices picking no viewer use — can't be deleted. */
+    val isDefault: Boolean = false,
 )
 
 @JsonClass(generateAdapter = false)

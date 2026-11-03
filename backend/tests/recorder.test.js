@@ -260,36 +260,42 @@ describe('startRecording', () => {
 describe('cachedFreeBytes', () => {
   const stat = (bavail) => ({ bavail, bsize: 4096 })
 
-  it('looks once per interval, and a folder not made yet by the one above it', async () => {
-    const asked = []
+  it('looks once per interval', async () => {
+    let asked = 0
     const c = { t: 0 }
-    const statfs = async (d) => {
-      asked.push(d)
-      if (d === path.join('/data', 'recordings')) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-      return stat(10)
-    }
-    const free = cachedFreeBytes(path.join('/data', 'recordings'), { ttlMs: 30_000, now: () => c.t, statfs })
+    const free = cachedFreeBytes('/rec', { ttlMs: 30_000, now: () => c.t, statfs: async () => { asked++; return stat(10) } })
     expect(await free()).toBe(40960)
-    expect(asked).toEqual([path.join('/data', 'recordings'), '/data'.replace(/\//g, path.sep)])
     c.t = 29_000
     await free()
-    expect(asked.length).toBe(2)
+    expect(asked).toBe(1)
     c.t = 31_000
     await free()
-    expect(asked.length).toBe(4)
+    expect(asked).toBe(2)
   })
 
-  it("gives up on a disk that hangs (null, or what it last said) — and doesn't block", async () => {
+  it("waits for a disk that hangs only once, then answers at once — unknown once it's hung a while", async () => {
     let answer = null
-    const statfs = () => new Promise((resolve) => { answer = resolve })
-    const free = cachedFreeBytes('/rec', { ttlMs: 0, waitMs: 20, statfs })
-    expect(await free()).toBe(null)
+    let asked = 0
+    const c = { t: 0 }
+    const statfs = () => { asked++; return new Promise((resolve) => { answer = resolve }) }
+    const free = cachedFreeBytes('/rec', { ttlMs: 30_000, waitMs: 20, now: () => c.t, statfs })
+    expect(await free()).toBe(null)   // waited 20 ms, gave up
+    c.t = 25
+    const started = Date.now()
+    expect(await free()).toBe(null)   // still hanging: not waited for again
+    expect(Date.now() - started).toBeLessThan(15)
     answer(stat(1))
     await new Promise((r) => setTimeout(r, 0))
-    expect(await free()).toBe(4096)   // the late answer is kept; this look hangs again
+    expect(await free()).toBe(4096)
+    // It hangs again, past the interval: what it last said is no longer told as current.
+    c.t = 40_000
+    await free()
+    c.t = 80_000
+    expect(await free()).toBe(null)
+    expect(asked).toBe(2)
   })
 
-  it('an error other than a missing folder: unknown', async () => {
+  it('an error: unknown', async () => {
     const free = cachedFreeBytes('/rec', { statfs: async () => { throw Object.assign(new Error('io'), { code: 'EIO' }) } })
     expect(await free()).toBe(null)
   })

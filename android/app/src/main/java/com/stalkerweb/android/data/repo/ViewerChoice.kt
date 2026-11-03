@@ -2,10 +2,13 @@ package com.stalkerweb.android.data.repo
 
 import com.stalkerweb.android.data.api.ViewerSummary
 
-/** Whether Settings offers to delete [v]: never the admin, never the last one (the web's viewerAdmin.js). */
-fun canRemoveViewer(v: ViewerSummary, viewers: List<ViewerSummary>): Boolean = !v.admin && viewers.size > 1
+/** Whether Settings offers to delete [v]: never the admin, the Default or the last one (the web's viewerAdmin.js). */
+fun canRemoveViewer(v: ViewerSummary, viewers: List<ViewerSummary>): Boolean = !v.admin && !v.isDefault && viewers.size > 1
 
-/** Whether Settings offers to make [v] the admin: only to the admin ([meId]), for someone else (the web's viewerAdmin.js). */
+/**
+ * Whether Settings offers to make [v] the admin: only to the admin, for someone else (the web's viewerAdmin.js).
+ * [meId]: the viewer this device sends (none: not offered — the server would refuse).
+ */
 fun canMakeAdmin(v: ViewerSummary, viewers: List<ViewerSummary>, meId: String?): Boolean =
     !v.admin && viewers.any { it.id == meId && it.admin }
 

@@ -140,3 +140,55 @@ export function saveRecordingPosition(id, position, duration, storage = browserS
 export function keepRecordingsResult(asked, current) {
   return asked === current
 }
+
+// ── Record a time ─────────────────────────────────────────────────────────────
+// Where the guide has no programme to book (a channel without guide data, or
+// a "No information available" stand-in): a start and an end of your own.
+// Booked like a programme (POST /api/recordings), so the padding, the stream
+// limit and the clash check are the same. RecordingRules.kt says the same.
+
+/** The lengths offered, in minutes. */
+export const RECORD_LENGTHS = [30, 60, 120, 180]
+const MAX_TIMED_MS = 12 * 60 * MIN
+
+/** A guide entry that stands for no programme ("No information available"): recorded by time instead. */
+export function isGuidePlaceholder(title) {
+  const t = String(title ?? '').trim()
+  return !t || /^no (information|info|data|programme|program|epg|guide)\b/i.test(t)
+}
+
+// The local half hour `ms` is in.
+function halfHour(ms) {
+  const d = new Date(ms)
+  d.setMinutes(d.getMinutes() < 30 ? 0 : 30, 0, 0)
+  return d.getTime()
+}
+
+/**
+ * Where Record a time starts: the half hour `at` is in — or now (to the
+ * minute) once that half hour has begun: a start gone by would count time
+ * never recorded (the server keeps the start it was given).
+ */
+export function timedStart(at, now) {
+  const s = halfHour(at)
+  return s <= now ? now - (now % MIN) : s
+}
+
+/** The end for an "HH:MM" picked after `startAt`: that time on its day, or the next day when it's not later. */
+export function endAtTime(startAt, hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+  const d = new Date(startAt)
+  d.setHours(h, m, 0, 0)
+  if (d.getTime() <= startAt) d.setDate(d.getDate() + 1)
+  return d.getTime()
+}
+
+/** What Record a time books — { title, startAt, endAt } — or { error } saying why it can't. */
+export function timedBooking({ startAt, endAt, title, channelName, now }) {
+  if (!Number.isFinite(startAt) || !Number.isFinite(endAt)) return { error: 'Pick when it starts and ends.' }
+  if (endAt <= startAt) return { error: 'It has to end after it starts.' }
+  if (endAt <= now) return { error: 'That time has already passed.' }
+  if (endAt - startAt > MAX_TIMED_MS) return { error: 'A recording can be at most 12 hours.' }
+  return { title: String(title ?? '').trim() || channelName || 'Recording', startAt, endAt }
+}

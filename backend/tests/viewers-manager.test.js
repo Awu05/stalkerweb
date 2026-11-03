@@ -123,7 +123,7 @@ describe('viewers', () => {
     expect(listed.find((v) => v.id === a.id).admin).toBe(false)
   })
 
-  it('the admin hands the role on; then the old default can go, and the admin stays', () => {
+  it('the admin hands the role on; the Default stays, for devices naming no viewer', () => {
     const def = viewers.getDefault()
     const a = viewers.create({ name: 'Andy' })
     const b = viewers.create({ name: 'Bea' })
@@ -133,11 +133,22 @@ describe('viewers', () => {
     viewers.setAdmin(a.id, def.id)
     expect(viewers.isAdmin(a.id)).toBe(true)
     expect(viewers.isAdmin(def.id)).toBe(false)
-    expect(viewers.list().viewers.filter((v) => v.admin).map((v) => v.id)).toEqual([a.id])
+    const listed = viewers.list().viewers
+    expect(listed.filter((v) => v.admin).map((v) => v.id)).toEqual([a.id])
+    expect(listed.filter((v) => v.isDefault).map((v) => v.id)).toEqual([def.id])
     expect(statusOf(() => viewers.remove(a.id))).toBe(409)
-    viewers.remove(def.id)
-    expect(viewers.isAdmin(a.id)).toBe(true)                         // not moved with the default
-    expect(viewers.getDefault().id).not.toBe(def.id)
+    expect(() => viewers.remove(def.id)).toThrow("The Default profile can't be removed")
+    viewers.remove(b.id)
+    expect(viewers.getDefault().id).toBe(def.id)
+  })
+
+  it('a file from before adminViewerId: the default viewer is the admin', () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-viewers-old-'))
+    fs.writeFileSync(path.join(d, 'viewers.json'), JSON.stringify({ defaultViewerId: 'view_b', viewers: [{ id: 'view_a', name: 'A' }, { id: 'view_b', name: 'B' }] }))
+    const old = new ViewersManager(d)
+    expect(old.isAdmin('view_b')).toBe(true)
+    expect(old.isAdmin('view_a')).toBe(false)
+    fs.rmSync(d, { recursive: true, force: true })
   })
 
   it('finds a viewer by name or id, ignoring case', () => {

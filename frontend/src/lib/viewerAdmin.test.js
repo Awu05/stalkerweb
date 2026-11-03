@@ -8,6 +8,8 @@ describe('canRemoveViewer', () => {
     expect(canRemoveViewer(bea, [admin, bea])).toBe(true)
     expect(canRemoveViewer(admin, [admin, bea])).toBe(false)
     expect(canRemoveViewer(bea, [bea])).toBe(false)
+    // The Default: what devices picking no profile use.
+    expect(canRemoveViewer({ id: 'd', isDefault: true }, [admin, bea, { id: 'd', isDefault: true }])).toBe(false)
   })
 })
 
