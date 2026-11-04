@@ -136,7 +136,8 @@ function isPlaylistUrl(url) {
 // Segments       → /proxy/hls/seg/<encoded>.ts     (passes FFmpeg's whitelist)
 // URI="" attrs   → /proxy/hls?url=<encoded>        (keys, maps — not segments)
 // `secret` (optional) enables HMAC signing of the emitted proxy URLs. Omitted
-// in unit tests; always provided in production via proxyModule's per-process key.
+// in unit tests; always provided in production via proxyModule's key (the one
+// kept in the data folder, lib/proxySecret.js).
 // `channelId` (optional) tags emitted URLs with `ch=<id>` so the /hls and
 // /hls/seg routes can attribute a CDN 403/404 (expired token) back to the
 // channel — recording health and evicting its stale resolved-stream cache.
@@ -200,8 +201,9 @@ function isM3u8Body(text) {
 
 // HMAC-sign the absolute target URL so the /hls* fetch routes only honor URLs
 // this server actually emitted — closing the SSRF/forged-URL hole where a caller
-// could base64-encode any URL and have the server fetch it. The secret is
-// per-process (see proxyModule), so URLs naturally expire on restart.
+// could base64-encode any URL and have the server fetch it. The secret is kept
+// in the data folder (lib/proxySecret.js), so links outlive a restart; they
+// stop working when that file is removed.
 function signProxyUrl(realUrl, secret) {
   return crypto.createHmac('sha256', secret).update(realUrl).digest('base64url');
 }
@@ -288,7 +290,7 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
   // Key for signing rewritten proxy URLs. The server passes the one kept in the
   // data folder (lib/proxySecret.js), so a player open across a restart keeps
   // its links; without one, a random key for this process.
-  const proxySecret = secret || crypto.randomBytes(32);
+  const proxySecret = Buffer.isBuffer(secret) && secret.length >= 32 ? secret : crypto.randomBytes(32);
 
   // Logs stutter / replay / drift causes per live channel (lib/streamDiagnostics).
   // Hides the replay a source restart causes (lib/restartSmoother); it reuses

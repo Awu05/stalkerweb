@@ -8,7 +8,10 @@
 // instead of making players jump forward.
 //
 // Players see a playlist of the released segments, numbered by the buffer, so
-// a skipped or failed segment never leaves a hole in the numbers. It holds at
+// a skipped or failed segment never leaves a hole in the numbers. The numbers
+// start from the clock (tenths of a second), so a buffer made after a restart
+// carries on above the old one's: a player whose links outlived the restart
+// never sees them go back (players stall on that), only a jump forward. It holds at
 // most `seconds` (plus two target durations) beyond what was released; more
 // than that is skipped, oldest first, to bound the delay and the memory.
 //
@@ -23,6 +26,8 @@ const START_SEGMENTS = 3;   // released at once when a channel starts, so player
 const SHOWN = 6;            // released segments listed to players
 const KEEP_RELEASED = 10;   // released segments whose bytes stay for players a little behind
 const MAX_SEEN = 2000;
+const RATE_WINDOW_MS = 60_000;   // how far back "ran dry" looks at what the source sent
+const SEQ_UNIT_MS = 100;         // the clock the numbers start from
 
 const pathOf = (url) => { try { const u = new URL(url); return u.host + u.pathname; } catch { return url; } };
 const headerNumber = (parsed, tag) => Number(parsed.header.find((l) => l.startsWith(`${tag}:`))?.split(':')[1]) || 0;
@@ -43,13 +48,16 @@ class LiveBuffer {
     this.seen = new Set();   // segment paths queued
     this.target = 6;
     this.nextAt = null;      // when the next segment is due for release
-    this.out = 0;            // number of the next released segment
-    this.rdiscs = 0;         // discontinuities released so far
+    const seed = Math.floor(now() / SEQ_UNIT_MS);
+    this.out = seed;         // number of the next released segment
+    this.rdiscs = seed;      // discontinuity sequence of the next released segment
     this.gap = false;        // a segment was skipped or failed since the last release
     this.started = false;
     this.unsupported = false;
-    this.dry = false;        // ran out of cushion (logged once per episode)
-    this.peak = 0;           // most cushion held since the start, or since it last ran dry
+    this.dry = false;        // ran out of cushion, until the next release
+    this.dryLoggedAt = null; // "ran dry" is logged at most once a minute
+    this.startedAt = null;
+    this.arrivals = [];      // { at, dur } of segments downloaded in the last minute
     this.queue = Promise.resolve();
   }
 
@@ -84,6 +92,7 @@ class LiveBuffer {
   // its oldest part straight away and hold the newest `seconds` as cushion.
   _planStart(window) {
     this.started = true;
+    this.startedAt = this.now();
     let held = 0;
     let cut = window.length;
     while (cut > START_SEGMENTS && held + window[cut - 1].dur <= this.seconds) held += window[--cut].dur;
@@ -96,6 +105,10 @@ class LiveBuffer {
     s.bytes = bytes;
     s.failed = !bytes;
     s.at = this.now();
+    if (bytes) {
+      this.arrivals.push({ at: s.at, dur: s.dur });
+      while (s.at - this.arrivals[0].at > RATE_WINDOW_MS) this.arrivals.shift();
+    }
     this.tick();
   }
 
@@ -127,7 +140,7 @@ class LiveBuffer {
     s.out = this.out++;
     this.gap = false;
     this.nextAt = at + s.dur * 1000;
-    if (this.dry && this.cushion() > 0) { this.dry = false; this.peak = 0; }
+    this.dry = false;
   }
 
   /** Seconds of downloaded content waiting to be released. */
@@ -139,16 +152,11 @@ class LiveBuffer {
   _bound() {
     const limit = this.seconds + 2 * this.target;
     let held = this.cushion();
-    this.peak = Math.max(this.peak, held);
     if (held <= limit) {
-      // The next segment is due but not here: the cushion ran out. A cushion
-      // that never filled means a source slower than real time, not a stall.
+      // The next segment is due but not here: the cushion ran out.
       if (this.started && !this.dry && this.nextAt !== null && this.now() > this.nextAt + 1000 && held === 0) {
         this.dry = true;
-        const why = this.peak >= this.seconds - this.target
-          ? `the source fell more than ${this.seconds}s behind`
-          : `it only built up ${Math.round(this.peak)}s of ${this.seconds}s: the source is sending slower than real time`;
-        this.log.warn(TAG, `ch ${this.channel}: buffer ran dry — ${why}; players wait for it`);
+        this._logDry();
       }
       return;
     }
@@ -163,6 +171,23 @@ class LiveBuffer {
       this.gap = true;
     }
     if (skipped) this.log.info(TAG, `ch ${this.channel}: buffer full — skipped ${skipped.toFixed(1)}s to stay within ${this.seconds}s of live`);
+  }
+
+  // Why it ran dry, from what the source sent in the minute up to its last
+  // segment (the gap since then is the pause, not its pace): under 90% of real
+  // time is a slow source (a bigger buffer only puts it off), otherwise a pause
+  // (a buffer longer than the pause rides it out).
+  _logDry() {
+    const now = this.now();
+    if (this.dryLoggedAt !== null && now - this.dryLoggedAt < RATE_WINDOW_MS) return;
+    this.dryLoggedAt = now;
+    const last = this.arrivals.at(-1)?.at ?? this.startedAt;
+    const span = Math.min(RATE_WINDOW_MS, last - this.startedAt) / 1000;
+    const sent = this.arrivals.filter((a) => last - a.at < RATE_WINDOW_MS).reduce((sum, a) => sum + a.dur, 0);
+    const why = span > 0 && sent < 0.9 * span
+      ? `the source sent ${Math.round(sent)}s of video in the last ${Math.round(span)}s — slower than real time, so a bigger buffer won't help`
+      : `the source sent nothing new for ${Math.round((now - last) / 1000)}s`;
+    this.log.warn(TAG, `ch ${this.channel}: buffer ran dry — ${why}; players wait for it`);
   }
 
   // Drop what players no longer need.
