@@ -4,6 +4,7 @@ dist/
 data/cache/
 data/config.json
 data/profiles.json
+data/proxy-secret
 *.log
 .claude/
 # Solo app build outputs (android/scripts/fetch-libnode.sh, pack-solo-server.sh)

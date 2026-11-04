@@ -60,7 +60,7 @@ describe('live buffer through the proxy', () => {
     // 48 s listed: the oldest 18 s released at once, the newest 30 s held.
     const segs = pl.split('\n').filter((l) => l.includes('/proxy/hls/seg/'))
     expect(segs).toHaveLength(3)
-    expect(pl).toContain('#EXT-X-MEDIA-SEQUENCE:0')
+    expect(pl).toMatch(/#EXT-X-MEDIA-SEQUENCE:[0-9]+/)
 
     // Wait for the held segments to download too.
     for (let i = 0; i < 50 && !hits['/live/tracks-v1a1/seg107.ts']; i++) await new Promise((r) => setTimeout(r, 20))

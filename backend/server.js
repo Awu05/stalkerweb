@@ -327,7 +327,7 @@ appState.describeChannel = async (id) => {
 };
 const streamRoutes = require('./routes/stream')(appState, config);
 const settingsRoutes = require('./routes/settings')(config, appState, access);
-const proxyRoutes = require('./routes/proxy')(appState);
+const proxyRoutes = require('./routes/proxy')(appState, { secret: require('./lib/proxySecret').loadProxySecret(config.dataDir) });
 const m3uRoutes = require('./routes/m3u')(appState, logoManager);
 const xspfRoutes = require('./routes/xspf')(appState, logoManager);
 const xmltvRoutes = require('./routes/xmltv')(appState);
