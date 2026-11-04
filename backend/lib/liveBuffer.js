@@ -49,6 +49,7 @@ class LiveBuffer {
     this.started = false;
     this.unsupported = false;
     this.dry = false;        // ran out of cushion (logged once per episode)
+    this.peak = 0;           // most cushion held since the start, or since it last ran dry
     this.queue = Promise.resolve();
   }
 
@@ -126,7 +127,7 @@ class LiveBuffer {
     s.out = this.out++;
     this.gap = false;
     this.nextAt = at + s.dur * 1000;
-    if (this.dry && this.cushion() > 0) this.dry = false;
+    if (this.dry && this.cushion() > 0) { this.dry = false; this.peak = 0; }
   }
 
   /** Seconds of downloaded content waiting to be released. */
@@ -138,11 +139,16 @@ class LiveBuffer {
   _bound() {
     const limit = this.seconds + 2 * this.target;
     let held = this.cushion();
+    this.peak = Math.max(this.peak, held);
     if (held <= limit) {
-      // The next segment is due but not here: the cushion ran out.
+      // The next segment is due but not here: the cushion ran out. A cushion
+      // that never filled means a source slower than real time, not a stall.
       if (this.started && !this.dry && this.nextAt !== null && this.now() > this.nextAt + 1000 && held === 0) {
         this.dry = true;
-        this.log.warn(TAG, `ch ${this.channel}: buffer ran dry — the source fell more than ${this.seconds}s behind; players wait for it`);
+        const why = this.peak >= this.seconds - this.target
+          ? `the source fell more than ${this.seconds}s behind`
+          : `it only built up ${Math.round(this.peak)}s of ${this.seconds}s: the source is sending slower than real time`;
+        this.log.warn(TAG, `ch ${this.channel}: buffer ran dry — ${why}; players wait for it`);
       }
       return;
     }

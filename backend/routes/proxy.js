@@ -259,7 +259,7 @@ module.exports.helpers = { encodeProxyUrl, decodeProxyUrl, rewriteM3u8, isPlayli
 // Waits before asking again for a segment the server says it doesn't have.
 const SEGMENT_RETRY_MS = [500, 1000, 1500, 2000];
 
-module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY_MS } = {}) {
+module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY_MS, secret = null } = {}) {
   const router = express.Router();
 
   // Settings → Activity (lib/activity.js): each stream request, for as long as
@@ -285,9 +285,10 @@ module.exports = function proxyModule(appState, { segmentRetryMs = SEGMENT_RETRY
     next();
   });
 
-  // Per-process key for signing rewritten proxy URLs. Random so it never needs
-  // configuring; URLs are short-lived (live HLS) so expiry-on-restart is fine.
-  const proxySecret = crypto.randomBytes(32);
+  // Key for signing rewritten proxy URLs. The server passes the one kept in the
+  // data folder (lib/proxySecret.js), so a player open across a restart keeps
+  // its links; without one, a random key for this process.
+  const proxySecret = secret || crypto.randomBytes(32);
 
   // Logs stutter / replay / drift causes per live channel (lib/streamDiagnostics).
   // Hides the replay a source restart causes (lib/restartSmoother); it reuses

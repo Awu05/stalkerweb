@@ -66,6 +66,15 @@ describe('LiveBuffer', () => {
     expect(buf.cushion()).toBe(24)
   })
 
+  it('says the source fell behind when a full cushion runs out', async () => {
+    buf.feed(source(100, 8), BASE)        // 30 s held
+    await settle()
+    for (let i = 0; i < 7; i++) at(6)     // nothing new for 42 s
+    const text = logs.join('\n')
+    expect(text).toMatch(/ran dry — the source fell more than 30s behind/)
+    expect(text).not.toMatch(/slower than real time/)
+  })
+
   it('says when the cushion runs out, and players wait', async () => {
     buf.feed(source(100, 4), BASE)        // 24 s: 3 released, 6 s held
     await settle()
@@ -73,7 +82,7 @@ describe('LiveBuffer', () => {
     expect(names(buf.playlist()).at(-1)).toBe(103)
     at(7.5)
     expect(names(buf.playlist()).at(-1)).toBe(103)
-    expect(logs.join('\n')).toMatch(/ran dry/)
+    expect(logs.join('\n')).toMatch(/ran dry — it only built up 6s of 30s: the source is sending slower than real time/)
     // The next segment goes out as soon as it arrives.
     buf.feed(source(101, 4), BASE)
     await settle()
