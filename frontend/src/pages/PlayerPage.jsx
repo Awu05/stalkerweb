@@ -58,19 +58,20 @@ function Controls({
         </div>
         <Badge variant="live" className="ml-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />LIVE</Badge>
       </div>
-      <div className="flex-1 text-center">
-        <span className="text-sm font-medium text-white/90 truncate">{channelName}</span>
+      <div className="flex-1 min-w-0 text-center truncate">
+        <span className="text-sm font-medium text-white/90">{channelName}</span>
       </div>
       {jumpDigits ? (
         <div className="text-sm font-mono font-bold text-white bg-white/20 rounded px-2 py-0.5 min-w-[2.5rem] text-center">
           {jumpDigits}
         </div>
       ) : (
-        <div className="flex items-center gap-1 text-xs text-white/50 mr-2 hidden sm:block">
+        <div className="text-xs text-white/50 mr-2 whitespace-nowrap hidden @4xl:block">
           OK·F·M·P·G·S·↑↓·←→·0-9
         </div>
       )}
-      <div className="flex items-center gap-1">
+      {/* Wraps rather than running on under the channel list beside the video. */}
+      <div className="flex flex-wrap justify-end items-center gap-1 min-w-0">
         {/* Audio track picker */}
         {audioTracks.length > 1 && (
           <select
@@ -1293,7 +1294,7 @@ export default function PlayerPage() {
       <div
         ref={containerRef}
         tabIndex={-1}
-        className="relative flex-1 flex items-center justify-center bg-black outline-none"
+        className="@container relative flex-1 min-w-0 flex items-center justify-center bg-black outline-none"
         onMouseMove={(e) => { if (lastPointer.current === 'mouse' && e.movementX + e.movementY !== 0) resetHideTimer() }}
         onMouseLeave={() => clearTimeout(hideTimer.current)}
         onPointerDown={(e) => { lastPointer.current = e.pointerType || 'mouse' }}

@@ -68,6 +68,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -337,7 +338,6 @@ private fun Content(
     openHistory: (HistoryEntry) -> Unit,
     onPlay: (PlayerParams) -> Unit,
 ) {
-    val isTV = rememberIsTV()
     val gridState = rememberLazyGridState()
     val nearEnd by remember { derivedStateOf {
         val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -348,7 +348,7 @@ private fun Content(
 
     LazyVerticalGrid(
         state = gridState,
-        columns = GridCells.Adaptive(if (isTV) 180.dp else 140.dp),
+        columns = GridCells.Adaptive(posterWidth(140.dp)),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -401,6 +401,13 @@ private fun Content(
 
 private fun LazyGridScope.full(content: @Composable () -> Unit) = item(span = { GridItemSpan(maxLineSpan) }) { content() }
 
+// A poster's width. On a TV it follows the screen's height — about 540 dp on
+// any TV, however wide — so a whole poster and its title fit with room to
+// spare; elsewhere it's [phone].
+@Composable
+private fun posterWidth(phone: Dp): Dp =
+    if (rememberIsTV()) (LocalConfiguration.current.screenHeightDp * 0.2f).dp.coerceIn(100.dp, 160.dp) else phone
+
 @Composable
 private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
                        onOpen: (HistoryEntry) -> Unit, watch: WatchRepository, seasonNos: Map<String, String> = emptyMap()) {
@@ -413,7 +420,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
             items(entries, key = { it.id }) { e ->
                 val p = progress[e.key]
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
-                Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.width(posterWidth(150.dp)), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
                         title = e.title, year = historyEpisodeLabel(e, seasonNos), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
@@ -439,7 +446,7 @@ private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, onOpen: 
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)) {
             items(entries, key = { it.id }) { e ->
-                Box(Modifier.width(150.dp)) {
+                Box(Modifier.width(posterWidth(150.dp))) {
                     PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { onOpen(e.item) },
                         bookmarked = e.id in myListIds, onBookmark = { onToggle(e.item) })
                 }
