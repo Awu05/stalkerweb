@@ -43,7 +43,10 @@ function Controls({
   onAudioTrack, onSubtitleTrack, cast, statsOpen, onToggleStats, recordChannel, recordProgramme,
 }) {
   return (
-    <div data-player-controls className="flex items-center gap-3 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
+    // When it doesn't fit on one line the buttons move to a line above, so the
+    // controls on the left never move (a volume slider opening under the
+    // pointer would otherwise jump away from it).
+    <div data-player-controls className="flex flex-wrap-reverse items-center gap-x-3 gap-y-1 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
       <div className="flex items-center gap-2">
         <button onClick={onPlayPause} className="text-white/90 hover:text-white transition-colors p-1" aria-label={playing ? 'Pause' : 'Play'}>
           {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
@@ -58,7 +61,7 @@ function Controls({
         </div>
         <Badge variant="live" className="ml-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />LIVE</Badge>
       </div>
-      <div className="flex-1 min-w-0 text-center truncate">
+      <div className="flex-1 min-w-24 text-center truncate" title={channelName}>
         <span className="text-sm font-medium text-white/90">{channelName}</span>
       </div>
       {jumpDigits ? (
@@ -70,14 +73,13 @@ function Controls({
           OK·F·M·P·G·S·↑↓·←→·0-9
         </div>
       )}
-      {/* Wraps rather than running on under the channel list beside the video. */}
-      <div className="flex flex-wrap justify-end items-center gap-1 min-w-0">
+      <div className="ml-auto flex flex-wrap justify-end items-center gap-1">
         {/* Audio track picker */}
         {audioTracks.length > 1 && (
           <select
             value={activeAudio}
             onChange={e => onAudioTrack(Number(e.target.value))}
-            className="bg-black/60 text-white/80 text-xs rounded px-1 py-0.5 border border-white/20 cursor-pointer"
+            className="max-w-32 bg-black/60 text-white/80 text-xs rounded px-1 py-0.5 border border-white/20 cursor-pointer"
             title="Audio track"
           >
             {audioTracks.map((t, i) => (
@@ -90,7 +92,7 @@ function Controls({
           <select
             value={activeSub}
             onChange={e => onSubtitleTrack(Number(e.target.value))}
-            className="bg-black/60 text-white/80 text-xs rounded px-1 py-0.5 border border-white/20 cursor-pointer"
+            className="max-w-32 bg-black/60 text-white/80 text-xs rounded px-1 py-0.5 border border-white/20 cursor-pointer"
             title="Subtitles"
           >
             <option value={-1}>Off</option>
@@ -1294,7 +1296,7 @@ export default function PlayerPage() {
       <div
         ref={containerRef}
         tabIndex={-1}
-        className="@container relative flex-1 min-w-0 flex items-center justify-center bg-black outline-none"
+        className="@container relative flex-1 flex items-center justify-center bg-black outline-none"
         onMouseMove={(e) => { if (lastPointer.current === 'mouse' && e.movementX + e.movementY !== 0) resetHideTimer() }}
         onMouseLeave={() => clearTimeout(hideTimer.current)}
         onPointerDown={(e) => { lastPointer.current = e.pointerType || 'mouse' }}
