@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -68,6 +69,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -337,7 +339,6 @@ private fun Content(
     openHistory: (HistoryEntry) -> Unit,
     onPlay: (PlayerParams) -> Unit,
 ) {
-    val isTV = rememberIsTV()
     val gridState = rememberLazyGridState()
     val nearEnd by remember { derivedStateOf {
         val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -346,54 +347,60 @@ private fun Content(
     LaunchedEffect(nearEnd, state.page, shown.size) { if (nearEnd && !state.isMyList) viewModel.loadMore(matchCount) }
     val browsing = !state.isMyList && !state.filters.isActive && state.search.isBlank()
 
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Adaptive(if (isTV) 180.dp else 140.dp),
-        contentPadding = PaddingValues(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        if (browsing && history.isNotEmpty()) {
-            full { HistoryRow(history, progress, openHistory, watch, state.seasonNos) }
-        }
-        if (browsing) {
-            val toWatch = tabList.filter { it.completedAt == null }
-            if (toWatch.isNotEmpty()) full { MyListRow(toWatch, myListIds, open, viewModel::toggleMyList) { viewModel.selectCategory(MY_LIST) } }
-        }
+    val isTV = rememberIsTV()
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sizes = posterSizesFor(isTV, screenHeightDp, maxWidth.value.toInt(), maxHeight.value.toInt())
+        val rowWidth = sizes.rowDp.dp
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(sizes.columns),
+            contentPadding = PaddingValues(GRID_PADDING_DP.dp),
+            horizontalArrangement = Arrangement.spacedBy(GRID_GAP_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(GRID_GAP_DP.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (browsing && history.isNotEmpty()) {
+                full { HistoryRow(history, progress, openHistory, watch, rowWidth, state.seasonNos) }
+            }
+            if (browsing) {
+                val toWatch = tabList.filter { it.completedAt == null }
+                if (toWatch.isNotEmpty()) full { MyListRow(toWatch, myListIds, rowWidth, open, viewModel::toggleMyList) { viewModel.selectCategory(MY_LIST) } }
+            }
 
-        when {
-            state.isMyList -> myListSection(state, tabList, myListIds, open, viewModel, watch)
-            else -> {
-                if (state.filtering) full {
-                    val l = state.listing
-                    Text(
-                        when {
-                            l.error != null -> l.error
-                            !l.complete -> "Reading titles… ${l.loaded}${if (l.total > 0) " of ${l.total}" else ""}"
-                            else -> "$matchCount of ${l.loaded} titles"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (l.error != null) SwColors.Live else SwColors.Muted,
-                    )
-                }
-                items(shown, key = { it.id }) { item ->
-                    PosterTile(
-                        title = item.name, year = item.year, posterUrl = item.screenshotUrl, isHD = item.isHD,
-                        onClick = { open(item) },
-                        bookmarked = item.id in myListIds, onBookmark = { viewModel.toggleMyList(item) },
-                        onDownload = if (item.isSeries || item.episodes.isNotEmpty()) null
-                            else ({ viewModel.download(listOf(DownloadItem(videoId = item.id, cmd = item.cmd, title = item.name)), "\"${item.name}\"") }),
-                    )
-                }
-                if (shown.isEmpty()) full {
-                    when {
-                        state.error != null -> Text(state.error, color = SwColors.Live)
-                        state.loadingItems || (state.filtering && !state.listing.complete) -> Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) { CircularProgressIndicator() }
-                        state.selected != null -> EmptyState(Icons.Default.Movie, if (state.filters.isActive || state.search.isNotBlank()) "No titles match." else "No titles in this category.")
+            when {
+                state.isMyList -> myListSection(state, tabList, myListIds, open, viewModel, watch)
+                else -> {
+                    if (state.filtering) full {
+                        val l = state.listing
+                        Text(
+                            when {
+                                l.error != null -> l.error
+                                !l.complete -> "Reading titles… ${l.loaded}${if (l.total > 0) " of ${l.total}" else ""}"
+                                else -> "$matchCount of ${l.loaded} titles"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (l.error != null) SwColors.Live else SwColors.Muted,
+                        )
                     }
+                    items(shown, key = { it.id }) { item ->
+                        PosterTile(
+                            title = item.name, year = item.year, posterUrl = item.screenshotUrl, isHD = item.isHD,
+                            onClick = { open(item) },
+                            bookmarked = item.id in myListIds, onBookmark = { viewModel.toggleMyList(item) },
+                            onDownload = if (item.isSeries || item.episodes.isNotEmpty()) null
+                                else ({ viewModel.download(listOf(DownloadItem(videoId = item.id, cmd = item.cmd, title = item.name)), "\"${item.name}\"") }),
+                        )
+                    }
+                    if (shown.isEmpty()) full {
+                        when {
+                            state.error != null -> Text(state.error, color = SwColors.Live)
+                            state.loadingItems || (state.filtering && !state.listing.complete) -> Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) { CircularProgressIndicator() }
+                            state.selected != null -> EmptyState(Icons.Default.Movie, if (state.filters.isActive || state.search.isNotBlank()) "No titles match." else "No titles in this category.")
+                        }
+                    }
+                    if (state.loadingItems && shown.isNotEmpty()) full { Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp)) } }
                 }
-                if (state.loadingItems && shown.isNotEmpty()) full { Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp)) } }
             }
         }
     }
@@ -403,7 +410,7 @@ private fun LazyGridScope.full(content: @Composable () -> Unit) = item(span = { 
 
 @Composable
 private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
-                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository, seasonNos: Map<String, String> = emptyMap()) {
+                       onOpen: (HistoryEntry) -> Unit, watch: WatchRepository, tileWidth: Dp, seasonNos: Map<String, String> = emptyMap()) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(Icons.Default.History, "Recently watched", entries.size)
@@ -413,7 +420,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
             items(entries, key = { it.id }) { e ->
                 val p = progress[e.key]
                 val frac = if (!e.finished && e.duration > 0) ((p?.position ?: e.position) / e.duration).toFloat() else null
-                Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.width(tileWidth), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PosterTile(
                         title = e.title, year = historyEpisodeLabel(e, seasonNos), posterUrl = e.screenshotUrl.ifEmpty { null }, isHD = false,
                         onClick = { onOpen(e) }, progress = frac, watched = e.finished,
@@ -431,7 +438,7 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
 }
 
 @Composable
-private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, onOpen: (VodItem) -> Unit, onToggle: (VodItem) -> Unit, onSeeAll: () -> Unit) {
+private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, tileWidth: Dp, onOpen: (VodItem) -> Unit, onToggle: (VodItem) -> Unit, onSeeAll: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(Icons.Default.Bookmark, "My List", entries.size)
@@ -439,7 +446,7 @@ private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, onOpen: 
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)) {
             items(entries, key = { it.id }) { e ->
-                Box(Modifier.width(150.dp)) {
+                Box(Modifier.width(tileWidth)) {
                     PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { onOpen(e.item) },
                         bookmarked = e.id in myListIds, onBookmark = { onToggle(e.item) })
                 }
@@ -478,10 +485,12 @@ private fun ListTile(e: ListEntry, done: Boolean, myListIds: Set<String>, open: 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { open(e.item) },
             bookmarked = e.id in myListIds, onBookmark = { viewModel.toggleMyList(e.item) })
-        TextButton(onClick = { watch.setCompleted(e.id, !done) }, modifier = Modifier.tvFocus(RoundedCornerShape(8.dp))) {
+        // One line at any poster width: tighter padding, and an ellipsis rather than a second line.
+        TextButton(onClick = { watch.setCompleted(e.id, !done) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.tvFocus(RoundedCornerShape(8.dp))) {
             Icon(if (done) Icons.Default.Replay else Icons.Default.Check, null, Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
-            Text(if (done) "Back to To watch" else "Mark completed", style = MaterialTheme.typography.labelSmall)
+            Text(if (done) "Back to To watch" else "Mark completed", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
