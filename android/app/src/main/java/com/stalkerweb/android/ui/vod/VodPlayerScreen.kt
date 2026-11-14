@@ -86,7 +86,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.stalkerweb.android.data.repo.PlayerParams
-import com.stalkerweb.android.data.repo.NEXT_COUNTDOWN_SECS
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -172,10 +171,12 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     LaunchedEffect(Unit) { viewModel.init(params) }
     val toastContext = LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_SHORT).show() } }
-    // Back stops "Next episode"'s countdown, and closes the episodes panel
-    // (the remote's Back would otherwise leave the player). The handler added
-    // last goes first, so an open panel closes before the countdown stops.
-    BackHandler(enabled = state.nextCountdown != null) { viewModel.stopCountdown() }
+    // On a TV, Back stops "Next episode"'s countdown (phones have a ✕), and
+    // closes the episodes panel (the remote's Back would otherwise leave the
+    // player). The handler added last goes first, so an open panel closes first.
+    val anyPanel = panelOpen || subtitlesOpen || gearOpen
+    LaunchedEffect(anyPanel) { viewModel.setPanelOpen(anyPanel) }
+    BackHandler(enabled = isTV && state.nextCountdown != null && !anyPanel) { viewModel.stopCountdown() }
     BackHandler(enabled = panelOpen) { panelOpen = false }
     BackHandler(enabled = subtitlesOpen) { subtitlesOpen = false }
     BackHandler(enabled = gearOpen) { gearOpen = false }
@@ -368,30 +369,31 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 
         state.skip?.takeIf { !casting && state.error == null }?.let { now ->
             val next = now.kind == "next"
-            val left = state.nextCountdown.takeIf { next }
-            // Above Media3's seek bar while its controls show.
+            val countdown = state.nextCountdown.takeIf { next }
+            // Above Media3's seek bar while its controls show. The ✕ is on the
+            // button's left, so the button doesn't move under a second tap when it goes.
             Row(
                 Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                SkipButton(
-                    label = if (!next) now.label else if (left != null) "Next episode in $left" else "Next episode",
-                    next = next,
-                    // The remote's OK skips (above), and Back stays; the button says so.
-                    hint = isTV && !controlsVisible && !panelOpen && !subtitlesOpen && !gearOpen,
-                    backHint = isTV && left != null,
-                    filled = left?.let { (NEXT_COUNTDOWN_SECS - it).toFloat() / NEXT_COUNTDOWN_SECS },
-                    onClick = { viewModel.skip(next) },
-                    // On a TV, OK skips: the button never takes the focus (gone, it would leave it nowhere).
-                    modifier = Modifier.focusProperties { canFocus = !isTV },
-                )
-                if (left != null && !isTV) {
+                if (countdown != null && !isTV) {
                     TipIconButton(label = "Stay on this episode", onClick = viewModel::stopCountdown,
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.7f), CircleShape)) {
                         Icon(Icons.Default.Close, "Stay on this episode", tint = Color.White)
                     }
                 }
+                SkipButton(
+                    label = if (!next) now.label else if (countdown != null) "Next episode in ${countdown.left}" else "Next episode",
+                    next = next,
+                    // The remote's OK skips (above), and Back stays; the button says so.
+                    hint = isTV && !controlsVisible && !anyPanel,
+                    backHint = isTV && countdown != null && !anyPanel,
+                    filled = countdown?.filled,
+                    onClick = { viewModel.skip(next) },
+                    // On a TV, OK skips: the button never takes the focus (gone, it would leave it nowhere).
+                    modifier = Modifier.focusProperties { canFocus = !isTV },
+                )
             }
         }
 
@@ -474,9 +476,13 @@ private fun EpisodesPanel(
 private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier,
                        backHint: Boolean = false, filled: Float? = null) {
     // How far the countdown has gone (0–1): it fills the button from the left,
-    // smoothly between the player's checks.
-    val fill by androidx.compose.animation.core.animateFloatAsState(filled ?: 0f, androidx.compose.animation.core.tween(500), label = "countdown")
+    // smoothly between the player's checks (twice a second).
+    val fill by androidx.compose.animation.core.animateFloatAsState(filled ?: 0f,
+        androidx.compose.animation.core.tween(500, easing = androidx.compose.animation.core.LinearEasing), label = "countdown")
     val shape = RoundedCornerShape(50)
+    // No larger touch area around it: the background and fill below are drawn
+    // on this modifier, and would show outside the outline.
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified) {
     OutlinedButton(
         onClick = onClick,
         // Its own background, so the fill draws over it.
@@ -489,6 +495,7 @@ private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () 
         Text(" $label")
         if (hint) Text("  · OK", color = SwColors.Muted)
         if (backHint) Text("  · Back to stay", color = SwColors.Muted)
+    }
     }
 }
 

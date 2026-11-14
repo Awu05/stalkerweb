@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, NEXT_PROMPT_SECS } from './skipSegments'
+import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, nextCountdownAt, NEXT_PROMPT_SECS } from './skipSegments'
 
 const parts = { intro: { start: 60, end: 90 }, recap: { start: 0, end: 40 }, outro: { start: 2800, end: 2900 } }
 
@@ -83,5 +83,17 @@ describe('matchLabel', () => {
     expect(matchLabel({ title: 'Breaking Bad', year: '2008' })).toBe('Breaking Bad (2008)')
     expect(matchLabel({ title: 'Shogun', year: '' })).toBe('Shogun')
     expect(matchLabel(null)).toBe('')
+  })
+})
+
+describe('nextCountdownAt', () => {
+  it('counts down during the credits only', () => {
+    expect(nextCountdownAt(parts, 2850)).toBe(true)
+    expect(nextCountdownAt(parts, 2790)).toBe(false)
+  })
+  it('not in the last seconds of a title with no credits times, nor with skipping off', () => {
+    expect(nextCountdownAt({ intro: null, recap: null, outro: null }, 2990)).toBe(false)
+    expect(nextCountdownAt(null, 2990)).toBe(false)
+    expect(nextCountdownAt({ ...parts, skipMode: 'off' }, 2850)).toBe(false)
   })
 })

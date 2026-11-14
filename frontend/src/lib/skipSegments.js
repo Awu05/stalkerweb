@@ -67,6 +67,15 @@ export function nextPromptAt(parts, t, duration, hasNext) {
   return skipAt(parts, t)?.kind === 'outro'
 }
 
+/**
+ * Whether "Next episode" counts down to playing it by itself at `t`: during
+ * the credits only. Without credits times (or with skipping off) the episode
+ * plays to its end, and the Up next card follows.
+ */
+export function nextCountdownAt(parts, t) {
+  return skipAt(parts, t)?.kind === 'outro'
+}
+
 /** "Breaking Bad (2008)" — what the show was matched to, for the side panel. */
 export function matchLabel(m) {
   if (!m?.title) return ''

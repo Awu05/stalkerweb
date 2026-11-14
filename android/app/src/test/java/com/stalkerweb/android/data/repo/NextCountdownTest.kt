@@ -9,13 +9,15 @@ class NextCountdownTest {
     private fun NextCountdown.run(key: String, fromMs: Long, toMs: Long, showing: Boolean = true, playing: Boolean = true): Int? {
         var left: Int? = null
         var t = fromMs
-        while (t <= toMs) { left = update(key, showing, playing, t); t += 500 }
+        while (t <= toMs) { left = update(key, showing, playing, t)?.left; t += 500 }
         return left
     }
+    private fun NextCountdown.at(key: String, nowMs: Long, showing: Boolean = true, playing: Boolean = true) =
+        update(key, showing, playing, nowMs)?.left
 
     @Test fun countsFiveSecondsOfPlayingDownToZero() {
         val c = NextCountdown()
-        assertEquals(5, c.update("ep1", showing = true, playing = true, nowMs = 0))
+        assertEquals(5, c.at("ep1", 0))
         assertEquals(1, c.run("ep1", 500, 4_000))
         assertEquals(0, c.run("ep1", 4_500, 5_000))
     }
@@ -29,25 +31,55 @@ class NextCountdownTest {
 
     @Test fun nothingWhileTheButtonIsntShowingAndAFreshStartAfter() {
         val c = NextCountdown()
-        assertNull(c.update("ep1", showing = false, playing = true, nowMs = 0))
+        assertNull(c.at("ep1", 0, showing = false))
         c.run("ep1", 500, 3_000)
-        assertNull(c.update("ep1", showing = false, playing = true, nowMs = 3_500))
-        assertEquals(5, c.update("ep1", showing = true, playing = true, nowMs = 10_000))
+        assertNull(c.at("ep1", 3_500, showing = false))
+        assertEquals(5, c.at("ep1", 10_000))
     }
 
     @Test fun stoppedStaysStoppedForThatEpisodeOnly() {
         val c = NextCountdown()
         c.run("ep1", 0, 2_000)
-        c.stop("ep1")
-        assertNull(c.update("ep1", showing = true, playing = true, nowMs = 2_500))
-        assertNull(c.update("ep1", showing = false, playing = true, nowMs = 3_000))
-        assertNull(c.update("ep1", showing = true, playing = true, nowMs = 3_500))
-        assertEquals(5, c.update("ep2", showing = true, playing = true, nowMs = 4_000))
+        c.stop()
+        assertNull(c.at("ep1", 2_500))
+        assertNull(c.at("ep1", 3_000, showing = false))
+        assertNull(c.at("ep1", 3_500))
+        assertEquals(5, c.at("ep2", 4_000))
     }
 
     @Test fun aNewEpisodeStartsAgainFromFive() {
         val c = NextCountdown()
         c.run("ep1", 0, 3_000)
-        assertEquals(5, c.update("ep2", showing = true, playing = true, nowMs = 3_500))
+        assertEquals(5, c.at("ep2", 3_500))
+    }
+
+    @Test fun timeNotCheckedIsntCounted() {
+        // Counting, then 30 s casting (no checks), then back: it carries on from where it was.
+        val c = NextCountdown()
+        c.run("ep1", 0, 2_000)
+        c.hold()
+        assertEquals(3, c.at("ep1", 32_000))
+        assertEquals(2, c.run("ep1", 32_500, 33_000))
+    }
+
+    @Test fun fillsAllTheWayAtZero() {
+        val c = NextCountdown()
+        assertEquals(0f, c.update("ep1", true, true, 0)!!.filled)
+        c.run("ep1", 500, 2_000)
+        assertEquals(0.4f, c.update("ep1", true, true, 2_000)!!.filled, 0.001f)
+        c.run("ep1", 2_500, 4_500)
+        assertEquals(1f, c.update("ep1", true, true, 5_000)!!.filled)
+    }
+}
+
+class NextCountdownAtTest {
+    private val parts = com.stalkerweb.android.data.api.SkipResponse(
+        intro = null, recap = null, outro = com.stalkerweb.android.data.api.SkipPart(2800.0, 2900.0),
+    )
+    @Test fun duringTheCreditsOnly() {
+        org.junit.Assert.assertTrue(nextCountdownAt(parts, 2850.0))
+        org.junit.Assert.assertFalse(nextCountdownAt(parts, 2790.0))
+        org.junit.Assert.assertFalse(nextCountdownAt(null, 2990.0))
+        org.junit.Assert.assertFalse(nextCountdownAt(parts.copy(skipMode = "off"), 2850.0))
     }
 }

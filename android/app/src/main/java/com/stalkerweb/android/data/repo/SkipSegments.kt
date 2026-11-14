@@ -16,9 +16,12 @@ const val NEXT_PROMPT_SECS = 30.0
 /** Once it shows, it plays the next episode by itself after this long. */
 const val NEXT_COUNTDOWN_SECS = 5
 
+/** A countdown as it stands: whole seconds [left], and how far it has gone (0–1). */
+data class CountdownNow(val left: Int, val filled: Float)
+
 /**
  * "Next episode"'s countdown, from how long it has shown while playing (the
- * web's useCountdown): seconds left, or null when not counting. Hidden, it
+ * web's useCountdown): where it stands, or null when not counting. Hidden, it
  * starts from the top next time; stopped, never again for that episode.
  */
 class NextCountdown(private val secs: Int = NEXT_COUNTDOWN_SECS) {
@@ -27,15 +30,19 @@ class NextCountdown(private val secs: Int = NEXT_COUNTDOWN_SECS) {
     private var playedMs = 0L
     private var lastAt: Long? = null
 
-    fun update(key: String, showing: Boolean, playing: Boolean, nowMs: Long): Int? {
+    fun update(key: String, showing: Boolean, playing: Boolean, nowMs: Long): CountdownNow? {
         if (key != this.key) { this.key = key; playedMs = 0; lastAt = null }
         if (!showing || key == stoppedFor) { playedMs = 0; lastAt = null; return null }
         lastAt?.let { if (playing) playedMs += nowMs - it }
         lastAt = if (playing) nowMs else null
-        return (secs - (playedMs / 1000).toInt()).coerceAtLeast(0)
+        return CountdownNow((secs - (playedMs / 1000).toInt()).coerceAtLeast(0), (playedMs / (secs * 1000f)).coerceIn(0f, 1f))
     }
 
-    fun stop(key: String) { stoppedFor = key }
+    /** Not checked for a while (casting, a reload): that time isn't counted. */
+    fun hold() { lastAt = null }
+
+    /** Stopped for the episode it last counted for. */
+    fun stop() { stoppedFor = key }
 }
 
 /**
@@ -84,3 +91,10 @@ fun nextPromptAt(parts: SkipResponse?, t: Double, duration: Double, hasNext: Boo
     if (duration > 0 && duration - t <= NEXT_PROMPT_SECS) return true
     return skipAt(parts, t)?.kind == "outro"
 }
+
+/**
+ * Whether "Next episode" counts down to playing it by itself at [t]: during
+ * the credits only. Without credits times (or with skipping off) the episode
+ * plays to its end, and the Up next card follows.
+ */
+fun nextCountdownAt(parts: SkipResponse?, t: Double): Boolean = skipAt(parts, t)?.kind == "outro"

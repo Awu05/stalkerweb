@@ -27,13 +27,13 @@ import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSet
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
 import { useVodAudio } from '@/lib/useVodAudio'
 import { usePlayerSettings } from '@/lib/usePlayerSettings'
-import { skipAt, autoSkipTo, nextPromptAt, NEXT_COUNTDOWN_SECS } from '@/lib/skipSegments'
+import { skipAt, autoSkipTo, nextPromptAt, nextCountdownAt, NEXT_COUNTDOWN_SECS } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import {
-  makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
+  makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange, setEpisodeWatched,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
@@ -103,6 +103,7 @@ export default function VodPlayerPage() {
   const [status, setStatus]           = useState('loading') // loading | playing | paused | error
   const [errorMsg, setErrorMsg]       = useState('')
   const [playing, setPlaying]         = useState(false)
+  const [waiting, setWaiting]         = useState(false)   // stalled for data, though playing
   const [muted, setMuted]             = useState(false)
   const [volume, setVolume]           = useState(80)
   const [currentTime, setCurrentTime] = useState(0)
@@ -331,17 +332,26 @@ export default function VodPlayerPage() {
   useEffect(() => { setGearOpen(false) }, [progressKey])
 
   function doSkip(toNextEpisode) {
-    if (toNextEpisode && neighbours.next) { playEpisode(neighbours.next.season, neighbours.next.episode); return }
+    if (toNextEpisode && neighbours.next) {
+      // On from the credits or the last seconds: this one is watched, though short of the end.
+      setEpisodeWatched(progressKey, true)
+      playEpisode(neighbours.next.season, neighbours.next.episode)
+      return
+    }
     const v = videoRef.current
     if (!v || !skipNow) return
     const t = Math.min(skipNow.to, v.duration)
     try { v.currentTime = t } catch { /* seek rejected */ }
     setCurrentTime(t)
   }
-  // "Next episode" plays it by itself after a few seconds of playing, unless
-  // stopped — for this episode, so seeking back doesn't start it again.
+  // During the credits, "Next episode" plays it by itself after a few seconds
+  // of playing (not stalled, no panel open), unless stopped — for this
+  // episode, so seeking back doesn't start it again.
   const [countdownStopped, setCountdownStopped] = useState(null)   // the progressKey it was stopped for
-  const nextCountdown = useCountdown(skipNow?.kind === 'next' && countdownStopped !== progressKey, playing, NEXT_COUNTDOWN_SECS, () => doSkip(true))
+  const counting = skipNow?.kind === 'next' && nextCountdownAt(skipParts, currentTime) && countdownStopped !== progressKey
+  const countdownRuns = playing && !waiting && !episodesOpen && !subsOpen && !gearOpen
+  const nextLeft = useCountdown(counting, countdownRuns, NEXT_COUNTDOWN_SECS, () => doSkip(true))
+  const nextCountdown = nextLeft == null ? null : { left: nextLeft, total: NEXT_COUNTDOWN_SECS, running: countdownRuns }
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -479,7 +489,9 @@ export default function VodPlayerPage() {
     const onTime   = () => setCurrentTime(v.currentTime)
     const onDur    = () => { setDuration(v.duration || 0); mediaKeyRef.current = streamKeyRef.current; setMediaKey(streamKeyRef.current) }
     const onPlay   = () => { setPlaying(true); setStatus('playing') }
-    const onPause  = () => { setPlaying(false); setStatus('paused') }
+    const onPause  = () => { setPlaying(false); setStatus('paused'); setWaiting(false) }
+    const onWait   = () => setWaiting(true)
+    const onGoing  = () => setWaiting(false)
     const onEnded  = () => { setPlaying(false); setStatus('paused'); if (nextRef.current) setUpNext(nextRef.current) }
     // The <video>'s own error — to the server log (lib/playerReport.js).
     const onError  = () => {
@@ -494,6 +506,8 @@ export default function VodPlayerPage() {
     v.addEventListener('play',             onPlay)
     v.addEventListener('pause',            onPause)
     v.addEventListener('ended',            onEnded)
+    v.addEventListener('waiting',          onWait)
+    v.addEventListener('playing',          onGoing)
     return () => {
       v.removeEventListener('timeupdate',     onTime)
       v.removeEventListener('seeking',        onTime)
@@ -502,6 +516,8 @@ export default function VodPlayerPage() {
       v.removeEventListener('play',           onPlay)
       v.removeEventListener('pause',          onPause)
       v.removeEventListener('ended',          onEnded)
+      v.removeEventListener('waiting',        onWait)
+      v.removeEventListener('playing',        onGoing)
       v.removeEventListener('error',          onError)
     }
   }, [])
@@ -934,14 +950,7 @@ export default function VodPlayerPage() {
 
 // At the end of an episode: the next one plays in 10 s, unless cancelled.
 function UpNextCard({ next, onPlay, onCancel }) {
-  const [left, setLeft] = useState(10)
-  const onPlayRef = useRef(onPlay)
-  useEffect(() => { onPlayRef.current = onPlay })
-  useEffect(() => {
-    if (left <= 0) { onPlayRef.current(); return }
-    const t = setTimeout(() => setLeft((n) => n - 1), 1000)
-    return () => clearTimeout(t)
-  }, [left])
+  const left = useCountdown(true, true, 10, onPlay)
   const name = episodeRowLabel(next.episode)
   return (
     <div className="absolute right-4 bottom-24 z-30 w-72 rounded-[var(--radius-md)] bg-black/85 backdrop-blur p-3 text-white shadow-xl" onClick={(e) => e.stopPropagation()}>

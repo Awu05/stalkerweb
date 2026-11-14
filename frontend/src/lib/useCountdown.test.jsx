@@ -62,3 +62,16 @@ describe('useCountdown', () => {
     expect(left).toBe(5)
   })
 })
+
+describe('useCountdown, paused often', () => {
+  it('keeps the part of a second counted before each pause', () => {
+    render(true, true)
+    for (let i = 0; i < 8; i++) {
+      act(() => { vi.advanceTimersByTime(750) })
+      render(true, false)
+      render(true, true)
+    }
+    expect(left).toBe(0)                  // 8 × 0.75 s = 6 s of playing
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})
