@@ -9,6 +9,8 @@ const LABELS = { intro: 'Skip intro', recap: 'Skip recap', outro: 'Skip credits'
 const TAIL_SECS = 1
 // The "Next episode" prompt shows this close to the end, credits times or not.
 export const NEXT_PROMPT_SECS = 30
+// Once it shows, it plays the next episode by itself after this long.
+export const NEXT_COUNTDOWN_SECS = 5
 const SKIP_MODES = ['off', 'button', 'auto']
 /** The intro-skipping choices, as the gear and Settings name them. */
 export const SKIP_MODE_CHOICES = [

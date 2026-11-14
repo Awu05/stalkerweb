@@ -13,6 +13,31 @@ private const val TAIL_SECS = 1.0
 /** The "Next episode" button shows this close to the end, credits times or not. */
 const val NEXT_PROMPT_SECS = 30.0
 
+/** Once it shows, it plays the next episode by itself after this long. */
+const val NEXT_COUNTDOWN_SECS = 5
+
+/**
+ * "Next episode"'s countdown, from how long it has shown while playing (the
+ * web's useCountdown): seconds left, or null when not counting. Hidden, it
+ * starts from the top next time; stopped, never again for that episode.
+ */
+class NextCountdown(private val secs: Int = NEXT_COUNTDOWN_SECS) {
+    private var key: String? = null
+    private var stoppedFor: String? = null
+    private var playedMs = 0L
+    private var lastAt: Long? = null
+
+    fun update(key: String, showing: Boolean, playing: Boolean, nowMs: Long): Int? {
+        if (key != this.key) { this.key = key; playedMs = 0; lastAt = null }
+        if (!showing || key == stoppedFor) { playedMs = 0; lastAt = null; return null }
+        lastAt?.let { if (playing) playedMs += nowMs - it }
+        lastAt = if (playing) nowMs else null
+        return (secs - (playedMs / 1000).toInt()).coerceAtLeast(0)
+    }
+
+    fun stop(key: String) { stoppedFor = key }
+}
+
 /**
  * Intro skipping, as the gear and Settings offer it: no Skip buttons ("off"),
  * a Skip button ("button"), or intros and recaps skipped by themselves ("auto").

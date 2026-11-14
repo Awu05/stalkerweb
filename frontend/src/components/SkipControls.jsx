@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { ChevronsRight, SkipForward } from 'lucide-react'
+import { ChevronsRight, SkipForward, X } from 'lucide-react'
 import { showToast } from '@/lib/toast'
-import { matchLabel } from '@/lib/skipSegments'
+import { matchLabel, NEXT_COUNTDOWN_SECS } from '@/lib/skipSegments'
 import { setVodSkipMatch } from '../stalkerApi'
 
 // Skip intro / recap / credits (lib/skipSegments.js).
@@ -9,21 +9,45 @@ import { setVodSkipMatch } from '../stalkerApi'
 /**
  * The button over the video while an intro, recap or the credits play — or
  * "Next episode" (`skip.kind` 'next': near the end, or at the credits, with
- * another episode to come; lib/skipSegments.js nextPromptAt).
+ * another episode to come; lib/skipSegments.js nextPromptAt). `countdown`
+ * (seconds left, or null) fills the button until it plays the next episode by
+ * itself, with a ✕ (`onCancel`) to stop that.
  */
-export function SkipButton({ skip, onSkip, raised = false }) {
+export function SkipButton({ skip, onSkip, raised = false, countdown = null, onCancel }) {
   if (!skip) return null
   const next = skip.kind === 'next'
+  const counting = next && countdown != null
   const Icon = next ? SkipForward : ChevronsRight
   return (
-    <button
+    <div
       // Above the controls bar while it's shown, near the bottom when it isn't.
-      className={`absolute right-4 ${raised ? 'bottom-28' : 'bottom-8'} z-30 flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-black/75 hover:bg-white hover:text-black border border-white/40 backdrop-blur px-4 py-2 text-sm font-semibold text-white shadow-lg transition-all`}
-      onClick={(e) => { e.stopPropagation(); onSkip(next) }}
+      className={`absolute right-4 ${raised ? 'bottom-28' : 'bottom-8'} z-30 flex items-center gap-1.5`}
+      onClick={(e) => e.stopPropagation()}
     >
-      <Icon size={16} fill={next ? 'currentColor' : 'none'} />
-      {next ? 'Next episode' : skip.label}
-    </button>
+      <button
+        className="relative overflow-hidden flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-black/75 hover:bg-white hover:text-black border border-white/40 backdrop-blur px-4 py-2 text-sm font-semibold text-white shadow-lg transition-all"
+        onClick={() => onSkip(next)}
+      >
+        {counting && (
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 bg-white/25 transition-[width] duration-1000 ease-linear"
+            style={{ width: `${((NEXT_COUNTDOWN_SECS - countdown) / NEXT_COUNTDOWN_SECS) * 100}%` }}
+          />
+        )}
+        <Icon size={16} fill={next ? 'currentColor' : 'none'} className="relative" />
+        <span className="relative tabular-nums">{!next ? skip.label : counting ? `Next episode in ${countdown}` : 'Next episode'}</span>
+      </button>
+      {counting && (
+        <button
+          onClick={onCancel}
+          className="rounded-[var(--radius-sm)] bg-black/75 hover:bg-white/25 border border-white/40 backdrop-blur p-2 text-white shadow-lg transition-colors"
+          aria-label="Don't play the next episode automatically" title="Stay on this episode"
+        >
+          <X size={16} />
+        </button>
+      )}
+    </div>
   )
 }
 

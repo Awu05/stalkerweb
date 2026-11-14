@@ -21,12 +21,13 @@ import { StreamStats, StatsButton } from '@/components/StreamStats'
 import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
 import { SkipButton, SkipMatch } from '@/components/SkipControls'
+import { useCountdown } from '@/lib/useCountdown'
 import { SubtitleButton, SubtitleMenu } from '@/components/SubtitleMenu'
 import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSettingsMenu'
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
 import { useVodAudio } from '@/lib/useVodAudio'
 import { usePlayerSettings } from '@/lib/usePlayerSettings'
-import { skipAt, autoSkipTo, nextPromptAt } from '@/lib/skipSegments'
+import { skipAt, autoSkipTo, nextPromptAt, NEXT_COUNTDOWN_SECS } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
@@ -337,6 +338,10 @@ export default function VodPlayerPage() {
     try { v.currentTime = t } catch { /* seek rejected */ }
     setCurrentTime(t)
   }
+  // "Next episode" plays it by itself after a few seconds of playing, unless
+  // stopped — for this episode, so seeking back doesn't start it again.
+  const [countdownStopped, setCountdownStopped] = useState(null)   // the progressKey it was stopped for
+  const nextCountdown = useCountdown(skipNow?.kind === 'next' && countdownStopped !== progressKey, playing, NEXT_COUNTDOWN_SECS, () => doSkip(true))
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -752,7 +757,8 @@ export default function VodPlayerPage() {
           <PlayerSettingsMenu audio={audio} settings={player.settings} onChange={player.change} onClose={() => setGearOpen(false)} />
         )}
 
-        <SkipButton skip={skipNow} onSkip={doSkip} raised={showControls || status !== 'playing'} />
+        <SkipButton skip={skipNow} onSkip={doSkip} raised={showControls || status !== 'playing'}
+          countdown={nextCountdown} onCancel={() => setCountdownStopped(progressKey)} />
 
         {upNext && (
           <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />

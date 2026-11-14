@@ -42,6 +42,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import com.stalkerweb.android.data.repo.autoSkipTo
 import com.stalkerweb.android.data.repo.nextPromptAt
+import com.stalkerweb.android.data.repo.NextCountdown
 import com.stalkerweb.android.data.repo.skipAt
 import com.stalkerweb.android.data.repo.skipModeOf
 import com.stalkerweb.android.data.repo.AudioTrack
@@ -88,6 +89,7 @@ data class VodPlayerState(
     val episodes: Map<String, List<VodEpisode>> = emptyMap(),
     val upNext: EpisodeRef? = null,                   // after an episode ends
     val skip: SkipNow? = null,                        // an intro, recap or the credits playing, or "next" near the end: the Skip button
+    val nextCountdown: Int? = null,                   // seconds until "Next episode" plays it by itself (null: not counting)
     val subtitles: SubtitleState = SubtitleState(),
     val audio: List<AudioTrack> = emptyList(),        // the video's audio tracks (the gear's Audio)
     val settings: PlayerSettings? = null,             // null until read from the server
@@ -399,7 +401,7 @@ class VodPlayerViewModel(
         val p = _player.value
         val key = _state.value.params?.key
         if (p == null || key == null || casting || p.currentMediaItem?.mediaId != key || mediaKey != key) {
-            if (_state.value.skip != null) _state.value = _state.value.copy(skip = null)
+            if (_state.value.skip != null || _state.value.nextCountdown != null) _state.value = _state.value.copy(skip = null, nextCountdown = null)
             return
         }
         // The skip mode set in the gear counts at once.
@@ -422,7 +424,18 @@ class VodPlayerViewModel(
             nextPromptAt(parts, t, duration, _state.value.neighbours.next != null) -> SkipNow("next", "Next episode", duration)
             else -> skipAt(parts, t)
         }
-        if (now != _state.value.skip) _state.value = _state.value.copy(skip = now)
+        val left = countdown.update(key, now?.kind == "next", p.isPlaying, android.os.SystemClock.elapsedRealtime())
+        if (left == 0) { playNext(); return }
+        if (now != _state.value.skip || left != _state.value.nextCountdown) _state.value = _state.value.copy(skip = now, nextCountdown = left)
+    }
+
+    // "Next episode" plays it by itself after a few seconds of playing, unless stopped.
+    private val countdown = NextCountdown()
+
+    /** Stays on this episode: no countdown for it again (the Next episode button stays). */
+    fun stopCountdown() {
+        _state.value.params?.key?.let { countdown.stop(it) }
+        _state.value = _state.value.copy(nextCountdown = null)
     }
 
     // A skip's landing point, short of the very end (the end itself is the episode over).
