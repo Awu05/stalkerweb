@@ -43,10 +43,9 @@ import androidx.media3.common.Tracks
 import com.stalkerweb.android.data.repo.autoSkipTo
 import com.stalkerweb.android.data.repo.nextPromptAt
 import com.stalkerweb.android.data.repo.NextCountdown
-import com.stalkerweb.android.data.repo.CountdownNow
-import com.stalkerweb.android.data.repo.nextCountdownAt
+import com.stalkerweb.android.data.repo.inCredits
+import com.stalkerweb.android.data.repo.beforeCredits
 import com.stalkerweb.android.data.repo.nextEpisodeDelayOf
-import com.stalkerweb.android.data.repo.DEFAULT_NEXT_EPISODE_DELAY
 import com.stalkerweb.android.data.repo.skipAt
 import com.stalkerweb.android.data.repo.skipModeOf
 import com.stalkerweb.android.data.repo.AudioTrack
@@ -79,7 +78,11 @@ data class SubtitleState(
 )
 
 /** The viewer's player settings (the gear), kept on the server: intro skipping ("off" | "button" | "auto") and the preferred audio language ("" or two letters). */
-data class PlayerSettings(val skipMode: String = "button", val audioLanguage: String = "", val nextEpisodeDelay: Int = DEFAULT_NEXT_EPISODE_DELAY)
+/** nextEpisodeDelay: seconds, 0 at once, -1 never; null when it couldn't be read (then nothing plays by itself). */
+data class PlayerSettings(val skipMode: String = "button", val audioLanguage: String = "", val nextEpisodeDelay: Int? = null)
+
+/** "Next episode"'s countdown as shown: whole seconds left of [total], and whether it's running (the button fills). */
+data class CountdownUi(val left: Int, val total: Int, val running: Boolean)
 
 // The online file's track, told apart from the video's own by its label.
 private const val ONLINE_LABEL = "Online subtitles"
@@ -93,7 +96,8 @@ data class VodPlayerState(
     val episodes: Map<String, List<VodEpisode>> = emptyMap(),
     val upNext: EpisodeRef? = null,                   // after an episode ends
     val skip: SkipNow? = null,                        // an intro, recap or the credits playing, or "next" near the end: the Skip button
-    val nextCountdown: CountdownNow? = null,          // until "Next episode" plays it by itself (null: not counting)
+    val nextCountdown: CountdownUi? = null,           // until "Next episode" plays it by itself (null: not counting)
+    val countdownStopped: Boolean = false,            // "stay on this episode": the Up next card waits too
     val subtitles: SubtitleState = SubtitleState(),
     val audio: List<AudioTrack> = emptyList(),        // the video's audio tracks (the gear's Audio)
     val settings: PlayerSettings? = null,             // null until read from the server
@@ -245,7 +249,7 @@ class VodPlayerViewModel(
         // The viewer's gear settings, read afresh (changed on another device since).
         viewModelScope.launch {
             val me = viewers.refresh() ?: viewers.current.value
-            _state.value = _state.value.copy(settings = PlayerSettings(skipModeOf(me?.skipMode, me?.autoSkip == true), me?.audioLanguage.orEmpty(), nextEpisodeDelayOf(me?.nextEpisodeDelay)))
+            _state.value = _state.value.copy(settings = PlayerSettings(skipModeOf(me?.skipMode, me?.autoSkip == true), me?.audioLanguage.orEmpty(), me?.let { nextEpisodeDelayOf(it.nextEpisodeDelay) }))
             applyPreferredAudio()
         }
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
@@ -317,7 +321,7 @@ class VodPlayerViewModel(
         val same = _state.value.params?.key == params.key
         _state.value = _state.value.copy(subtitles = (if (same) _state.value.subtitles else SubtitleState())
             .copy(embedded = emptyList(), choice = SubtitleChoice(), delay = prefs.subtitleDelay))
-        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null, skip = null, nextCountdown = null,
+        _state.value = _state.value.copy(params = params, loading = true, error = null, resumedFrom = 0.0, upNext = null, skip = null, nextCountdown = null, countdownStopped = false,
             audio = if (same) _state.value.audio else emptyList())
         // A track picked by hand was for the last title: this one starts in the preferred language.
         if (!same) _player.value?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build() }
@@ -429,22 +433,26 @@ class VodPlayerViewModel(
             nextPromptAt(parts, t, duration, _state.value.neighbours.next != null) -> SkipNow("next", "Next episode", duration)
             else -> skipAt(parts, t)
         }
-        // After the viewer's delay (0 at once, -1 never). Not with the error
-        // screen up (no button shows), and held while a panel is open.
+        // After the viewer's delay (0 at once, -1 never), for an episode seen
+        // playing before the credits. Not with the error screen up (no button
+        // shows), and held while a panel is open.
+        if (p.isPlaying && beforeCredits(parts, t)) watchedIntoCredits = key
         val delay = nextDelay
-        val counting = delay >= 0 && now?.kind == "next" && nextCountdownAt(parts, t) && _state.value.error == null
+        val counting = delay >= 0 && now?.kind == "next" && inCredits(parts, t) && watchedIntoCredits == key && _state.value.error == null
         val running = p.isPlaying && !panelOpen
         val c = countdown.update(key, counting, running, android.os.SystemClock.elapsedRealtime(), delay)
-        if (c?.left == 0 && running) { moveToNextEpisode(); return }
-        val shown = c.takeIf { delay > 0 }   // at once: nothing to show, it just goes
+        if (c?.left == 0 && running) { playNext(); return }
+        // Only when the seconds or running change, not every check; at once, nothing to show.
+        val shown = c?.takeIf { delay > 0 }?.let { CountdownUi(it.left, delay, running) }
         if (now != _state.value.skip || shown != _state.value.nextCountdown) _state.value = _state.value.copy(skip = now, nextCountdown = shown)
     }
 
     // During the credits, "Next episode" plays it by itself after a few seconds of playing, unless stopped.
     private val countdown = NextCountdown()
     private var panelOpen = false
-    /** The viewer's next-episode delay (seconds, 0 at once, -1 never). */
-    val nextDelay: Int get() = _state.value.settings?.nextEpisodeDelay ?: DEFAULT_NEXT_EPISODE_DELAY
+    private var watchedIntoCredits: String? = null   // the episode seen playing before its credits
+    /** The viewer's next-episode delay (seconds, 0 at once, -1 never — and never while unread). */
+    private val nextDelay: Int get() = _state.value.settings?.nextEpisodeDelay ?: -1
 
     /** The episodes, subtitles or settings panel is open: the countdown waits. */
     fun setPanelOpen(open: Boolean) { panelOpen = open }
@@ -452,15 +460,7 @@ class VodPlayerViewModel(
     /** Stays on this episode: no countdown for it again (the Next episode button stays). */
     fun stopCountdown() {
         countdown.stop()
-        _state.value = _state.value.copy(nextCountdown = null)
-    }
-
-    // On from the credits or the last seconds: this one is watched, though short of the end.
-    private fun moveToNextEpisode() {
-        val params = _state.value.params ?: return
-        if (_state.value.neighbours.next == null) return
-        playNext()
-        if (!params.isRecording) watch.setEpisodeWatched(params.key, true)
+        _state.value = _state.value.copy(nextCountdown = null, countdownStopped = true)
     }
 
     // A skip's landing point, short of the very end (the end itself is the episode over).
@@ -471,7 +471,7 @@ class VodPlayerViewModel(
 
     /** The Skip button: past the part playing, or — near the end or at the credits, with one to come — the next episode. */
     fun skip(toNextEpisode: Boolean) {
-        if (toNextEpisode && _state.value.neighbours.next != null) { moveToNextEpisode(); return }
+        if (toNextEpisode && _state.value.neighbours.next != null) { playNext(); return }
         val p = _player.value ?: return
         val s = _state.value.skip ?: return
         p.seekTo(seekable(p, s.to))
@@ -688,12 +688,12 @@ class VodPlayerViewModel(
     fun dismissResumed() { _state.value = _state.value.copy(resumedFrom = 0.0) }
 
     /** Saves the position — only for the media actually playing, never the next episode's key. */
-    private fun persist() {
+    private fun persist(finished: Boolean = false) {
         val p = _player.value ?: return
         val params = _state.value.params ?: return
         if (mediaKey == null || mediaKey != params.key || p.currentMediaItem?.mediaId != params.key) return
         val duration = p.duration.takeIf { it > 0 }?.div(1000.0) ?: return
-        save(params, p.currentPosition / 1000.0, duration)
+        save(params, if (finished) duration else p.currentPosition / 1000.0, duration)
     }
 
     /** Saves where the TV is in this title (it plays the one on screen). */
@@ -741,9 +741,12 @@ class VodPlayerViewModel(
     }
 
     /** Another episode of the same show, in place. */
-    fun playEpisode(season: VodSeason, episode: VodEpisode) {
+    fun playEpisode(season: VodSeason, episode: VodEpisode) = playEpisode(season, episode, finished = false)
+
+    /** [finished]: left from its credits or last seconds — saved at its end, so it counts as watched. */
+    private fun playEpisode(season: VodSeason, episode: VodEpisode, finished: Boolean) {
         val params = _state.value.params ?: return
-        if (casting) persistFromTv() else persist()
+        if (casting) persistFromTv() else persist(finished)
         mediaKey = null
         load(params.copy(
             series = episode.seriesNumber.ifBlank { "0" }, seasonId = season.id, episodeId = episode.episodeId,
@@ -756,7 +759,15 @@ class VodPlayerViewModel(
     /** The stream again, after an error. */
     fun retry() { _state.value.params?.let { mediaKey = null; resumedKey = null; load(it) } }
 
-    fun playNext() { _state.value.neighbours.next?.let { playEpisode(it.season, it.episode) } }
+    /**
+     * On to the next episode — the Next episode button, its countdown, the top
+     * bar, the remote's NEXT / CH+, the Up next card. From the Next episode
+     * prompt (credits, last seconds) this one is saved as finished, in one save.
+     */
+    fun playNext() {
+        val finished = _state.value.skip?.kind == "next"
+        _state.value.neighbours.next?.let { playEpisode(it.season, it.episode, finished) }
+    }
     fun playPrevious() { _state.value.neighbours.prev?.let { playEpisode(it.season, it.episode) } }
     fun cancelUpNext() { _state.value = _state.value.copy(upNext = null) }
 

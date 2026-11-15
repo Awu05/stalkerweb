@@ -260,7 +260,7 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                     enabled = me != null && !state.busy, onPick = viewModel::setSkipMode,
                 )
                 Text("Play the next episode", color = SwColors.Text, modifier = Modifier.padding(top = 6.dp))
-                Text("When an episode's credits start (where their times are known), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.",
+                Text("When an episode's credits start (where their times are known, and intro skipping isn't off), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.",
                     style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
                 com.stalkerweb.android.ui.components.NextEpisodeDelayPills(
                     selected = me?.let { com.stalkerweb.android.data.repo.nextEpisodeDelayOf(it.nextEpisodeDelay) },

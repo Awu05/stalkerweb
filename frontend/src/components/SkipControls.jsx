@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronsRight, SkipForward, X } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { matchLabel } from '@/lib/skipSegments'
+import { useCountdown } from '@/lib/useCountdown'
 import { setVodSkipMatch } from '../stalkerApi'
 
 // Skip intro / recap / credits (lib/skipSegments.js).
@@ -10,14 +11,16 @@ import { setVodSkipMatch } from '../stalkerApi'
  * The button over the video while an intro, recap or the credits play — or
  * "Next episode" (`skip.kind` 'next': near the end, or at the credits, with
  * another episode to come; lib/skipSegments.js nextPromptAt). `countdown`
- * ({ left, total, running } seconds, or null) fills the button until it plays
- * the next episode by itself, with a ✕ (`onCancel`) to stop that — on its
- * left, so the button doesn't move under a second click when it goes.
+ * ({ secs, running }, or null) counts down here — so its ticks redraw only
+ * the button — filling it until `onDone` plays the next episode (at once with
+ * 0 s), with a ✕ (`onCancel`) to stop it — on its left, so the button doesn't
+ * move under a second click when it goes.
  */
-export function SkipButton({ skip, onSkip, raised = false, countdown = null, onCancel }) {
+export function SkipButton({ skip, onSkip, raised = false, countdown = null, onCancel, onDone }) {
+  const next = skip?.kind === 'next'
+  const left = useCountdown(next && !!countdown, !!countdown?.running, countdown?.secs ?? 0, () => onDone?.())
   if (!skip) return null
-  const next = skip.kind === 'next'
-  const counting = next && !!countdown
+  const counting = left != null && countdown.secs > 0   // at once: nothing to show, it just goes
   const Icon = next ? SkipForward : ChevronsRight
   return (
     <div
@@ -43,11 +46,11 @@ export function SkipButton({ skip, onSkip, raised = false, countdown = null, onC
           <span
             aria-hidden
             className="absolute inset-y-0 left-0 bg-white/25"
-            style={{ animation: `sw-countdown-fill ${countdown.total}s linear forwards`, animationPlayState: countdown.running ? 'running' : 'paused' }}
+            style={{ animation: `sw-countdown-fill ${countdown.secs}s linear forwards`, animationPlayState: countdown.running ? 'running' : 'paused' }}
           />
         )}
         <Icon size={16} fill={next ? 'currentColor' : 'none'} className="relative" />
-        <span className="relative tabular-nums">{!next ? skip.label : counting ? `Next episode in ${countdown.left}` : 'Next episode'}</span>
+        <span className="relative tabular-nums">{!next ? skip.label : counting ? `Next episode in ${left}` : 'Next episode'}</span>
       </button>
     </div>
   )

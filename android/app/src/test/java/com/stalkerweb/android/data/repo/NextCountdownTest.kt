@@ -72,15 +72,25 @@ class NextCountdownTest {
     }
 }
 
-class NextCountdownAtTest {
+class InCreditsTest {
     private val parts = com.stalkerweb.android.data.api.SkipResponse(
         intro = null, recap = null, outro = com.stalkerweb.android.data.api.SkipPart(2800.0, 2900.0),
     )
     @Test fun duringTheCreditsOnly() {
-        org.junit.Assert.assertTrue(nextCountdownAt(parts, 2850.0))
-        org.junit.Assert.assertFalse(nextCountdownAt(parts, 2790.0))
-        org.junit.Assert.assertFalse(nextCountdownAt(null, 2990.0))
-        org.junit.Assert.assertFalse(nextCountdownAt(parts.copy(skipMode = "off"), 2850.0))
+        org.junit.Assert.assertTrue(inCredits(parts, 2850.0))
+        org.junit.Assert.assertFalse(inCredits(parts, 2790.0))
+        org.junit.Assert.assertFalse(inCredits(null, 2990.0))
+        org.junit.Assert.assertFalse(inCredits(parts.copy(skipMode = "off"), 2850.0))
+    }
+
+    @Test fun beforeTheCreditsPastTheFirstSeconds() {
+        org.junit.Assert.assertTrue(beforeCredits(parts, 600.0))
+        org.junit.Assert.assertTrue(beforeCredits(parts, 2799.0))
+        // In them, in the first seconds a resume passes through, or with no credits times: no.
+        org.junit.Assert.assertFalse(beforeCredits(parts, 2850.0))
+        org.junit.Assert.assertFalse(beforeCredits(parts, 0.0))
+        org.junit.Assert.assertFalse(beforeCredits(parts, 2.0))
+        org.junit.Assert.assertFalse(beforeCredits(com.stalkerweb.android.data.api.SkipResponse(), 600.0))
     }
 }
 

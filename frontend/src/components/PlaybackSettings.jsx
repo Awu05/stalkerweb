@@ -26,7 +26,7 @@ export default function PlaybackSettings() {
       <div>
         <p className="text-sm font-medium text-[var(--color-text)]">Play the next episode</p>
         <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-2">
-          When an episode&apos;s credits start (where their times are known), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.
+          When an episode&apos;s credits start (where their times are known, and intro skipping isn&apos;t off), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.
         </p>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Play the next episode">
           {NEXT_EPISODE_DELAY_CHOICES.map((c) => (

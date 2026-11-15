@@ -87,7 +87,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.stalkerweb.android.data.repo.PlayerParams
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.drawBehind
 import com.stalkerweb.android.cast.CastManager
 import com.stalkerweb.android.cast.RemoteState
@@ -390,7 +391,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                     // The remote's OK skips (above), and Back stays; the button says so.
                     hint = isTV && !controlsVisible && !anyPanel,
                     backHint = isTV && countdown != null && !anyPanel,
-                    filled = countdown?.filled,
+                    countdown = countdown,
                     onClick = { viewModel.skip(next) },
                     // On a TV, OK skips: the button never takes the focus (gone, it would leave it nowhere).
                     modifier = Modifier.focusProperties { canFocus = !isTV },
@@ -401,7 +402,8 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         state.upNext?.let { next ->
             UpNextCard(
                 title = com.stalkerweb.android.data.repo.episodeRowLabel(next.episode),
-                delaySecs = viewModel.nextDelay,
+                // Stopped in the credits ("stay on this episode"): it waits for Play now.
+                delaySecs = if (state.countdownStopped) -1 else state.settings?.nextEpisodeDelay ?: -1,
                 onPlay = viewModel::playNext,
                 onCancel = viewModel::cancelUpNext,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
@@ -476,28 +478,36 @@ private fun EpisodesPanel(
  */
 @Composable
 private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier,
-                       backHint: Boolean = false, filled: Float? = null) {
-    // How far the countdown has gone (0–1): it fills the button from the left,
-    // smoothly between the player's checks (twice a second).
-    val fill by androidx.compose.animation.core.animateFloatAsState(filled ?: 0f,
-        androidx.compose.animation.core.tween(500, easing = androidx.compose.animation.core.LinearEasing), label = "countdown")
-    val shape = RoundedCornerShape(50)
-    // No larger touch area around it: the background and fill below are drawn
-    // on this modifier, and would show outside the outline.
-    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified) {
+                       backHint: Boolean = false, countdown: CountdownUi? = null) {
+    // How far the countdown has gone (0–1), filling the button from the left:
+    // each second it runs to that second's end, at an even pace, so it's full at 0.
+    val fill = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(countdown) {
+        if (countdown == null) { fill.snapTo(0f); return@LaunchedEffect }
+        if (!countdown.running) return@LaunchedEffect
+        val target = ((countdown.total - countdown.left + 1f) / countdown.total).coerceAtMost(1f)
+        val ms = ((target - fill.value) * countdown.total * 1000).toInt().coerceAtLeast(0)
+        fill.animateTo(target, androidx.compose.animation.core.tween(ms, easing = androidx.compose.animation.core.LinearEasing))
+    }
     OutlinedButton(
         onClick = onClick,
-        // Its own background, so the fill draws over it.
-        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Transparent, contentColor = Color.White),
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
-        modifier = modifier.tvFocus(shape).clip(shape).background(Color.Black.copy(alpha = 0.7f))
-            .drawBehind { if (filled != null) drawRect(Color.White.copy(alpha = 0.25f), size = size.copy(width = size.width * fill)) },
+        // The fill is drawn by the content, inside the button's own shape.
+        contentPadding = PaddingValues(0.dp),
+        modifier = modifier.tvFocus(RoundedCornerShape(50)),
     ) {
-        Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
-        Text(" $label")
-        if (hint) Text("  · OK", color = SwColors.Muted)
-        if (backHint) Text("  · Back to stay", color = SwColors.Muted)
-    }
+        Row(
+            Modifier.heightIn(min = androidx.compose.material3.ButtonDefaults.MinHeight)
+                .drawBehind { if (countdown != null) drawRect(Color.White.copy(alpha = 0.25f), size = size.copy(width = size.width * fill.value)) }
+                .padding(androidx.compose.material3.ButtonDefaults.ContentPadding),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
+            Text(" $label")
+            if (hint) Text("  · OK", color = SwColors.Muted)
+            if (backHint) Text("  · Back to stay", color = SwColors.Muted)
+        }
     }
 }
 
@@ -587,11 +597,13 @@ internal fun SubtitleNote(text: String, color: Color = SwColors.Muted) =
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */
 @Composable
 private fun UpNextCard(title: String, delaySecs: Int, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier) {
-    // After the viewer's delay (0 at once); with -1 it waits for Play now.
+    // After the viewer's delay (0 at once); with -1 it waits for Play now. A
+    // delay changed meanwhile (the gear) starts it again with the new one.
     var left by remember { mutableIntStateOf(delaySecs) }
     val playFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        runCatching { playFocus.requestFocus() }
+    LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+    LaunchedEffect(delaySecs) {
+        left = delaySecs
         if (delaySecs < 0) return@LaunchedEffect
         while (left > 0) { delay(1_000); left -= 1 }
         onPlay()

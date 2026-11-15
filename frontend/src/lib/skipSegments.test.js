@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, nextCountdownAt, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
+import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, inCredits, beforeCredits, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
 
 const parts = { intro: { start: 60, end: 90 }, recap: { start: 0, end: 40 }, outro: { start: 2800, end: 2900 } }
 
@@ -86,15 +86,28 @@ describe('matchLabel', () => {
   })
 })
 
-describe('nextCountdownAt', () => {
-  it('counts down during the credits only', () => {
-    expect(nextCountdownAt(parts, 2850)).toBe(true)
-    expect(nextCountdownAt(parts, 2790)).toBe(false)
+describe('inCredits', () => {
+  it('during the credits only', () => {
+    expect(inCredits(parts, 2850)).toBe(true)
+    expect(inCredits(parts, 2790)).toBe(false)
   })
-  it('not in the last seconds of a title with no credits times, nor with skipping off', () => {
-    expect(nextCountdownAt({ intro: null, recap: null, outro: null }, 2990)).toBe(false)
-    expect(nextCountdownAt(null, 2990)).toBe(false)
-    expect(nextCountdownAt({ ...parts, skipMode: 'off' }, 2850)).toBe(false)
+  it('not without credits times, nor with skipping off', () => {
+    expect(inCredits({ intro: null, recap: null, outro: null }, 2990)).toBe(false)
+    expect(inCredits(null, 2990)).toBe(false)
+    expect(inCredits({ ...parts, skipMode: 'off' }, 2850)).toBe(false)
+  })
+})
+
+describe('beforeCredits', () => {
+  it('past the first seconds and before the credits', () => {
+    expect(beforeCredits(parts, 600)).toBe(true)
+    expect(beforeCredits(parts, 2799)).toBe(true)
+  })
+  it('not in the credits, not in the first seconds a resume passes through, not without credits times', () => {
+    expect(beforeCredits(parts, 2850)).toBe(false)
+    expect(beforeCredits(parts, 0)).toBe(false)
+    expect(beforeCredits(parts, 2)).toBe(false)
+    expect(beforeCredits({ intro: null, recap: null, outro: null }, 600)).toBe(false)
   })
 })
 

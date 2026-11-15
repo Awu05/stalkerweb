@@ -99,12 +99,25 @@ fun autoSkipTo(parts: SkipResponse?, t: Double, done: Set<String>): SkipNow? =
 fun nextPromptAt(parts: SkipResponse?, t: Double, duration: Double, hasNext: Boolean): Boolean {
     if (!hasNext || t.isNaN()) return false
     if (duration > 0 && duration - t <= NEXT_PROMPT_SECS) return true
-    return skipAt(parts, t)?.kind == "outro"
+    return inCredits(parts, t)
 }
 
 /**
- * Whether "Next episode" counts down to playing it by itself at [t]: during
- * the credits only. Without credits times (or with skipping off) the episode
+ * Whether [t] is in the credits (their times known, skipping not off): where
+ * "Next episode" counts down to playing it by itself. Elsewhere the episode
  * plays to its end, and the Up next card follows.
  */
-fun nextCountdownAt(parts: SkipResponse?, t: Double): Boolean = skipAt(parts, t)?.kind == "outro"
+fun inCredits(parts: SkipResponse?, t: Double): Boolean = skipAt(parts, t)?.kind == "outro"
+
+// A resume passes through the first seconds on its way to where it lands.
+private const val ARM_SECS = 5.0
+
+/**
+ * Whether [t] is before the credits, past the first seconds: an episode seen
+ * playing there is one watched into its credits, so their countdown is for it
+ * — not for one opened (or resumed) in them, for a scene after them.
+ */
+fun beforeCredits(parts: SkipResponse?, t: Double): Boolean {
+    val o = parts?.outro ?: return false
+    return !t.isNaN() && t >= ARM_SECS && t < o.start
+}

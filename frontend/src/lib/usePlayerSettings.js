@@ -6,13 +6,14 @@ import { getMyViewer, saveMyFilters } from '../stalkerApi'
 import { nextEpisodeDelayOf } from './skipSegments'
 
 const save = serialSaves(saveMyFilters)
-const DEFAULTS = { skipMode: 'button', audioLanguage: '', nextEpisodeDelay: nextEpisodeDelayOf(null) }
+const DEFAULTS = { skipMode: 'button', audioLanguage: '', nextEpisodeDelay: null }
 
 /**
  * This viewer's player settings, kept on the server (so they follow them to
  * every device): intro skipping ('off' | 'button' | 'auto') and the preferred
  * audio language ('' for the stream's own, or two letters), and when the next
- * episode plays by itself (nextEpisodeDelay: seconds, 0 at once, -1 never).
+ * episode plays by itself (nextEpisodeDelay: seconds, 0 at once, -1 never;
+ * null when it couldn't be read — then nothing plays by itself).
  * Null until read. `change({ skipMode?, audioLanguage?, nextEpisodeDelay? })`
  * shows the change at once and puts it back if the save fails.
  */

@@ -81,16 +81,28 @@ export function autoSkipTo(parts, t, done) {
 export function nextPromptAt(parts, t, duration, hasNext) {
   if (!hasNext || !Number.isFinite(t)) return false
   if (Number.isFinite(duration) && duration > 0 && duration - t <= NEXT_PROMPT_SECS) return true
-  return skipAt(parts, t)?.kind === 'outro'
+  return inCredits(parts, t)
 }
 
 /**
- * Whether "Next episode" counts down to playing it by itself at `t`: during
- * the credits only. Without credits times (or with skipping off) the episode
+ * Whether `t` is in the credits (their times known, skipping not off): where
+ * "Next episode" counts down to playing it by itself. Elsewhere the episode
  * plays to its end, and the Up next card follows.
  */
-export function nextCountdownAt(parts, t) {
+export function inCredits(parts, t) {
   return skipAt(parts, t)?.kind === 'outro'
+}
+
+// A resume passes through the first seconds on its way to where it lands.
+const ARM_SECS = 5
+/**
+ * Whether `t` is before the credits, past the first seconds: an episode seen
+ * playing there is one watched into its credits, so their countdown is for it
+ * — not for one opened (or resumed) in them, for a scene after them.
+ */
+export function beforeCredits(parts, t) {
+  const o = parts?.outro
+  return !!o && Number.isFinite(t) && t >= ARM_SECS && t < o.start
 }
 
 /** "Breaking Bad (2008)" — what the show was matched to, for the side panel. */

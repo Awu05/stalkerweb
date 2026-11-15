@@ -85,3 +85,16 @@ describe('useCountdown, 0 s', () => {
     expect(onDone).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('useCountdown, paused between steps', () => {
+  it('keeps the time since the last step when it pauses', () => {
+    render(true, true)
+    for (let i = 0; i < 25; i++) {     // 25 × 200 ms of playing, each cut short of a 250 ms step
+      act(() => { vi.advanceTimersByTime(200) })
+      render(true, false)
+      render(true, true)
+    }
+    expect(left).toBe(0)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})

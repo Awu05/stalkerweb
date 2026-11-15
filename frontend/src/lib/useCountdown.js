@@ -23,7 +23,11 @@ export function useCountdown(active, running, secs, onDone) {
       last = now
       setCounted((c) => c + step)
     }, STEP_MS)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      const step = Date.now() - last   // since the last step: kept, not lost to the pause
+      setCounted((c) => c + step)
+    }
   }, [active, running])
   const left = Math.max(0, secs - Math.floor(counted / 1000))
   useEffect(() => {
