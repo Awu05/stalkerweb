@@ -160,6 +160,8 @@ body::before {
   animation: shimmer 1.6s infinite;
 }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
+/* The Next episode button's countdown (components/SkipControls.jsx). */
+@keyframes sw-countdown-fill { from { width: 0; } to { width: 100%; } }
 
 /* ── Route / mount fade-in ── */
 /* `backwards`, not `both`: a transform animation still in effect after it ends

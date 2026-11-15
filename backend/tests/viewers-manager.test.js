@@ -305,6 +305,28 @@ describe('player settings per viewer', () => {
     expect(viewers.setFilters(a.id, { autoSkip: true, skipMode: 'off' }).skipMode).toBe('off')
   })
 
+  it('plays the next episode 5 s into the credits, unless set otherwise', () => {
+    const a = viewers.create({ name: 'Andy' })
+    expect(a.nextEpisodeDelay).toBe(5)
+    for (const secs of [0, 3, 10, 15, -1]) expect(viewers.setFilters(a.id, { nextEpisodeDelay: secs }).nextEpisodeDelay).toBe(secs)
+    for (const bad of [4, '5', 60, null, -2, 2.5]) {
+      expect(statusOf(() => viewers.setFilters(a.id, { nextEpisodeDelay: bad }))).toBe(400)
+    }
+    // Left alone by a save that doesn't mention it (an older app).
+    expect(viewers.setFilters(a.id, { skipMode: 'off' }).nextEpisodeDelay).toBe(-1)
+  })
+
+  it('reads a viewer saved before the setting, or a hand-edited odd value, as 5 s', () => {
+    const file = path.join(dir, 'viewers.json')
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+    delete data.viewers[0].nextEpisodeDelay
+    data.viewers.push({ id: 'view_odd', name: 'Odd', color: COLORS[1], nextEpisodeDelay: 7 })
+    fs.writeFileSync(file, JSON.stringify(data))
+    const fresh = new ViewersManager(dir)
+    expect(fresh.get(data.viewers[0].id).nextEpisodeDelay).toBe(5)
+    expect(fresh.get('view_odd').nextEpisodeDelay).toBe(5)
+  })
+
   it('saves a preferred audio language as a two-letter code, or none', () => {
     const a = viewers.create({ name: 'Andy' })
     expect(viewers.setFilters(a.id, { audioLanguage: 'ES' }).audioLanguage).toBe('es')

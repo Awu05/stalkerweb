@@ -36,11 +36,13 @@ data class ViewerDetails(
     val autoSkip: Boolean = false,
     /** The preferred audio language: two letters, or "" for the stream's own. */
     val audioLanguage: String = "",
+    /** When the next episode plays by itself: seconds, 0 at once, -1 never; null from an older server. */
+    val nextEpisodeDelay: Int? = null,
 )
 
 /** The player's settings gear (and Settings): only what's set is sent. */
 @JsonClass(generateAdapter = false)
-data class PlayerSettingsRequest(val skipMode: String? = null, val audioLanguage: String? = null)
+data class PlayerSettingsRequest(val skipMode: String? = null, val audioLanguage: String? = null, val nextEpisodeDelay: Int? = null)
 
 @JsonClass(generateAdapter = false)
 data class CreateViewerRequest(

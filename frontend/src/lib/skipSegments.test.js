@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, NEXT_PROMPT_SECS } from './skipSegments'
+import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, inCredits, beforeCredits, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
 
 const parts = { intro: { start: 60, end: 90 }, recap: { start: 0, end: 40 }, outro: { start: 2800, end: 2900 } }
 
@@ -83,5 +83,41 @@ describe('matchLabel', () => {
     expect(matchLabel({ title: 'Breaking Bad', year: '2008' })).toBe('Breaking Bad (2008)')
     expect(matchLabel({ title: 'Shogun', year: '' })).toBe('Shogun')
     expect(matchLabel(null)).toBe('')
+  })
+})
+
+describe('inCredits', () => {
+  it('during the credits only', () => {
+    expect(inCredits(parts, 2850)).toBe(true)
+    expect(inCredits(parts, 2790)).toBe(false)
+  })
+  it('not without credits times, nor with skipping off', () => {
+    expect(inCredits({ intro: null, recap: null, outro: null }, 2990)).toBe(false)
+    expect(inCredits(null, 2990)).toBe(false)
+    expect(inCredits({ ...parts, skipMode: 'off' }, 2850)).toBe(false)
+  })
+})
+
+describe('beforeCredits', () => {
+  it('past the first seconds and before the credits', () => {
+    expect(beforeCredits(parts, 600)).toBe(true)
+    expect(beforeCredits(parts, 2799)).toBe(true)
+  })
+  it('not in the credits, not in the first seconds a resume passes through, not without credits times', () => {
+    expect(beforeCredits(parts, 2850)).toBe(false)
+    expect(beforeCredits(parts, 0)).toBe(false)
+    expect(beforeCredits(parts, 2)).toBe(false)
+    expect(beforeCredits({ intro: null, recap: null, outro: null }, 600)).toBe(false)
+  })
+})
+
+describe('nextEpisodeDelayOf', () => {
+  it("is the viewer's choice, or 5 s from an older server or an odd value", () => {
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 0 })).toBe(0)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: -1 })).toBe(-1)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 15 })).toBe(15)
+    expect(nextEpisodeDelayOf({})).toBe(5)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 7 })).toBe(5)
+    expect(nextEpisodeDelayOf(null)).toBe(5)
   })
 })

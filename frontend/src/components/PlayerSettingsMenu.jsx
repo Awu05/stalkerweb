@@ -2,10 +2,11 @@ import { useEffect, useRef } from 'react'
 import { Check, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { audioTrackLabels, audioLanguageOptions } from '@/lib/audioTracks'
-import { SKIP_MODE_CHOICES } from '@/lib/skipSegments'
+import { SKIP_MODE_CHOICES, NEXT_EPISODE_DELAY_CHOICES } from '@/lib/skipSegments'
 
 // The movie & series player's settings gear: this title's audio track, the
-// viewer's preferred audio language, and intro skipping (lib/usePlayerSettings.js).
+// viewer's preferred audio language, intro skipping, and when the next episode
+// plays by itself (lib/usePlayerSettings.js).
 
 /** The controls bar's gear button. */
 export function PlayerSettingsButton({ open, onToggle }) {
@@ -23,7 +24,7 @@ export function PlayerSettingsButton({ open, onToggle }) {
 
 /**
  * The menu. `audio` is lib/useVodAudio.js's { tracks, active, switchable, pick };
- * `settings` { skipMode, audioLanguage } (null while loading), `onChange(patch)` saves.
+ * `settings` { skipMode, audioLanguage, nextEpisodeDelay } (null while loading), `onChange(patch)` saves.
  */
 export function PlayerSettingsMenu({ audio, settings, onChange, onClose }) {
   const ref = useRef(null)
@@ -75,6 +76,9 @@ export function PlayerSettingsMenu({ audio, settings, onChange, onClose }) {
 
       {heading('Intro skipping')}
       {SKIP_MODE_CHOICES.map((c) => row(skipMode === c.id, c.label, () => onChange({ skipMode: c.id }), `s${c.id}`, !settings))}
+
+      {heading('Play the next episode')}
+      {NEXT_EPISODE_DELAY_CHOICES.map((c) => row(settings?.nextEpisodeDelay === c.secs, c.label, () => onChange({ nextEpisodeDelay: c.secs }), `n${c.secs}`, !settings))}
     </div>
   )
 }

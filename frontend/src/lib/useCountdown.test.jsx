@@ -1,0 +1,100 @@
+// @vitest-environment jsdom
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { useCountdown } from './useCountdown'
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
+
+let root, host, left, onDone
+function Probe({ active, running, secs = 5 }) {
+  left = useCountdown(active, running, secs, onDone)
+  return null
+}
+const render = (active, running, secs) => act(() => root.render(<Probe active={active} running={running} secs={secs} />))
+// A second at a time: each tick schedules the next once React has rendered it.
+const tick = (secs) => { for (let i = 0; i < secs; i++) act(() => { vi.advanceTimersByTime(1000) }) }
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  onDone = vi.fn()
+  host = document.createElement('div')
+  root = createRoot(host)
+})
+afterEach(() => { act(() => root.unmount()); vi.useRealTimers() })
+
+describe('useCountdown', () => {
+  it('counts down from 5 and fires once at 0', () => {
+    render(true, true)
+    expect(left).toBe(5)
+    tick(4)
+    expect(left).toBe(1)
+    expect(onDone).not.toHaveBeenCalled()
+    tick(1)
+    expect(left).toBe(0)
+    expect(onDone).toHaveBeenCalledTimes(1)
+    tick(5)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds while paused and carries on when playing again', () => {
+    render(true, true)
+    tick(2)
+    render(true, false)
+    tick(10)
+    expect(left).toBe(3)
+    expect(onDone).not.toHaveBeenCalled()
+    render(true, true)
+    tick(3)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('is null when inactive, and starts again from 5 when active again', () => {
+    render(false, true)
+    expect(left).toBeNull()
+    render(true, true)
+    tick(3)
+    render(false, true)
+    expect(left).toBeNull()
+    tick(10)
+    expect(onDone).not.toHaveBeenCalled()
+    render(true, true)
+    expect(left).toBe(5)
+  })
+})
+
+describe('useCountdown, paused often', () => {
+  it('keeps the part of a second counted before each pause', () => {
+    render(true, true)
+    for (let i = 0; i < 8; i++) {
+      act(() => { vi.advanceTimersByTime(750) })
+      render(true, false)
+      render(true, true)
+    }
+    expect(left).toBe(0)                  // 8 × 0.75 s = 6 s of playing
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useCountdown, 0 s', () => {
+  it('fires at once — once running', () => {
+    render(true, false, 0)
+    expect(left).toBe(0)
+    expect(onDone).not.toHaveBeenCalled()
+    render(true, true, 0)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useCountdown, paused between steps', () => {
+  it('keeps the time since the last step when it pauses', () => {
+    render(true, true)
+    for (let i = 0; i < 25; i++) {     // 25 × 200 ms of playing, each cut short of a 250 ms step
+      act(() => { vi.advanceTimersByTime(200) })
+      render(true, false)
+      render(true, true)
+    }
+    expect(left).toBe(0)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})

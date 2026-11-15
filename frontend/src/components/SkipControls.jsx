@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronsRight, SkipForward } from 'lucide-react'
+import { ChevronsRight, SkipForward, X } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { matchLabel } from '@/lib/skipSegments'
+import { useCountdown } from '@/lib/useCountdown'
 import { setVodSkipMatch } from '../stalkerApi'
 
 // Skip intro / recap / credits (lib/skipSegments.js).
@@ -9,21 +10,49 @@ import { setVodSkipMatch } from '../stalkerApi'
 /**
  * The button over the video while an intro, recap or the credits play — or
  * "Next episode" (`skip.kind` 'next': near the end, or at the credits, with
- * another episode to come; lib/skipSegments.js nextPromptAt).
+ * another episode to come; lib/skipSegments.js nextPromptAt). `countdown`
+ * ({ secs, running }, or null) counts down here — so its ticks redraw only
+ * the button — filling it until `onDone` plays the next episode (at once with
+ * 0 s), with a ✕ (`onCancel`) to stop it — on its left, so the button doesn't
+ * move under a second click when it goes.
  */
-export function SkipButton({ skip, onSkip, raised = false }) {
+export function SkipButton({ skip, onSkip, raised = false, countdown = null, onCancel, onDone }) {
+  const next = skip?.kind === 'next'
+  const left = useCountdown(next && !!countdown, !!countdown?.running, countdown?.secs ?? 0, () => onDone?.())
   if (!skip) return null
-  const next = skip.kind === 'next'
+  const counting = left != null && countdown.secs > 0   // at once: nothing to show, it just goes
   const Icon = next ? SkipForward : ChevronsRight
   return (
-    <button
+    <div
       // Above the controls bar while it's shown, near the bottom when it isn't.
-      className={`absolute right-4 ${raised ? 'bottom-28' : 'bottom-8'} z-30 flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-black/75 hover:bg-white hover:text-black border border-white/40 backdrop-blur px-4 py-2 text-sm font-semibold text-white shadow-lg transition-all`}
-      onClick={(e) => { e.stopPropagation(); onSkip(next) }}
+      className={`absolute right-4 ${raised ? 'bottom-28' : 'bottom-8'} z-30 flex items-center gap-1.5`}
+      onClick={(e) => e.stopPropagation()}
     >
-      <Icon size={16} fill={next ? 'currentColor' : 'none'} />
-      {next ? 'Next episode' : skip.label}
-    </button>
+      {counting && (
+        <button
+          onClick={onCancel}
+          className="rounded-[var(--radius-sm)] bg-black/75 hover:bg-white/25 border border-white/40 backdrop-blur p-2 text-white shadow-lg transition-colors"
+          aria-label="Cancel the countdown and stay on this episode" title="Stay on this episode"
+        >
+          <X size={16} />
+        </button>
+      )}
+      <button
+        className="relative overflow-hidden flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-black/75 hover:bg-white hover:text-black border border-white/40 backdrop-blur px-4 py-2 text-sm font-semibold text-white shadow-lg transition-all"
+        onClick={() => onSkip(next)}
+      >
+        {counting && (
+          // Full as it reaches 0, held while the countdown is.
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 bg-white/25"
+            style={{ animation: `sw-countdown-fill ${countdown.secs}s linear forwards`, animationPlayState: countdown.running ? 'running' : 'paused' }}
+          />
+        )}
+        <Icon size={16} fill={next ? 'currentColor' : 'none'} className="relative" />
+        <span className="relative tabular-nums">{!next ? skip.label : counting ? `Next episode in ${left}` : 'Next episode'}</span>
+      </button>
+    </div>
   )
 }
 

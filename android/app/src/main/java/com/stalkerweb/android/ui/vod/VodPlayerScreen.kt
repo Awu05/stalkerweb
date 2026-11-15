@@ -86,6 +86,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.stalkerweb.android.data.repo.PlayerParams
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.drawBehind
 import com.stalkerweb.android.cast.CastManager
 import com.stalkerweb.android.cast.RemoteState
 import com.stalkerweb.android.ui.components.CastButton
@@ -168,7 +172,12 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
     LaunchedEffect(Unit) { viewModel.init(params) }
     val toastContext = LocalContext.current
     LaunchedEffect(viewModel) { viewModel.messages.collect { android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_SHORT).show() } }
-    // Back closes the episodes panel first (the remote's Back would otherwise leave the player).
+    // On a TV, Back stops "Next episode"'s countdown (phones have a ✕), and
+    // closes the episodes panel (the remote's Back would otherwise leave the
+    // player). The handler added last goes first, so an open panel closes first.
+    val anyPanel = panelOpen || subtitlesOpen || gearOpen
+    LaunchedEffect(anyPanel) { viewModel.setPanelOpen(anyPanel) }
+    BackHandler(enabled = isTV && state.nextCountdown != null && !anyPanel) { viewModel.stopCountdown() }
     BackHandler(enabled = panelOpen) { panelOpen = false }
     BackHandler(enabled = subtitlesOpen) { subtitlesOpen = false }
     BackHandler(enabled = gearOpen) { gearOpen = false }
@@ -353,6 +362,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 onPickAudio = viewModel::pickAudio,
                 onAudioLanguage = viewModel::setAudioLanguage,
                 onSkipMode = viewModel::setSkipMode,
+                onNextEpisodeDelay = viewModel::setNextEpisodeDelay,
                 onClose = { gearOpen = false },
                 modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(340.dp).fillMaxHeight()
                            else Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
@@ -361,22 +371,39 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
 
         state.skip?.takeIf { !casting && state.error == null }?.let { now ->
             val next = now.kind == "next"
-            SkipButton(
-                label = if (next) "Next episode" else now.label,
-                next = next,
-                // The remote's OK skips (above); the button says so.
-                hint = isTV && !controlsVisible && !panelOpen && !subtitlesOpen && !gearOpen,
-                onClick = { viewModel.skip(next) },
-                // Above Media3's seek bar while its controls show. On a TV, OK skips:
-                // the button never takes the focus (gone, it would leave it nowhere).
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp)
-                    .focusProperties { canFocus = !isTV },
-            )
+            val countdown = state.nextCountdown.takeIf { next }
+            // Above Media3's seek bar while its controls show. The ✕ is on the
+            // button's left, so the button doesn't move under a second tap when it goes.
+            Row(
+                Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (controlsVisible) 110.dp else 32.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (countdown != null && !isTV) {
+                    TipIconButton(label = "Stay on this episode", onClick = viewModel::stopCountdown,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.7f), CircleShape)) {
+                        Icon(Icons.Default.Close, "Stay on this episode", tint = Color.White)
+                    }
+                }
+                SkipButton(
+                    label = if (!next) now.label else if (countdown != null) "Next episode in ${countdown.left}" else "Next episode",
+                    next = next,
+                    // The remote's OK skips (above), and Back stays; the button says so.
+                    hint = isTV && !controlsVisible && !anyPanel,
+                    backHint = isTV && countdown != null && !anyPanel,
+                    countdown = countdown,
+                    onClick = { viewModel.skip(next) },
+                    // On a TV, OK skips: the button never takes the focus (gone, it would leave it nowhere).
+                    modifier = Modifier.focusProperties { canFocus = !isTV },
+                )
+            }
         }
 
         state.upNext?.let { next ->
             UpNextCard(
                 title = com.stalkerweb.android.data.repo.episodeRowLabel(next.episode),
+                // Stopped in the credits ("stay on this episode"): it waits for Play now.
+                delaySecs = if (state.countdownStopped) -1 else state.settings?.nextEpisodeDelay ?: -1,
                 onPlay = viewModel::playNext,
                 onCancel = viewModel::cancelUpNext,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
@@ -450,16 +477,37 @@ private fun EpisodesPanel(
  * remote's OK skips while the controls are hidden ([hint] says so).
  */
 @Composable
-private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier) {
+private fun SkipButton(label: String, next: Boolean, hint: Boolean, onClick: () -> Unit, modifier: Modifier,
+                       backHint: Boolean = false, countdown: CountdownUi? = null) {
+    // How far the countdown has gone (0–1), filling the button from the left:
+    // each second it runs to that second's end, at an even pace, so it's full at 0.
+    val fill = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(countdown) {
+        if (countdown == null) { fill.snapTo(0f); return@LaunchedEffect }
+        if (!countdown.running) return@LaunchedEffect
+        val target = ((countdown.total - countdown.left + 1f) / countdown.total).coerceAtMost(1f)
+        val ms = ((target - fill.value) * countdown.total * 1000).toInt().coerceAtLeast(0)
+        fill.animateTo(target, androidx.compose.animation.core.tween(ms, easing = androidx.compose.animation.core.LinearEasing))
+    }
     OutlinedButton(
         onClick = onClick,
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+        // The fill is drawn by the content, inside the button's own shape.
+        contentPadding = PaddingValues(0.dp),
         modifier = modifier.tvFocus(RoundedCornerShape(50)),
     ) {
-        Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
-        Text(" $label")
-        if (hint) Text("  · OK", color = SwColors.Muted)
+        Row(
+            Modifier.heightIn(min = androidx.compose.material3.ButtonDefaults.MinHeight)
+                .drawBehind { if (countdown != null) drawRect(Color.White.copy(alpha = 0.25f), size = size.copy(width = size.width * fill.value)) }
+                .padding(androidx.compose.material3.ButtonDefaults.ContentPadding),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (next) Icons.Default.SkipNext else Icons.Default.FastForward, null, Modifier.size(18.dp))
+            Text(" $label")
+            if (hint) Text("  · OK", color = SwColors.Muted)
+            if (backHint) Text("  · Back to stay", color = SwColors.Muted)
+        }
     }
 }
 
@@ -548,17 +596,21 @@ internal fun SubtitleNote(text: String, color: Color = SwColors.Muted) =
 
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */
 @Composable
-private fun UpNextCard(title: String, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier) {
-    var left by remember { mutableIntStateOf(10) }
+private fun UpNextCard(title: String, delaySecs: Int, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier) {
+    // After the viewer's delay (0 at once); with -1 it waits for Play now. A
+    // delay changed meanwhile (the gear) starts it again with the new one.
+    var left by remember { mutableIntStateOf(delaySecs) }
     val playFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        runCatching { playFocus.requestFocus() }
+    LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+    LaunchedEffect(delaySecs) {
+        left = delaySecs
+        if (delaySecs < 0) return@LaunchedEffect
         while (left > 0) { delay(1_000); left -= 1 }
         onPlay()
     }
     Surface(color = SwColors.Surface, shape = RoundedCornerShape(12.dp), modifier = modifier.width(300.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Up next in $left s", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
+            Text(if (delaySecs < 0) "Up next" else "Up next in $left s", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
             Text(title, style = MaterialTheme.typography.titleSmall, color = SwColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onPlay, modifier = Modifier.focusRequester(playFocus)) { Text("Play now") }

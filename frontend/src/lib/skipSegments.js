@@ -9,6 +9,25 @@ const LABELS = { intro: 'Skip intro', recap: 'Skip recap', outro: 'Skip credits'
 const TAIL_SECS = 1
 // The "Next episode" prompt shows this close to the end, credits times or not.
 export const NEXT_PROMPT_SECS = 30
+/**
+ * When the next episode plays by itself, during the credits and after the end
+ * (the viewer's nextEpisodeDelay; the server's ViewersManager.js): after this
+ * many seconds, 0 at once, -1 not by itself.
+ */
+export const NEXT_EPISODE_DELAY_CHOICES = [
+  { secs: 0, label: 'Immediately' },
+  { secs: 3, label: 'After 3 s' },
+  { secs: 5, label: 'After 5 s' },
+  { secs: 10, label: 'After 10 s' },
+  { secs: 15, label: 'After 15 s' },
+  { secs: -1, label: 'Off' },
+]
+const DEFAULT_NEXT_EPISODE_DELAY = 5
+/** The viewer's choice, from the server's answer (5 s from an older server). */
+export function nextEpisodeDelayOf(me) {
+  const secs = me?.nextEpisodeDelay
+  return NEXT_EPISODE_DELAY_CHOICES.some((c) => c.secs === secs) ? secs : DEFAULT_NEXT_EPISODE_DELAY
+}
 const SKIP_MODES = ['off', 'button', 'auto']
 /** The intro-skipping choices, as the gear and Settings name them. */
 export const SKIP_MODE_CHOICES = [
@@ -62,7 +81,28 @@ export function autoSkipTo(parts, t, done) {
 export function nextPromptAt(parts, t, duration, hasNext) {
   if (!hasNext || !Number.isFinite(t)) return false
   if (Number.isFinite(duration) && duration > 0 && duration - t <= NEXT_PROMPT_SECS) return true
+  return inCredits(parts, t)
+}
+
+/**
+ * Whether `t` is in the credits (their times known, skipping not off): where
+ * "Next episode" counts down to playing it by itself. Elsewhere the episode
+ * plays to its end, and the Up next card follows.
+ */
+export function inCredits(parts, t) {
   return skipAt(parts, t)?.kind === 'outro'
+}
+
+// A resume passes through the first seconds on its way to where it lands.
+const ARM_SECS = 5
+/**
+ * Whether `t` is before the credits, past the first seconds: an episode seen
+ * playing there is one watched into its credits, so their countdown is for it
+ * — not for one opened (or resumed) in them, for a scene after them.
+ */
+export function beforeCredits(parts, t) {
+  const o = parts?.outro
+  return !!o && Number.isFinite(t) && t >= ARM_SECS && t < o.start
 }
 
 /** "Breaking Bad (2008)" — what the show was matched to, for the side panel. */

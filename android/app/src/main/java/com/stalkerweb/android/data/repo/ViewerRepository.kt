@@ -50,10 +50,11 @@ class ViewerRepository(private val prefs: AppPrefs, private val apis: ApiProvide
 
     /**
      * The viewer's player settings (the VOD player's gear, Settings): intro
-     * skipping and the preferred audio language. Throws with the server's message.
+     * skipping, the preferred audio language, and when the next episode plays
+     * by itself. Throws with the server's message.
      */
-    suspend fun savePlayerSettings(skipMode: String? = null, audioLanguage: String? = null): ViewerDetails =
-        apis.get().savePlayerSettings(PlayerSettingsRequest(skipMode, audioLanguage)).also { _current.value = it }
+    suspend fun savePlayerSettings(skipMode: String? = null, audioLanguage: String? = null, nextEpisodeDelay: Int? = null): ViewerDetails =
+        apis.get().savePlayerSettings(PlayerSettingsRequest(skipMode, audioLanguage, nextEpisodeDelay)).also { _current.value = it }
 
     /** The current viewer's live TV filter, reading the viewer first if needed. */
     suspend fun filter(): ViewerFilter = ViewerFilter.from(_current.value ?: refresh())
