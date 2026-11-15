@@ -7,11 +7,11 @@ import { useCountdown } from './useCountdown'
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 let root, host, left, onDone
-function Probe({ active, running }) {
-  left = useCountdown(active, running, 5, onDone)
+function Probe({ active, running, secs = 5 }) {
+  left = useCountdown(active, running, secs, onDone)
   return null
 }
-const render = (active, running) => act(() => root.render(<Probe active={active} running={running} />))
+const render = (active, running, secs) => act(() => root.render(<Probe active={active} running={running} secs={secs} />))
 // A second at a time: each tick schedules the next once React has rendered it.
 const tick = (secs) => { for (let i = 0; i < secs; i++) act(() => { vi.advanceTimersByTime(1000) }) }
 
@@ -72,6 +72,16 @@ describe('useCountdown, paused often', () => {
       render(true, true)
     }
     expect(left).toBe(0)                  // 8 × 0.75 s = 6 s of playing
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useCountdown, 0 s', () => {
+  it('fires at once — once running', () => {
+    render(true, false, 0)
+    expect(left).toBe(0)
+    expect(onDone).not.toHaveBeenCalled()
+    render(true, true, 0)
     expect(onDone).toHaveBeenCalledTimes(1)
   })
 })

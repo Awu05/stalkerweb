@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, nextCountdownAt, NEXT_PROMPT_SECS } from './skipSegments'
+import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, nextCountdownAt, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
 
 const parts = { intro: { start: 60, end: 90 }, recap: { start: 0, end: 40 }, outro: { start: 2800, end: 2900 } }
 
@@ -95,5 +95,16 @@ describe('nextCountdownAt', () => {
     expect(nextCountdownAt({ intro: null, recap: null, outro: null }, 2990)).toBe(false)
     expect(nextCountdownAt(null, 2990)).toBe(false)
     expect(nextCountdownAt({ ...parts, skipMode: 'off' }, 2850)).toBe(false)
+  })
+})
+
+describe('nextEpisodeDelayOf', () => {
+  it("is the viewer's choice, or 5 s from an older server or an odd value", () => {
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 0 })).toBe(0)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: -1 })).toBe(-1)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 15 })).toBe(15)
+    expect(nextEpisodeDelayOf({})).toBe(5)
+    expect(nextEpisodeDelayOf({ nextEpisodeDelay: 7 })).toBe(5)
+    expect(nextEpisodeDelayOf(null)).toBe(5)
   })
 })

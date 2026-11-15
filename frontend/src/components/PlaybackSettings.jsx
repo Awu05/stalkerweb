@@ -1,11 +1,12 @@
 import { usePlayerSettings } from '@/lib/usePlayerSettings'
 import { audioLanguageOptions } from '@/lib/audioTracks'
-import { SKIP_MODE_CHOICES } from '@/lib/skipSegments'
+import { SKIP_MODE_CHOICES, NEXT_EPISODE_DELAY_CHOICES } from '@/lib/skipSegments'
 import { cn } from '@/lib/utils'
 
 /**
- * Settings → Viewers → My playback: intro skipping and the preferred audio
- * language, for this viewer — the same settings as the player's gear.
+ * Settings → Viewers → My playback: intro skipping, when the next episode
+ * plays by itself, and the preferred audio language, for this viewer — the
+ * same settings as the player's gear.
  */
 export default function PlaybackSettings() {
   const { settings, change } = usePlayerSettings()
@@ -18,14 +19,18 @@ export default function PlaybackSettings() {
         </p>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Intro skipping">
           {SKIP_MODE_CHOICES.map((c) => (
-            <button key={c.id} role="radio" aria-checked={settings?.skipMode === c.id} disabled={!settings}
-              onClick={() => change({ skipMode: c.id })}
-              className={cn('rounded-[var(--radius-sm)] border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50',
-                settings?.skipMode === c.id
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary-light)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]')}>
-              {c.label}
-            </button>
+            <Choice key={c.id} selected={settings?.skipMode === c.id} disabled={!settings} onClick={() => change({ skipMode: c.id })}>{c.label}</Choice>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-[var(--color-text)]">Play the next episode</p>
+        <p className="text-xs text-[var(--color-muted)] mt-0.5 mb-2">
+          When an episode&apos;s credits start (where their times are known), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.
+        </p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Play the next episode">
+          {NEXT_EPISODE_DELAY_CHOICES.map((c) => (
+            <Choice key={c.secs} selected={settings?.nextEpisodeDelay === c.secs} disabled={!settings} onClick={() => change({ nextEpisodeDelay: c.secs })}>{c.label}</Choice>
           ))}
         </div>
       </div>
@@ -40,5 +45,17 @@ export default function PlaybackSettings() {
         </select>
       </label>
     </div>
+  )
+}
+
+function Choice({ selected, disabled, onClick, children }) {
+  return (
+    <button role="radio" aria-checked={selected} disabled={disabled} onClick={onClick}
+      className={cn('rounded-[var(--radius-sm)] border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50',
+        selected
+          ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary-light)]'
+          : 'border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]')}>
+      {children}
+    </button>
   )
 }

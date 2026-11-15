@@ -27,7 +27,7 @@ import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSet
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
 import { useVodAudio } from '@/lib/useVodAudio'
 import { usePlayerSettings } from '@/lib/usePlayerSettings'
-import { skipAt, autoSkipTo, nextPromptAt, nextCountdownAt, NEXT_COUNTDOWN_SECS } from '@/lib/skipSegments'
+import { skipAt, autoSkipTo, nextPromptAt, nextCountdownAt, nextEpisodeDelayOf } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
@@ -344,14 +344,16 @@ export default function VodPlayerPage() {
     try { v.currentTime = t } catch { /* seek rejected */ }
     setCurrentTime(t)
   }
-  // During the credits, "Next episode" plays it by itself after a few seconds
-  // of playing (not stalled, no panel open), unless stopped — for this
-  // episode, so seeking back doesn't start it again.
+  // During the credits, "Next episode" plays it by itself after the viewer's
+  // delay of playing (not stalled, no panel open; 0 at once, -1 never), unless
+  // stopped — for this episode, so seeking back doesn't start it again.
+  const nextDelay = nextEpisodeDelayOf(player.settings)
   const [countdownStopped, setCountdownStopped] = useState(null)   // the progressKey it was stopped for
-  const counting = skipNow?.kind === 'next' && nextCountdownAt(skipParts, currentTime) && countdownStopped !== progressKey
+  const counting = nextDelay >= 0 && skipNow?.kind === 'next' && nextCountdownAt(skipParts, currentTime) && countdownStopped !== progressKey
   const countdownRuns = playing && !waiting && !episodesOpen && !subsOpen && !gearOpen
-  const nextLeft = useCountdown(counting, countdownRuns, NEXT_COUNTDOWN_SECS, () => doSkip(true))
-  const nextCountdown = nextLeft == null ? null : { left: nextLeft, total: NEXT_COUNTDOWN_SECS, running: countdownRuns }
+  const nextLeft = useCountdown(counting, countdownRuns, nextDelay, () => doSkip(true))
+  // At once: no countdown to show, it just goes.
+  const nextCountdown = nextLeft == null || nextDelay === 0 ? null : { left: nextLeft, total: nextDelay, running: countdownRuns }
 
   // Auto-hide the "resumed" banner after a few seconds.
   useEffect(() => {
@@ -777,7 +779,7 @@ export default function VodPlayerPage() {
           countdown={nextCountdown} onCancel={() => setCountdownStopped(progressKey)} />
 
         {upNext && (
-          <UpNextCard next={upNext} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
+          <UpNextCard next={upNext} delay={nextDelay} onPlay={() => playEpisode(upNext.season, upNext.episode)} onCancel={() => setUpNext(null)} />
         )}
 
         {episodesOpen && (
@@ -948,13 +950,13 @@ export default function VodPlayerPage() {
   )
 }
 
-// At the end of an episode: the next one plays in 10 s, unless cancelled.
-function UpNextCard({ next, onPlay, onCancel }) {
-  const left = useCountdown(true, true, 10, onPlay)
+// At the end of an episode: the next one plays after the viewer's delay (at once with 0), unless cancelled; with -1, only if asked.
+function UpNextCard({ next, delay, onPlay, onCancel }) {
+  const left = useCountdown(delay >= 0, true, Math.max(0, delay), onPlay)
   const name = episodeRowLabel(next.episode)
   return (
     <div className="absolute right-4 bottom-24 z-30 w-72 rounded-[var(--radius-md)] bg-black/85 backdrop-blur p-3 text-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-      <p className="text-[10px] uppercase tracking-wide text-white/60">Up next · in {left}s</p>
+      <p className="text-[10px] uppercase tracking-wide text-white/60">Up next{left != null && ` · in ${left}s`}</p>
       <p className="text-sm font-semibold truncate">{name}</p>
       <p className="text-xs text-white/60 truncate">{next.season.name}</p>
       <div className="flex gap-2 mt-2">

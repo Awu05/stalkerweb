@@ -45,6 +45,8 @@ import com.stalkerweb.android.data.repo.nextPromptAt
 import com.stalkerweb.android.data.repo.NextCountdown
 import com.stalkerweb.android.data.repo.CountdownNow
 import com.stalkerweb.android.data.repo.nextCountdownAt
+import com.stalkerweb.android.data.repo.nextEpisodeDelayOf
+import com.stalkerweb.android.data.repo.DEFAULT_NEXT_EPISODE_DELAY
 import com.stalkerweb.android.data.repo.skipAt
 import com.stalkerweb.android.data.repo.skipModeOf
 import com.stalkerweb.android.data.repo.AudioTrack
@@ -77,7 +79,7 @@ data class SubtitleState(
 )
 
 /** The viewer's player settings (the gear), kept on the server: intro skipping ("off" | "button" | "auto") and the preferred audio language ("" or two letters). */
-data class PlayerSettings(val skipMode: String = "button", val audioLanguage: String = "")
+data class PlayerSettings(val skipMode: String = "button", val audioLanguage: String = "", val nextEpisodeDelay: Int = DEFAULT_NEXT_EPISODE_DELAY)
 
 // The online file's track, told apart from the video's own by its label.
 private const val ONLINE_LABEL = "Online subtitles"
@@ -243,7 +245,7 @@ class VodPlayerViewModel(
         // The viewer's gear settings, read afresh (changed on another device since).
         viewModelScope.launch {
             val me = viewers.refresh() ?: viewers.current.value
-            _state.value = _state.value.copy(settings = PlayerSettings(skipModeOf(me?.skipMode, me?.autoSkip == true), me?.audioLanguage.orEmpty()))
+            _state.value = _state.value.copy(settings = PlayerSettings(skipModeOf(me?.skipMode, me?.autoSkip == true), me?.audioLanguage.orEmpty(), nextEpisodeDelayOf(me?.nextEpisodeDelay)))
             applyPreferredAudio()
         }
         // Fresh resume points (watched elsewhere since); the resume waits for the media to be ready.
@@ -427,16 +429,22 @@ class VodPlayerViewModel(
             nextPromptAt(parts, t, duration, _state.value.neighbours.next != null) -> SkipNow("next", "Next episode", duration)
             else -> skipAt(parts, t)
         }
-        // Not with the error screen up (no button shows), and held while a panel is open.
-        val counting = now?.kind == "next" && nextCountdownAt(parts, t) && _state.value.error == null
-        val c = countdown.update(key, counting, p.isPlaying && !panelOpen, android.os.SystemClock.elapsedRealtime())
-        if (c?.left == 0) { moveToNextEpisode(); return }
-        if (now != _state.value.skip || c != _state.value.nextCountdown) _state.value = _state.value.copy(skip = now, nextCountdown = c)
+        // After the viewer's delay (0 at once, -1 never). Not with the error
+        // screen up (no button shows), and held while a panel is open.
+        val delay = nextDelay
+        val counting = delay >= 0 && now?.kind == "next" && nextCountdownAt(parts, t) && _state.value.error == null
+        val running = p.isPlaying && !panelOpen
+        val c = countdown.update(key, counting, running, android.os.SystemClock.elapsedRealtime(), delay)
+        if (c?.left == 0 && running) { moveToNextEpisode(); return }
+        val shown = c.takeIf { delay > 0 }   // at once: nothing to show, it just goes
+        if (now != _state.value.skip || shown != _state.value.nextCountdown) _state.value = _state.value.copy(skip = now, nextCountdown = shown)
     }
 
     // During the credits, "Next episode" plays it by itself after a few seconds of playing, unless stopped.
     private val countdown = NextCountdown()
     private var panelOpen = false
+    /** The viewer's next-episode delay (seconds, 0 at once, -1 never). */
+    val nextDelay: Int get() = _state.value.settings?.nextEpisodeDelay ?: DEFAULT_NEXT_EPISODE_DELAY
 
     /** The episodes, subtitles or settings panel is open: the countdown waits. */
     fun setPanelOpen(open: Boolean) { panelOpen = open }
@@ -504,18 +512,21 @@ class VodPlayerViewModel(
 
     fun setSkipMode(mode: String) = saveSettings(skipMode = mode)
     fun setAudioLanguage(code: String) = saveSettings(audioLanguage = code)
+    fun setNextEpisodeDelay(secs: Int) = saveSettings(nextEpisodeDelay = secs)
 
     // Shown at once; put back, and the viewer told, if the server won't keep it.
-    private fun saveSettings(skipMode: String? = null, audioLanguage: String? = null) {
+    private fun saveSettings(skipMode: String? = null, audioLanguage: String? = null, nextEpisodeDelay: Int? = null) {
         val before = _state.value.settings ?: PlayerSettings()
-        _state.value = _state.value.copy(settings = before.copy(skipMode = skipMode ?: before.skipMode, audioLanguage = audioLanguage ?: before.audioLanguage))
+        _state.value = _state.value.copy(settings = before.copy(skipMode = skipMode ?: before.skipMode, audioLanguage = audioLanguage ?: before.audioLanguage,
+            nextEpisodeDelay = nextEpisodeDelay ?: before.nextEpisodeDelay))
         if (audioLanguage != null) applyPreferredAudio()
         viewModelScope.launch {
-            runCatching { viewers.savePlayerSettings(skipMode, audioLanguage) }.onFailure {
+            runCatching { viewers.savePlayerSettings(skipMode, audioLanguage, nextEpisodeDelay) }.onFailure {
                 val now = _state.value.settings ?: before
                 _state.value = _state.value.copy(settings = now.copy(
                     skipMode = if (skipMode != null) before.skipMode else now.skipMode,
                     audioLanguage = if (audioLanguage != null) before.audioLanguage else now.audioLanguage,
+                    nextEpisodeDelay = if (nextEpisodeDelay != null) before.nextEpisodeDelay else now.nextEpisodeDelay,
                 ))
                 if (audioLanguage != null) applyPreferredAudio()
                 _messages.tryEmit("Couldn't save: ${it.toApiError().message ?: "try again"}")

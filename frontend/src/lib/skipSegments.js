@@ -9,8 +9,25 @@ const LABELS = { intro: 'Skip intro', recap: 'Skip recap', outro: 'Skip credits'
 const TAIL_SECS = 1
 // The "Next episode" prompt shows this close to the end, credits times or not.
 export const NEXT_PROMPT_SECS = 30
-// Once it shows, it plays the next episode by itself after this long.
-export const NEXT_COUNTDOWN_SECS = 5
+/**
+ * When the next episode plays by itself, during the credits and after the end
+ * (the viewer's nextEpisodeDelay; the server's ViewersManager.js): after this
+ * many seconds, 0 at once, -1 not by itself.
+ */
+export const NEXT_EPISODE_DELAY_CHOICES = [
+  { secs: 0, label: 'Immediately' },
+  { secs: 3, label: 'After 3 s' },
+  { secs: 5, label: 'After 5 s' },
+  { secs: 10, label: 'After 10 s' },
+  { secs: 15, label: 'After 15 s' },
+  { secs: -1, label: 'Off' },
+]
+const DEFAULT_NEXT_EPISODE_DELAY = 5
+/** The viewer's choice, from the server's answer (5 s from an older server). */
+export function nextEpisodeDelayOf(me) {
+  const secs = me?.nextEpisodeDelay
+  return NEXT_EPISODE_DELAY_CHOICES.some((c) => c.secs === secs) ? secs : DEFAULT_NEXT_EPISODE_DELAY
+}
 const SKIP_MODES = ['off', 'button', 'auto']
 /** The intro-skipping choices, as the gear and Settings name them. */
 export const SKIP_MODE_CHOICES = [

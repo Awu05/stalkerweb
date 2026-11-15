@@ -21,12 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.stalkerweb.android.data.repo.SKIP_MODES
+import com.stalkerweb.android.data.repo.NEXT_EPISODE_DELAYS
 import com.stalkerweb.android.data.repo.audioLanguageName
 import com.stalkerweb.android.data.repo.audioLanguageOptions
 import com.stalkerweb.android.ui.theme.SwColors
 
 // The viewer's player settings, as Settings shows them (the VOD player's gear
-// has the same in its panel): intro skipping and the preferred audio language.
+// has the same in its panel): intro skipping, when the next episode plays by
+// itself, and the preferred audio language.
 
 /** Off / Show a Skip button / Skip automatically, as pills. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -34,6 +36,15 @@ import com.stalkerweb.android.ui.theme.SwColors
 fun SkipModePills(selected: String?, enabled: Boolean, onPick: (String) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SKIP_MODES.forEach { (id, label) -> Pill(label, selected == id, { if (enabled) onPick(id) }) }
+    }
+}
+
+/** Immediately / After 3 s … / Off, as pills. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun NextEpisodeDelayPills(selected: Int?, enabled: Boolean, onPick: (Int) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        NEXT_EPISODE_DELAYS.forEach { (secs, label) -> Pill(label, selected == secs, { if (enabled) onPick(secs) }) }
     }
 }
 

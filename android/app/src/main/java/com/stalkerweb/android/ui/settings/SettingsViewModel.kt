@@ -134,6 +134,7 @@ class SettingsViewModel(
     // The viewer's player settings (the VOD player's gear has the same).
     fun setSkipMode(mode: String) = act("Saved") { viewers.savePlayerSettings(skipMode = mode) }
     fun setAudioLanguage(code: String) = act("Saved") { viewers.savePlayerSettings(audioLanguage = code) }
+    fun setNextEpisodeDelay(secs: Int) = act("Saved") { viewers.savePlayerSettings(nextEpisodeDelay = secs) }
 
     // Connection
     // A portal change reloads Channels, VOD and the Guide (as the Portal screen does on Back).

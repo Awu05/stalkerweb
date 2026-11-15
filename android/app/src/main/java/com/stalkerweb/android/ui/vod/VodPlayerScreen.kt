@@ -361,6 +361,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 onPickAudio = viewModel::pickAudio,
                 onAudioLanguage = viewModel::setAudioLanguage,
                 onSkipMode = viewModel::setSkipMode,
+                onNextEpisodeDelay = viewModel::setNextEpisodeDelay,
                 onClose = { gearOpen = false },
                 modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(340.dp).fillMaxHeight()
                            else Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
@@ -400,6 +401,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
         state.upNext?.let { next ->
             UpNextCard(
                 title = com.stalkerweb.android.data.repo.episodeRowLabel(next.episode),
+                delaySecs = viewModel.nextDelay,
                 onPlay = viewModel::playNext,
                 onCancel = viewModel::cancelUpNext,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
@@ -584,17 +586,19 @@ internal fun SubtitleNote(text: String, color: Color = SwColors.Muted) =
 
 /** "Up next" after an episode: plays the next one in 10 s unless cancelled. */
 @Composable
-private fun UpNextCard(title: String, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier) {
-    var left by remember { mutableIntStateOf(10) }
+private fun UpNextCard(title: String, delaySecs: Int, onPlay: () -> Unit, onCancel: () -> Unit, modifier: Modifier) {
+    // After the viewer's delay (0 at once); with -1 it waits for Play now.
+    var left by remember { mutableIntStateOf(delaySecs) }
     val playFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         runCatching { playFocus.requestFocus() }
+        if (delaySecs < 0) return@LaunchedEffect
         while (left > 0) { delay(1_000); left -= 1 }
         onPlay()
     }
     Surface(color = SwColors.Surface, shape = RoundedCornerShape(12.dp), modifier = modifier.width(300.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Up next in $left s", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
+            Text(if (delaySecs < 0) "Up next" else "Up next in $left s", style = MaterialTheme.typography.labelMedium, color = SwColors.Muted)
             Text(title, style = MaterialTheme.typography.titleSmall, color = SwColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onPlay, modifier = Modifier.focusRequester(playFocus)) { Text("Play now") }

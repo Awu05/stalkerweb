@@ -83,3 +83,27 @@ class NextCountdownAtTest {
         org.junit.Assert.assertFalse(nextCountdownAt(parts.copy(skipMode = "off"), 2850.0))
     }
 }
+
+class NextEpisodeDelayTest {
+    @Test fun theViewersChoiceOrFiveSeconds() {
+        assertEquals(0, nextEpisodeDelayOf(0))
+        assertEquals(-1, nextEpisodeDelayOf(-1))
+        assertEquals(15, nextEpisodeDelayOf(15))
+        assertEquals(5, nextEpisodeDelayOf(null))
+        assertEquals(5, nextEpisodeDelayOf(7))
+    }
+
+    @Test fun zeroSecondsIsAtZeroStraightAway() {
+        val c = NextCountdown()
+        assertEquals(CountdownNow(0, 1f), c.update("ep1", true, false, 0, secs = 0))
+    }
+
+    @Test fun tenSecondsCountsFromTen() {
+        val c = NextCountdown()
+        assertEquals(10, c.update("ep1", true, true, 0, secs = 10)!!.left)
+        var t = 500L
+        while (t <= 9_000) { c.update("ep1", true, true, t, secs = 10); t += 500 }
+        assertEquals(1, c.update("ep1", true, true, 9_000, secs = 10)!!.left)
+        assertEquals(0.9f, c.update("ep1", true, true, 9_000, secs = 10)!!.filled, 0.001f)
+    }
+}

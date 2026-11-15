@@ -95,6 +95,10 @@ describe('viewers API and favorites', () => {
     expect(player.body).toMatchObject({ skipMode: 'off', autoSkip: false, audioLanguage: 'fr' })
     expect((await call('GET', '/api/viewers/me', null, sam.id)).body).toMatchObject({ skipMode: 'off', audioLanguage: 'fr' })
     expect((await call('PUT', '/api/viewers/me/filters', { audioLanguage: 'french' }, sam.id)).status).toBe(400)
+    expect((await call('GET', '/api/viewers/me', null, sam.id)).body.nextEpisodeDelay).toBe(5)
+    expect((await call('PUT', '/api/viewers/me/filters', { nextEpisodeDelay: 0 }, sam.id)).body.nextEpisodeDelay).toBe(0)
+    expect((await call('GET', '/api/viewers/me', null, sam.id)).body.nextEpisodeDelay).toBe(0)
+    expect((await call('PUT', '/api/viewers/me/filters', { nextEpisodeDelay: 'soon' }, sam.id)).status).toBe(400)
   })
 
   it('tells a device whose viewer was deleted, instead of using the default viewer\'s data', async () => {

@@ -13,8 +13,16 @@ private const val TAIL_SECS = 1.0
 /** The "Next episode" button shows this close to the end, credits times or not. */
 const val NEXT_PROMPT_SECS = 30.0
 
-/** Once it shows, it plays the next episode by itself after this long. */
-const val NEXT_COUNTDOWN_SECS = 5
+/**
+ * When the next episode plays by itself, during the credits and after the end
+ * (the viewer's nextEpisodeDelay; the web's NEXT_EPISODE_DELAY_CHOICES): after
+ * this many seconds, 0 at once, -1 not by itself.
+ */
+val NEXT_EPISODE_DELAYS = listOf(0 to "Immediately", 3 to "After 3 s", 5 to "After 5 s", 10 to "After 10 s", 15 to "After 15 s", -1 to "Off")
+const val DEFAULT_NEXT_EPISODE_DELAY = 5
+
+/** The viewer's choice (5 s from an older server, or an odd value). */
+fun nextEpisodeDelayOf(secs: Int?): Int = if (NEXT_EPISODE_DELAYS.any { it.first == secs }) secs!! else DEFAULT_NEXT_EPISODE_DELAY
 
 /** A countdown as it stands: whole seconds [left], and how far it has gone (0–1). */
 data class CountdownNow(val left: Int, val filled: Float)
@@ -24,17 +32,19 @@ data class CountdownNow(val left: Int, val filled: Float)
  * web's useCountdown): where it stands, or null when not counting. Hidden, it
  * starts from the top next time; stopped, never again for that episode.
  */
-class NextCountdown(private val secs: Int = NEXT_COUNTDOWN_SECS) {
+class NextCountdown {
     private var key: String? = null
     private var stoppedFor: String? = null
     private var playedMs = 0L
     private var lastAt: Long? = null
 
-    fun update(key: String, showing: Boolean, playing: Boolean, nowMs: Long): CountdownNow? {
+    /** [secs] long (0: at 0 straight away). */
+    fun update(key: String, showing: Boolean, playing: Boolean, nowMs: Long, secs: Int = DEFAULT_NEXT_EPISODE_DELAY): CountdownNow? {
         if (key != this.key) { this.key = key; playedMs = 0; lastAt = null }
         if (!showing || key == stoppedFor) { playedMs = 0; lastAt = null; return null }
         lastAt?.let { if (playing) playedMs += nowMs - it }
         lastAt = if (playing) nowMs else null
+        if (secs <= 0) return CountdownNow(0, 1f)
         return CountdownNow((secs - (playedMs / 1000).toInt()).coerceAtLeast(0), (playedMs / (secs * 1000f)).coerceIn(0f, 1f))
     }
 

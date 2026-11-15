@@ -259,6 +259,13 @@ private fun ViewersTab(viewModel: SettingsViewModel, state: SettingsState, onOwn
                     selected = me?.let { com.stalkerweb.android.data.repo.skipModeOf(it.skipMode, it.autoSkip) },
                     enabled = me != null && !state.busy, onPick = viewModel::setSkipMode,
                 )
+                Text("Play the next episode", color = SwColors.Text, modifier = Modifier.padding(top = 6.dp))
+                Text("When an episode's credits start (where their times are known), or when it ends: how long the Next episode button counts down before playing it by itself. Off leaves it to you.",
+                    style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
+                com.stalkerweb.android.ui.components.NextEpisodeDelayPills(
+                    selected = me?.let { com.stalkerweb.android.data.repo.nextEpisodeDelayOf(it.nextEpisodeDelay) },
+                    enabled = me != null && !state.busy, onPick = viewModel::setNextEpisodeDelay,
+                )
                 Text("Preferred audio language", color = SwColors.Text, modifier = Modifier.padding(top = 6.dp))
                 Text("A movie or episode with a track in it starts in it; otherwise the stream's own plays.", style = MaterialTheme.typography.bodySmall, color = SwColors.Muted)
                 com.stalkerweb.android.ui.components.AudioLanguagePicker(

@@ -22,6 +22,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.stalkerweb.android.data.repo.AudioTrack
 import com.stalkerweb.android.data.repo.SKIP_MODES
+import com.stalkerweb.android.data.repo.NEXT_EPISODE_DELAYS
 import com.stalkerweb.android.data.repo.audioTrackLabels
 import com.stalkerweb.android.ui.components.AudioLanguagePicker
 import com.stalkerweb.android.ui.components.TipIconButton
@@ -36,7 +37,7 @@ import com.stalkerweb.android.ui.theme.SwColors
 internal fun PlayerSettingsPanel(
     audio: List<AudioTrack>, settings: PlayerSettings?, wide: Boolean,
     onPickAudio: (AudioTrack) -> Unit, onAudioLanguage: (String) -> Unit, onSkipMode: (String) -> Unit,
-    onClose: () -> Unit, modifier: Modifier,
+    onNextEpisodeDelay: (Int) -> Unit, onClose: () -> Unit, modifier: Modifier,
 ) {
     val firstFocus = remember { FocusRequester() }
     val labels = audioTrackLabels(audio)
@@ -62,6 +63,10 @@ internal fun PlayerSettingsPanel(
             item { SubtitleHeading("Intro skipping") }
             SKIP_MODES.forEach { (id, label) ->
                 item(key = "s$id") { SubtitleRow(label, null, settings?.skipMode == id) { if (settings != null) onSkipMode(id) } }
+            }
+            item { SubtitleHeading("Play the next episode") }
+            NEXT_EPISODE_DELAYS.forEach { (secs, label) ->
+                item(key = "n$secs") { SubtitleRow(label, null, settings?.nextEpisodeDelay == secs) { if (settings != null) onNextEpisodeDelay(secs) } }
             }
         }
     }
