@@ -6,6 +6,8 @@ import com.stalkerweb.android.ui.components.StatsButton
 import com.stalkerweb.android.ui.components.StreamStatsOverlay
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.foundation.layout.height
 import android.app.Activity
 import android.view.View
@@ -338,6 +340,7 @@ fun VodPlayerScreen(params: PlayerParams, viewModel: VodPlayerViewModel, onBack:
                 state = state, current = p, wide = wide,
                 watched = watchedKeys, progress = progressByKey,
                 onPick = { season, ep -> viewModel.playEpisode(season, ep) },
+                onToggleWatched = viewModel::setEpisodeWatched,
                 onSeason = viewModel::loadSeason,
                 onClose = { panelOpen = false },
                 modifier = if (wide) Modifier.align(Alignment.CenterEnd).width(340.dp).fillMaxHeight()
@@ -417,6 +420,7 @@ private fun EpisodesPanel(
     state: VodPlayerState, current: PlayerParams, wide: Boolean,
     watched: Set<String>, progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
     onPick: (com.stalkerweb.android.data.api.VodSeason, com.stalkerweb.android.data.api.VodEpisode) -> Unit,
+    onToggleWatched: (key: String, watched: Boolean) -> Unit,
     onSeason: (String) -> Unit, onClose: () -> Unit, modifier: Modifier,
 ) {
     var seasonId by remember(current.seasonId) { mutableStateOf(current.seasonId) }
@@ -450,8 +454,9 @@ private fun EpisodesPanel(
                                 .tvFocus(RoundedCornerShape(8.dp))
                                 .background(if (playing) SwColors.Surface3 else Color.Transparent, RoundedCornerShape(8.dp))
                                 .clickable(enabled = season != null) { season?.let { onPick(it, ep) } }
-                                .padding(10.dp),
+                                .padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             val key = com.stalkerweb.android.data.repo.WatchRules.makeKey(current.videoId, seasonId, ep.episodeId)
                             val seen = key in watched
@@ -462,7 +467,15 @@ private fun EpisodesPanel(
                                 if (frac != null && frac > 0f) LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth(0.6f).padding(top = 3.dp).height(2.dp),
                                     color = SwColors.Primary, trackColor = SwColors.Surface3)
                             }
-                            if (seen) Icon(Icons.Default.Check, "Watched", Modifier.size(16.dp), tint = SwColors.Success)
+                            // Tick by hand: one left in its credits before they counted, or not really watched.
+                            TipIconButton(label = if (seen) "Mark as not watched" else "Mark as watched", onClick = { onToggleWatched(key, !seen) }) {
+                                Icon(
+                                    if (seen) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    if (seen) "Mark as not watched" else "Mark as watched",
+                                    Modifier.size(18.dp),
+                                    tint = if (seen) SwColors.Success else SwColors.Muted,
+                                )
+                            }
                         }
                     }
                 }

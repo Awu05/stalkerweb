@@ -27,13 +27,13 @@ import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSet
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
 import { useVodAudio } from '@/lib/useVodAudio'
 import { usePlayerSettings } from '@/lib/usePlayerSettings'
-import { skipAt, autoSkipTo, nextPromptAt, inCredits, beforeCredits, nextEpisodeDelayOf } from '@/lib/skipSegments'
+import { skipAt, autoSkipTo, nextPromptAt, inCredits, beforeCredits, creditsReached, nextEpisodeDelayOf } from '@/lib/skipSegments'
 import { episodeNeighbours } from '@/lib/episodeNav'
 import { seasonNoOf, episodeRowLabel, episodeLabel } from '@/lib/seriesProgress'
 import { releaseMedia, allowRemotePlayback } from '@/lib/mediaRelease'
 import { reportPlayerError, mediaErrorText, hlsErrorText } from '@/lib/playerReport'
 import {
-  makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange,
+  makeVodKey, getVodProgress, saveVodProgress, getWatchState, onWatchChange, setEpisodeWatched,
   VOD_RESUME_MIN_SECS, VOD_DONE_FRACTION,
 } from '@/lib/vodProgress'
 
@@ -233,6 +233,16 @@ export default function VodPlayerPage() {
 
   // The episode left for the next one while the Next episode prompt showed.
   const finishedRef = useRef(null)
+  // This title's credits times, { key, outro }, once found (below).
+  const creditsRef = useRef({ key: null, outro: null })
+  // Where a save puts `t`: at the end — finished, in this one save (a second
+  // "watched" one could land before it) — when left for the next episode
+  // from the prompt, or once the credits have started, however it's left.
+  const savedPosition = useCallback((t, dur) => {
+    const key = metaRef.current.key
+    const outro = creditsRef.current.key === key ? creditsRef.current.outro : null
+    return finishedRef.current === key || creditsReached(outro, t, dur) ? dur : t
+  }, [])
   // Write current position to the store (auto-prunes when finished/barely-started).
   const persist = useCallback(() => {
     const v = videoRef.current
@@ -240,28 +250,29 @@ export default function VodPlayerPage() {
     // Not while the previous title's media is still the one playing.
     if (mediaKeyRef.current !== metaRef.current.key) return
     if (recordingId) { saveRecordingPosition(recordingId, v.currentTime, v.duration); return }
-    // Left for the next episode from its credits or last seconds: finished,
-    // in this one save (a second "watched" one could land before it).
-    const done = finishedRef.current === metaRef.current.key
-    saveVodProgress({ ...metaRef.current, position: done ? v.duration : v.currentTime, duration: v.duration })
-  }, [recordingId])
+    saveVodProgress({ ...metaRef.current, position: savedPosition(v.currentTime, v.duration), duration: v.duration })
+  }, [recordingId, savedPosition])
 
   // Save every 10s while playing, and once more on unmount / title change.
   useEffect(() => {
+    const saveRemote = () => {
+      const r = castRemoteRef.current
+      saveVodProgress({ ...metaRef.current, position: savedPosition(r.time, r.duration), duration: r.duration })
+    }
     const id = setInterval(() => {
       if (onTvRef.current) {
         const r = castRemoteRef.current
-        if (r.playing && r.duration > 0 && r.time > 0) saveVodProgress({ ...metaRef.current, position: r.time, duration: r.duration })
+        if (r.playing && r.duration > 0 && r.time > 0) saveRemote()
       } else if (!videoRef.current?.paused) persist()
     }, 10_000)
     return () => {
       clearInterval(id)
       if (onTvRef.current) {
         const r = castRemoteRef.current
-        if (r.duration > 0 && r.time > 0) saveVodProgress({ ...metaRef.current, position: r.time, duration: r.duration })
+        if (r.duration > 0 && r.time > 0) saveRemote()
       } else persist()
     }
-  }, [persist, progressKey])
+  }, [persist, progressKey, savedPosition])
 
   // Resume once per title, after the duration is known. Re-runs if the user
   // navigates to a different title without the component remounting.
@@ -292,6 +303,9 @@ export default function VodPlayerPage() {
   // (`for`), so the last episode's never show on the next while it loads.
   const [skipFound, setSkipFound] = useState(null)   // { for, imdbId, match, intro, recap, outro, skipMode, autoSkip }
   const [skipAsk, setSkipAsk]     = useState(0)      // goes up when the show's match is changed
+  useEffect(() => {
+    if (skipFound?.for === progressKey) creditsRef.current = { key: progressKey, outro: skipFound.outro || null }
+  }, [skipFound, progressKey])
   const seasonNo = searchParams.get('season') || ''
   const year     = searchParams.get('year') || ''
   // The portal's own name, not the "Untitled" shown for none (that would be searched for).
@@ -811,7 +825,7 @@ export default function VodPlayerPage() {
               </div>
               <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
                 playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode}
-                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} />
+                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} onMarkWatched={setEpisodeWatched} />
             </div>
           </div>
         )}
@@ -961,7 +975,7 @@ export default function VodPlayerPage() {
             <div className="pt-3 border-t border-[var(--color-border)]">
               <EpisodePanel seasons={seasons} seasonId={panelSeason} onSeason={setPanelSeason} episodes={episodesBySeason[panelSeason]}
                 playingSeasonId={seasonId} playingEpisodeId={episodeId} onPlay={playEpisode}
-                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} />
+                showId={videoId} watchedEpisodes={watchState.watchedEpisodes} progressOf={progressOf} onMarkWatched={setEpisodeWatched} />
             </div>
           )}
         </div>

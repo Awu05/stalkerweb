@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, inCredits, beforeCredits, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
+import { skipAt, autoSkipTo, matchLabel, skipModeOf, nextPromptAt, inCredits, beforeCredits, creditsReached, nextEpisodeDelayOf, NEXT_PROMPT_SECS } from './skipSegments'
 
 const parts = { intro: { start: 60, end: 90 }, recap: { start: 0, end: 40 }, outro: { start: 2800, end: 2900 } }
 
@@ -108,6 +108,26 @@ describe('beforeCredits', () => {
     expect(beforeCredits(parts, 0)).toBe(false)
     expect(beforeCredits(parts, 2)).toBe(false)
     expect(beforeCredits({ intro: null, recap: null, outro: null }, 600)).toBe(false)
+  })
+})
+
+describe('creditsReached', () => {
+  const outro = { start: 2800, end: 2900 }
+  it('from the start of the credits on', () => {
+    expect(creditsReached(outro, 2800, 2950)).toBe(true)
+    expect(creditsReached(outro, 2940, 2950)).toBe(true)
+    expect(creditsReached(outro, 2799, 2950)).toBe(false)
+  })
+  it('whatever the intro skipping: the credits times are what count', () => {
+    expect(creditsReached({ start: 2800, end: 2900 }, 2850, 2950)).toBe(true)
+  })
+  it('not without credits times, a duration or a position', () => {
+    expect(creditsReached(null, 2850, 2950)).toBe(false)
+    expect(creditsReached(outro, 2850, 0)).toBe(false)
+    expect(creditsReached(outro, NaN, 2950)).toBe(false)
+  })
+  it('not for "credits" starting before the last fifth (a wrong match)', () => {
+    expect(creditsReached({ start: 1000, end: 1100 }, 1050, 2950)).toBe(false)
   })
 })
 

@@ -75,4 +75,18 @@ class SkipSegmentsTest {
         assertFalse(nextPromptAt(null, 5.0, 0.0, hasNext = true))
         assertFalse(nextPromptAt(null, Double.NaN, dur, hasNext = true))
     }
+
+    @Test fun `credits reached from their start on, whatever the skip mode`() {
+        val outro = SkipPart(2800.0, 2900.0)
+        assertTrue(creditsReached(outro, 2800.0, 2950.0))
+        assertTrue(creditsReached(outro, 2940.0, 2950.0))
+        assertFalse(creditsReached(outro, 2799.0, 2950.0))
+    }
+
+    @Test fun `credits not reached without times, a duration or a position, nor for a wrong match`() {
+        assertFalse(creditsReached(null, 2850.0, 2950.0))
+        assertFalse(creditsReached(SkipPart(2800.0, 2900.0), 2850.0, 0.0))
+        assertFalse(creditsReached(SkipPart(2800.0, 2900.0), Double.NaN, 2950.0))
+        assertFalse(creditsReached(SkipPart(1000.0, 1100.0), 1050.0, 2950.0))   // before the last fifth
+    }
 }

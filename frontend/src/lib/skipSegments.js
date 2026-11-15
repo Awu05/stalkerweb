@@ -105,6 +105,20 @@ export function beforeCredits(parts, t) {
   return !!o && Number.isFinite(t) && t >= ARM_SECS && t < o.start
 }
 
+// Credits starting earlier than this share of the video are a wrong match, not credits.
+const CREDITS_MIN_FRACTION = 0.8
+/**
+ * Whether `t` of a `duration`-second video is at or past the start of its
+ * credits (`outro`, { start, end } or null): it's watched from there, and
+ * saved as finished however it's left. Whatever the intro skipping — the
+ * credits times are what count.
+ */
+export function creditsReached(outro, t, duration) {
+  return !!outro && Number.isFinite(outro.start) && Number.isFinite(t)
+    && Number.isFinite(duration) && duration > 0
+    && outro.start >= duration * CREDITS_MIN_FRACTION && t >= outro.start
+}
+
 /** "Breaking Bad (2008)" — what the show was matched to, for the side panel. */
 export function matchLabel(m) {
   if (!m?.title) return ''
