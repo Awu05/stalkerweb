@@ -1,5 +1,6 @@
 package com.stalkerweb.android.data.repo
 
+import com.stalkerweb.android.data.api.SkipPart
 import com.stalkerweb.android.data.api.SkipResponse
 
 // Skip intro / recap / credits — the web's lib/skipSegments.js.
@@ -121,3 +122,15 @@ fun beforeCredits(parts: SkipResponse?, t: Double): Boolean {
     val o = parts?.outro ?: return false
     return !t.isNaN() && t >= ARM_SECS && t < o.start
 }
+
+// Credits starting earlier than this share of the video are a wrong match, not credits.
+private const val CREDITS_MIN_FRACTION = 0.8
+
+/**
+ * Whether [t] of a [duration]-second video is at or past the start of its
+ * credits: it's watched from there, and saved as finished however it's left.
+ * Whatever the intro skipping — the credits times are what count.
+ */
+fun creditsReached(outro: SkipPart?, t: Double, duration: Double): Boolean =
+    outro != null && !t.isNaN() && duration > 0 &&
+        outro.start >= duration * CREDITS_MIN_FRACTION && t >= outro.start

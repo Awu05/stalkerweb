@@ -45,6 +45,7 @@ import com.stalkerweb.android.data.repo.nextPromptAt
 import com.stalkerweb.android.data.repo.NextCountdown
 import com.stalkerweb.android.data.repo.inCredits
 import com.stalkerweb.android.data.repo.beforeCredits
+import com.stalkerweb.android.data.repo.creditsReached
 import com.stalkerweb.android.data.repo.nextEpisodeDelayOf
 import com.stalkerweb.android.data.repo.skipAt
 import com.stalkerweb.android.data.repo.skipModeOf
@@ -707,6 +708,9 @@ class VodPlayerViewModel(
     private fun save(params: PlayerParams, position: Double, duration: Double) {
         // A recording's place is this device's (the web keeps its own); gone once near the end.
         if (params.isRecording) { prefs.setRecordingPosition(params.recordingId, recordingPositionToKeep(position, duration)); return }
+        // Once the credits have started it's watched: saved at its end, however it's left.
+        val outro = skipParts?.takeIf { it.first == params.key }?.second?.outro
+        val at = if (creditsReached(outro, position, duration)) duration else position
         val stored = params.copy(screenshotUrl = links.relativeImage(params.screenshotUrl))
         watch.saveProgress(SaveWatchRequest(
             key = params.key,
@@ -714,7 +718,7 @@ class VodPlayerViewModel(
             episodeTitle = params.episodeTitle,
             screenshotUrl = stored.screenshotUrl,
             params = stored.toQuery(),
-            position = position,
+            position = at,
             duration = duration,
         ))
     }
@@ -741,6 +745,9 @@ class VodPlayerViewModel(
     }
 
     /** Another episode of the same show, in place. */
+    /** An episode ticked as watched, or not, by hand (from the episodes panel). */
+    fun setEpisodeWatched(key: String, watched: Boolean) = watch.setEpisodeWatched(key, watched)
+
     fun playEpisode(season: VodSeason, episode: VodEpisode) = playEpisode(season, episode, finished = false)
 
     /** [finished]: left from its credits or last seconds — saved at its end, so it counts as watched. */

@@ -1,4 +1,4 @@
-import { Loader2, Play, Check } from 'lucide-react'
+import { Loader2, Play, Check, Circle, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { episodeRowLabel } from '@/lib/seriesProgress'
 
@@ -6,7 +6,8 @@ import { episodeRowLabel } from '@/lib/seriesProgress'
 // playing is highlighted. Used in the player's side panel, and in a pop-up on
 // screens too narrow for it.
 // showId, watchedEpisodes (keys) and progressOf(key) → fraction: the ticks and progress bars.
-export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, playingSeasonId, playingEpisodeId, onPlay, showId, watchedEpisodes = [], progressOf = () => 0 }) {
+// onMarkWatched(key, watched), when given: a button on each to mark it watched or not.
+export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, playingSeasonId, playingEpisodeId, onPlay, showId, watchedEpisodes = [], progressOf = () => 0, onMarkWatched }) {
   const watched = new Set(watchedEpisodes)
   if (!seasons) {
     return <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin text-[var(--color-primary-light)]" /></div>
@@ -41,13 +42,13 @@ export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, pl
             const seen = watched.has(key)
             const pct = seen ? 0 : progressOf(key)
             return (
-              <li key={ep.episodeId}>
+              <li key={ep.episodeId} className="flex items-center gap-0.5">
                 <button
                   type="button"
                   onClick={() => onPlay(season, ep)}
                   aria-current={playing ? 'true' : undefined}
                   className={cn(
-                    'w-full flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs transition-colors',
+                    'flex-1 min-w-0 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs transition-colors',
                     playing
                       ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary-light)] font-medium'
                       : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
@@ -55,9 +56,22 @@ export default function EpisodePanel({ seasons, seasonId, onSeason, episodes, pl
                 >
                   <Play size={11} className={cn('shrink-0', playing ? 'opacity-100' : 'opacity-40')} fill="currentColor" />
                   <span className="truncate flex-1">{episodeRowLabel(ep)}</span>
-                  {seen && <Check size={12} className="shrink-0 text-[var(--color-success)]" aria-label="Watched" />}
+                  {seen && !onMarkWatched && <Check size={12} className="shrink-0 text-[var(--color-success)]" aria-label="Watched" />}
                   {pct > 0 && <span className="shrink-0 w-8 h-1 rounded-full bg-[var(--color-surface-3)] overflow-hidden" aria-label={`${Math.round(pct * 100)}% watched`}><span className="block h-full bg-[var(--color-primary-light)]" style={{ width: `${pct * 100}%` }} /></span>}
                 </button>
+                {onMarkWatched && (
+                  <button
+                    type="button"
+                    onClick={() => onMarkWatched(key, !seen)}
+                    title={seen ? 'Mark as not watched' : 'Mark as watched'}
+                    aria-label={seen ? `Mark ${episodeRowLabel(ep)} as not watched` : `Mark ${episodeRowLabel(ep)} as watched`}
+                    aria-pressed={seen}
+                    className={cn('shrink-0 p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-surface-2)] transition-colors',
+                      seen ? 'text-[var(--color-success)]' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]')}
+                  >
+                    {seen ? <CheckCircle2 size={13} /> : <Circle size={13} />}
+                  </button>
+                )}
               </li>
             )
           })}
