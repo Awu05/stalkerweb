@@ -43,3 +43,36 @@ describe('answers that arrive out of order', () => {
     expect(vod.isInMyList('9')).toBe(true)
   })
 })
+
+describe('markMyListCompleted', () => {
+  it('a title not on My List: added and completed at once here, and on the server added before it is completed', async () => {
+    const api = await import('../stalkerApi')
+    pending.length = 0
+    vi.mocked(api.addToWatchList).mockClear()
+    vi.mocked(api.setWatchListCompleted).mockClear()
+    vod.markMyListCompleted({ id: '42', name: 'Futurama' }, true)
+    const e = vod.getMyList().find((x) => x.id === '42')
+    expect(e.completedAt).toBeTruthy()
+    expect(api.addToWatchList).toHaveBeenCalledTimes(1)
+    expect(api.setWatchListCompleted).not.toHaveBeenCalled()   // not before the add is in
+
+    pending[0](lists([{ id: '42', item: { id: '42' }, addedAt: 1, completedAt: null }]))   // added, not yet completed
+    await flush()
+    expect(api.setWatchListCompleted).toHaveBeenCalledWith('42', true)
+    expect(vod.getMyList().find((x) => x.id === '42').completedAt).toBeTruthy()   // no flicker back to To watch
+
+    pending[1](lists([{ id: '42', item: { id: '42' }, addedAt: 1, completedAt: 5 }]))
+    await flush()
+    expect(vod.getMyList().find((x) => x.id === '42').completedAt).toBe(5)
+  })
+
+  it('a title on My List: moved between To watch and Completed', async () => {
+    const api = await import('../stalkerApi')
+    pending.length = 0
+    vi.mocked(api.addToWatchList).mockClear()
+    vod.markMyListCompleted({ id: '42' }, false)
+    expect(vod.getMyList().find((x) => x.id === '42').completedAt).toBe(null)
+    expect(api.addToWatchList).not.toHaveBeenCalled()
+    expect(api.setWatchListCompleted).toHaveBeenLastCalledWith('42', false)
+  })
+})

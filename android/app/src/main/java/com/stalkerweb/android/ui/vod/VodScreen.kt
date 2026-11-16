@@ -241,6 +241,8 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
             loading = state.seriesLoading,
             inMyList = show.id in myListIds,
             onToggleMyList = { viewModel.toggleMyList(show) },
+            completed = watchState.list.firstOrNull { it.id == show.id }?.completedAt != null,
+            onToggleCompleted = { done -> watch.markCompleted(show, done) },
             onOpenSeason = viewModel::openSeason,
             onBackSeasons = viewModel::backToSeasons,
             onClose = viewModel::closeSeries,
@@ -365,7 +367,7 @@ private fun Content(
             }
             if (browsing) {
                 val toWatch = tabList.filter { it.completedAt == null }
-                if (toWatch.isNotEmpty()) full { MyListRow(toWatch, myListIds, rowWidth, open, viewModel::toggleMyList) { viewModel.selectCategory(MY_LIST) } }
+                if (toWatch.isNotEmpty()) full { MyListRow(toWatch, myListIds, rowWidth, open, viewModel::toggleMyList, { id -> watch.setCompleted(id, true) }) { viewModel.selectCategory(MY_LIST) } }
             }
 
             when {
@@ -438,7 +440,8 @@ private fun HistoryRow(entries: List<HistoryEntry>, progress: Map<String, com.st
 }
 
 @Composable
-private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, tileWidth: Dp, onOpen: (VodItem) -> Unit, onToggle: (VodItem) -> Unit, onSeeAll: () -> Unit) {
+private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, tileWidth: Dp, onOpen: (VodItem) -> Unit, onToggle: (VodItem) -> Unit,
+                      onCompleted: (String) -> Unit, onSeeAll: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(Icons.Default.Bookmark, "My List", entries.size)
@@ -446,9 +449,10 @@ private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, tileWidt
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)) {
             items(entries, key = { it.id }) { e ->
-                Box(Modifier.width(tileWidth)) {
+                Column(Modifier.width(tileWidth), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { onOpen(e.item) },
                         bookmarked = e.id in myListIds, onBookmark = { onToggle(e.item) })
+                    CompletedLink(done = false) { onCompleted(e.id) }
                 }
             }
         }
@@ -485,13 +489,19 @@ private fun ListTile(e: ListEntry, done: Boolean, myListIds: Set<String>, open: 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { open(e.item) },
             bookmarked = e.id in myListIds, onBookmark = { viewModel.toggleMyList(e.item) })
-        // One line at any poster width: tighter padding, and an ellipsis rather than a second line.
-        TextButton(onClick = { watch.setCompleted(e.id, !done) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.tvFocus(RoundedCornerShape(8.dp))) {
-            Icon(if (done) Icons.Default.Replay else Icons.Default.Check, null, Modifier.size(14.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(if (done) "Back to To watch" else "Mark completed", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        CompletedLink(done) { watch.setCompleted(e.id, !done) }
+    }
+}
+
+/** Under a My List tile: to Completed, or back to To watch. */
+@Composable
+private fun CompletedLink(done: Boolean, onClick: () -> Unit) {
+    // One line at any poster width: tighter padding, and an ellipsis rather than a second line.
+    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.tvFocus(RoundedCornerShape(8.dp))) {
+        Icon(if (done) Icons.Default.Replay else Icons.Default.Check, null, Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(if (done) "Back to To watch" else "Mark completed", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -504,7 +514,7 @@ private fun ListTile(e: ListEntry, done: Boolean, myListIds: Set<String>, open: 
 @Composable
 private fun SeriesDialog(
     show: VodItem, seasons: List<VodSeason>?, selectedSeason: VodSeason?, episodes: List<VodEpisode>?, loading: Boolean,
-    inMyList: Boolean, onToggleMyList: () -> Unit, onOpenSeason: (VodSeason) -> Unit, onBackSeasons: () -> Unit,
+    inMyList: Boolean, onToggleMyList: () -> Unit, completed: Boolean, onToggleCompleted: (Boolean) -> Unit, onOpenSeason: (VodSeason) -> Unit, onBackSeasons: () -> Unit,
     onClose: () -> Unit, onPlay: (VodSeason, VodEpisode) -> Unit,
     onDownloadEpisode: (VodSeason, VodEpisode) -> Unit, onDownloadSeason: (VodSeason, List<VodEpisode>) -> Unit,
     next: ContinueTarget.Play?, watched: Set<String>, progress: Map<String, ProgressEntry>,
@@ -521,6 +531,9 @@ private fun SeriesDialog(
                         style = MaterialTheme.typography.titleMedium, color = SwColors.Text, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (selectedSeason != null && !episodes.isNullOrEmpty()) Pill("Download season", false, { onDownloadSeason(selectedSeason, episodes) }, leading = Icons.Default.Download)
                     Pill(if (inMyList) "On My List" else "My List", inMyList, onToggleMyList, leading = if (inMyList) Icons.Default.Bookmark else Icons.Default.BookmarkBorder)
+                    // To My List's Completed (put on My List first when it isn't), or back to To watch.
+                    Pill(if (completed) "Completed" else "Mark completed", completed, { onToggleCompleted(!completed) },
+                        leading = if (completed) Icons.Default.CheckCircle else Icons.Default.Check)
                     TipIconButton(label = "Close", onClick = onClose) { Icon(Icons.Default.Close, "Close") }
                 }
                 // Continue: resume the episode stopped partway, or play the next one not watched.
