@@ -129,6 +129,19 @@ export function toggleMyList(item) {
   }
 }
 
+/**
+ * `item` to Completed, or back to To watch. One not on My List is put on it
+ * first — on the server too, in one request, so the add is in before it's
+ * completed (and no answer in between shows it back in To watch).
+ */
+export function markMyListCompleted(item, completed) {
+  const id = String(item.id)
+  if (isInMyList(id)) { setMyListCompleted(id, completed); return }
+  if (!completed) return
+  set({ ...watch, list: [{ id, item, addedAt: Date.now(), completedAt: Date.now() }, ...watch.list] })
+  request(() => addToWatchList(item).then(() => setWatchListCompleted(id, true)), { local: true }).catch(() => loadWatch())
+}
+
 export function setMyListCompleted(id, completed) {
   set({ ...watch, list: watch.list.map((e) => (e.id === String(id) ? { ...e, completedAt: completed ? Date.now() : null } : e)) })
   request(() => setWatchListCompleted(id, completed), { local: true }).catch(() => loadWatch())

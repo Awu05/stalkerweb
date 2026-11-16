@@ -11,6 +11,7 @@ import { getVodCategories, getVodItems, getVodSeasons, getVodEpisodes } from '..
 import { getVodHistory, removeFromVodHistory, clearVodHistory, loadWatch, onWatchChange, getWatchedVodIds, getMyList, setMyListCompleted, getWatchState, setEpisodeWatched } from '@/lib/vodProgress'
 import { continueTarget, hasWatchedShow, episodeLabel, historyEpisodeLabel, episodeRowLabel, seasonLookupFor, seasonNoOf, watchedInSeason, watchedOfEpisodes, seasonWatchedLabel } from '@/lib/seriesProgress'
 import MyListButton from '@/components/MyListButton'
+import CompletedButton from '@/components/CompletedButton'
 import VodFilters from '@/components/VodFilters'
 import { ClearSearch } from '@/components/ui/clear-search'
 import { useCategoryListing } from '@/lib/useCategoryListing'
@@ -90,6 +91,19 @@ const MY_LIST = { id: 'mylist', title: 'My List' }
 const COMBINED_ALL_IDS = new Set(['movies:all', 'series:all'])
 const isCombinedAllId = (id) => COMBINED_ALL_IDS.has(id)
 
+// Under a My List tile: to Completed, or back to To watch.
+function CompletedLink({ id, done }) {
+  return (
+    <button
+      type="button"
+      onClick={() => setMyListCompleted(id, !done)}
+      className="self-start flex items-center gap-1 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+    >
+      {done ? <><RotateCcw size={11} /> Back to To watch</> : <><Check size={11} /> Mark completed</>}
+    </button>
+  )
+}
+
 // The titles to watch, as a row under Recently watched.
 function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
   if (!entries.length) return null
@@ -101,8 +115,9 @@ function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
       </div>
       <div className={TILE_ROW}>
         {entries.map((e) => (
-          <div key={e.id} className="min-w-0">
+          <div key={e.id} className="min-w-0 flex flex-col gap-1">
             <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
+            <CompletedLink id={e.id} done={false} />
           </div>
         ))}
       </div>
@@ -127,13 +142,7 @@ function MyListView({ toWatch, completed, empty, kind, onOpen, onDownload }) {
       {entries.map((e) => (
         <div key={e.id} className="flex flex-col gap-1">
           <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
-          <button
-            type="button"
-            onClick={() => setMyListCompleted(e.id, !done)}
-            className="self-start flex items-center gap-1 text-[11px] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-          >
-            {done ? <><RotateCcw size={11} /> Back to To watch</> : <><Check size={11} /> Mark completed</>}
-          </button>
+          <CompletedLink id={e.id} done={done} />
         </div>
       ))}
     </div>
@@ -444,6 +453,7 @@ function SeasonsSheet({ item, onClose, onPlayEpisode, onDownloadEpisode, onDownl
             </p>
           </div>
           <MyListButton item={item} />
+          <CompletedButton item={item} />
           {selectedSeason && episodes?.length > 0 && (
             <button
               onClick={() => onDownloadSeason(item, selectedSeason, episodes)}

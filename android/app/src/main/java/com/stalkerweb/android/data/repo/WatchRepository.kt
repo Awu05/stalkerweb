@@ -70,6 +70,24 @@ class WatchRepository(private val apis: ApiProvider, private val links: MediaLin
         }
     }
 
+    /**
+     * [item] to Completed, or back to To watch. One not on My List is put on it
+     * first — on the server too, in one request, so the add is in before it's
+     * completed (and no answer in between shows it back in To watch).
+     */
+    fun markCompleted(item: VodItem, completed: Boolean) {
+        if (isInMyList(item.id)) { setCompleted(item.id, completed); return }
+        if (!completed) return
+        val s = _state.value
+        val now = System.currentTimeMillis()
+        set(s.copy(list = listOf(ListEntry(item.id, item, now, now)) + s.list))
+        val stored = item.copy(screenshotUrl = links.relativeImage(item.screenshotUrl))
+        request(local = true) {
+            addToWatchList(stored)
+            setWatchListCompleted(item.id, CompletedRequest(true))
+        }
+    }
+
     fun setCompleted(id: String, completed: Boolean) {
         val s = _state.value
         set(s.copy(list = s.list.map { if (it.id == id) it.copy(completedAt = if (completed) System.currentTimeMillis() else null) else it }))
