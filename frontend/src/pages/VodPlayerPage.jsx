@@ -22,6 +22,7 @@ import { trackHlsStats } from '@/lib/streamStats'
 import MyListButton from '@/components/MyListButton'
 import { SkipButton, SkipMatch } from '@/components/SkipControls'
 import { useCountdown } from '@/lib/useCountdown'
+import { useMediaSessionNext } from '@/lib/useMediaSessionNext'
 import { SubtitleButton, SubtitleMenu } from '@/components/SubtitleMenu'
 import { PlayerSettingsButton, PlayerSettingsMenu } from '@/components/PlayerSettingsMenu'
 import { useVodSubtitles } from '@/lib/useVodSubtitles'
@@ -211,6 +212,9 @@ export default function VodPlayerPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isEpisode])
+  // The browser's ⏭ in its picture-in-picture window (Chrome, Edge) and the
+  // media keys: on to the next episode, as N does.
+  useMediaSessionNext(isEpisode && !!neighbours.next, () => goNextRef.current())
 
   useEffect(() => { volumeRef.current = volume }, [volume])
 
