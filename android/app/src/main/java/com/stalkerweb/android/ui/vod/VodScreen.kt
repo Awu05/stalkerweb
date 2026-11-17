@@ -135,6 +135,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
     val isSeries = state.type == "series"
     val watched = remember(watchState) { watch.watchedIds() }
     val myListIds = remember(watchState) { watchState.list.map { it.id }.toSet() }
+    val completedIds = remember(watchState) { watchState.list.filter { it.completedAt != null }.map { it.id }.toSet() }
     // This tab's My List and history: movies, or shows.
     val tabList = remember(watchState, isSeries) { watchState.list.filter { it.item.isSeries == isSeries } }
     LaunchedEffect(watchState.history) { viewModel.lookUpSeasons(watchState.history) }
@@ -191,7 +192,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
             Row(Modifier.fillMaxSize()) {
                 CategoryColumn(state, tabList.count { it.completedAt == null }, firstCategory, viewModel::selectCategory)
                 Box(Modifier.width(1.dp).fillMaxHeight().background(SwColors.Border))
-                Content(state, shown, filtered.size, tabHistory, tabList, myListIds, watchState.progress.associateBy { it.key },
+                Content(state, shown, filtered.size, tabHistory, tabList, myListIds, completedIds, watchState.progress.associateBy { it.key },
                     viewModel, watch, ::open, ::openHistory, onPlay)
             }
         } else {
@@ -202,7 +203,7 @@ fun VodScreen(viewModel: VodViewModel, watch: WatchRepository, onPlay: (PlayerPa
                             leading = if (cat.id == MY_LIST.id) Icons.Default.Bookmark else null)
                     }
                 }
-                Content(state, shown, filtered.size, tabHistory, tabList, myListIds, watchState.progress.associateBy { it.key },
+                Content(state, shown, filtered.size, tabHistory, tabList, myListIds, completedIds, watchState.progress.associateBy { it.key },
                     viewModel, watch, ::open, ::openHistory, onPlay)
             }
         }
@@ -334,6 +335,7 @@ private fun Content(
     history: List<HistoryEntry>,
     tabList: List<ListEntry>,
     myListIds: Set<String>,
+    completedIds: Set<String>,
     progress: Map<String, com.stalkerweb.android.data.api.ProgressEntry>,
     viewModel: VodViewModel,
     watch: WatchRepository,
@@ -390,6 +392,7 @@ private fun Content(
                             title = item.name, year = item.year, posterUrl = item.screenshotUrl, isHD = item.isHD,
                             onClick = { open(item) },
                             bookmarked = item.id in myListIds, onBookmark = { viewModel.toggleMyList(item) },
+                            completed = item.id in completedIds, onCompleted = { watch.setCompleted(item.id, item.id !in completedIds) },
                             onDownload = if (item.isSeries || item.episodes.isNotEmpty()) null
                                 else ({ viewModel.download(listOf(DownloadItem(videoId = item.id, cmd = item.cmd, title = item.name)), "\"${item.name}\"") }),
                         )
@@ -449,10 +452,10 @@ private fun MyListRow(entries: List<ListEntry>, myListIds: Set<String>, tileWidt
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)) {
             items(entries, key = { it.id }) { e ->
-                Column(Modifier.width(tileWidth), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.width(tileWidth)) {
                     PosterTile(e.item.name, e.item.year, e.item.screenshotUrl, e.item.isHD, { onOpen(e.item) },
-                        bookmarked = e.id in myListIds, onBookmark = { onToggle(e.item) })
-                    CompletedLink(done = false) { onCompleted(e.id) }
+                        bookmarked = e.id in myListIds, onBookmark = { onToggle(e.item) },
+                        completed = false, onCompleted = { onCompleted(e.id) })
                 }
             }
         }

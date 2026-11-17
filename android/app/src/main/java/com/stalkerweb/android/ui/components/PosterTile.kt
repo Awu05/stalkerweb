@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.Icon
@@ -47,7 +48,9 @@ import com.stalkerweb.android.ui.utils.rememberIsTV
  * an HD badge at the bottom right, the title and year below. Long-press — the
  * remote's held OK — toggles My List, so the remote reaches it; the corner
  * bookmark (shown on focus, once bookmarked, and always on touch) is for touch.
- * [progress] (0–1) draws a resume bar; [watched] a "Watched" badge.
+ * [progress] (0–1) draws a resume bar; [watched] a "Watched" badge. On My
+ * List, [onCompleted] adds a tick beside the bookmark: to Completed ([completed]
+ * green) and back.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -63,6 +66,8 @@ fun PosterTile(
     onDownload: (() -> Unit)? = null,
     progress: Float? = null,
     watched: Boolean = false,
+    completed: Boolean = false,
+    onCompleted: (() -> Unit)? = null,
 ) {
     val isTv = rememberIsTV()
     var focused by remember { mutableStateOf(false) }
@@ -107,6 +112,12 @@ fun PosterTile(
             if (onBookmark != null && (showButtons || bookmarked == true) && !watched) {
                 TipIconButton(label = if (bookmarked == true) "Remove from My List" else "Add to My List", onClick = onBookmark, size = 36.dp, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
                     Icon(if (bookmarked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, if (bookmarked == true) "Remove from My List" else "Add to My List", Modifier.size(18.dp), tint = Color.White)
+                }
+            }
+            if (onCompleted != null && bookmarked == true && !watched && (showButtons || completed)) {
+                val label = if (completed) "Completed — move back to To watch" else "Mark completed"
+                TipIconButton(label = label, onClick = onCompleted, size = 36.dp, modifier = Modifier.align(Alignment.TopStart).padding(start = 44.dp, top = 4.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)) {
+                    Icon(if (completed) Icons.Default.CheckCircle else Icons.Default.Check, label, Modifier.size(18.dp), tint = if (completed) SwColors.Success else Color.White)
                 }
             }
             if (onDownload != null && showButtons) {

@@ -115,9 +115,8 @@ function MyListRow({ entries, onOpen, onSeeAll, onDownload }) {
       </div>
       <div className={TILE_ROW}>
         {entries.map((e) => (
-          <div key={e.id} className="min-w-0 flex flex-col gap-1">
+          <div key={e.id} className="min-w-0">
             <VodCard item={e.item} onClick={onOpen} onDownload={onDownload} />
-            <CompletedLink id={e.id} done={false} />
           </div>
         ))}
       </div>
@@ -230,6 +229,7 @@ function VodCard({ item, onClick, onDownload }) {
         </div>
         {/* Above the hover shade (z-10), or the shade takes the click and plays the title. */}
         <MyListButton item={item} overlay className="absolute top-1.5 left-1.5 z-10" />
+        <CompletedButton item={item} overlay className="absolute top-1.5 left-12 z-10" />
         {!hasSeries && (
           <div
             role="button"
